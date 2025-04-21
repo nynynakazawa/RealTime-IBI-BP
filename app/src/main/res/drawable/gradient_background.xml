@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:type="linear"
+        android:angle="270">   <!-- 上→下方向（0 は右→左）-->
+
+        <!-- 0 % 〜 20 % : 完全 #00FF00 -->
+        <item android:offset="0.0" android:color="#00FF00" />
+        <item android:offset="0.2" android:color="#00FF00" />
+
+        <!-- 20 % 〜 70 % : グラデーション -->
+        <item android:offset="0.7" android:color="#000000" />
+
+        <!-- 70 % 〜 100 % : 完全 #000000 -->
+        <item android:offset="1.0" android:color="#000000" />
+    </gradient>
+</shape>

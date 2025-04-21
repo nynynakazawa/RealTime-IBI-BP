@@ -1,0 +1,25 @@
+# Gradle
+.gradle/
+build/
+
+# IntelliJ / Android Studio
+*.iml
+.idea/
+local.properties
+
+# Android ビルド成果物
+app/build/
+*/build/
+
+# 環境設定ファイル
+env/
+.env
+*.keystore
+
+# OS / エディタ固有
+.DS_Store
+Thumbs.db
+.vscode/
+
+tinygpt/tinystories/
+tinygpt/log/

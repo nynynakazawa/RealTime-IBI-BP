@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <RadioGroup
+        android:id="@+id/modeRadioGroup"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="150dp"
+        android:layout_marginTop="120dp">
+
+        <RadioButton
+            android:id="@+id/mode_1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Mode 1" />
+
+        <RadioButton
+            android:id="@+id/mode_2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Mode 2" />
+
+        <RadioButton
+            android:id="@+id/mode_3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Mode 3 Random" />
+
+        <RadioButton
+            android:id="@+id/mode_4"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Mode 4 Random" />
+
+        <RadioButton
+            android:id="@+id/mode_IBI_test"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Mode IBI test 1min " />
+
+        <RadioButton
+            android:id="@+id/mode_20sec"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Mode 20 sec " />
+
+        <RadioButton
+            android:id="@+id/back"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="back" />
+
+    </RadioGroup>
+
+</LinearLayout>

@@ -1,0 +1,8 @@
+// build.gradle
+
+plugins {
+    // もともとあった Android Application プラグイン
+    alias(libs.plugins.androidApplication) apply false
+    // ここに Kotlin Android プラグインを追加
+    alias(libs.plugins.kotlinAndroid) apply false
+}

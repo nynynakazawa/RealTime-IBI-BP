@@ -1,0 +1,18 @@
+                        -H/Users/nakazawa/Desktop/研究室/RealTimeHR/app
+-DCMAKE_SYSTEM_NAME=Android
+-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+-DCMAKE_SYSTEM_VERSION=33
+-DANDROID_PLATFORM=android-33
+-DANDROID_ABI=arm64-v8a
+-DCMAKE_ANDROID_ARCH_ABI=arm64-v8a
+-DANDROID_NDK=/Users/nakazawa/Library/Android/sdk/ndk/25.1.8937393
+-DCMAKE_ANDROID_NDK=/Users/nakazawa/Library/Android/sdk/ndk/25.1.8937393
+-DCMAKE_TOOLCHAIN_FILE=/Users/nakazawa/Library/Android/sdk/ndk/25.1.8937393/build/cmake/android.toolchain.cmake
+-DCMAKE_MAKE_PROGRAM=/Users/nakazawa/Library/Android/sdk/cmake/3.22.1/bin/ninja
+-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=/Users/nakazawa/Desktop/研究室/RealTimeHR/app/build/intermediates/cxx/RelWithDebInfo/1k3ow1rd/obj/arm64-v8a
+-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=/Users/nakazawa/Desktop/研究室/RealTimeHR/app/build/intermediates/cxx/RelWithDebInfo/1k3ow1rd/obj/arm64-v8a
+-DCMAKE_BUILD_TYPE=RelWithDebInfo
+-B/Users/nakazawa/Desktop/研究室/RealTimeHR/app/.cxx/RelWithDebInfo/1k3ow1rd/arm64-v8a
+-GNinja
+                        Build command args: []
+                        Version: 2

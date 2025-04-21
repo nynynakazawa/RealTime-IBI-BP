@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center|top"
+    android:orientation="vertical">
+
+    <!-- ロジック選択用のSpinnerを追加 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="20dp"
+        android:padding="7dp">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Select Processing Mode:" />
+        <Spinner
+            android:id="@+id/spinnerLogicSelection"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="10dp" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/mode_select_fragment_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center|top"
+        android:orientation="horizontal"
+        android:padding="0dp">
+        <EditText
+            android:id="@+id/editTextName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:hint="Enter your name"
+            android:layout_centerHorizontal="true"
+            android:layout_marginTop="20dp"/>
+        <TextView
+            android:id="@+id/tvMode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:layout_marginLeft="20dp"
+            android:text="mode : -1" />
+    </LinearLayout>
+    <com.github.mikephil.charting.charts.LineChart
+        android:id="@+id/lineChart"
+        android:layout_marginTop="30dp"
+        android:layout_width="380dp"
+        android:layout_height="300dp" />
+    <TextView
+        android:id="@+id/NowTextMessage"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="キャリブレーション中 "/>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center|top"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/greenValueTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Green : "/>
+        <TextView
+            android:id="@+id/BPMSD"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="40dp"
+            android:text="BPM SD : "/>
+    </LinearLayout>
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center|top"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/ibiTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="IBI : "/>
+        <TextView
+            android:id="@+id/HRTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="40dp"
+            android:text="HeartRate : "/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center|top"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/SmoothedIbiTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Smoothed IBI : "/>
+        <TextView
+            android:id="@+id/SmoothedHRTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="40dp"
+            android:text="Smoothed HR : "/>
+    </LinearLayout>
+
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center|top"
+        android:padding="16dp">
+
+
+        <Button
+            android:id="@+id/show_mode_select_fragment_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
+            android:text="mode" />
+
+
+        <Button
+            android:id="@+id/start_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Start" />
+
+        <Button
+            android:id="@+id/reset_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Reset" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center|top"
+        android:padding="16dp">
+
+    <Button
+        android:id="@+id/btn_bp_measure"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Measure BP" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center|top"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/tvBPMax"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="BP Max : " />
+
+        <TextView
+            android:id="@+id/tvBPMin"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="40dp"
+            android:text="BP Min : " />
+    </LinearLayout>
+
+
+</LinearLayout>
