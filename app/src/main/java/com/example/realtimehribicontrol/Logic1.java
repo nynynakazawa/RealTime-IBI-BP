@@ -32,9 +32,9 @@ public class Logic1 implements LogicProcessor {
     private ArrayList<Double> bpmHistory = new ArrayList<>();
     private long lastPeakTime = 0;
     private int updateCount = 0;
-    private int updateCountHR = 0;
-    private int AddCount = 0;
     private double lastIbiValue = -1;
+    private static final int REFRACTORY_FRAMES = 8;
+    private int framesSinceLastPeak = REFRACTORY_FRAMES;
 
     // 心拍関連
     private double bpmValue = 0.0;
@@ -44,21 +44,11 @@ public class Logic1 implements LogicProcessor {
     public interface UIUpdateCallback {
         void updateValueText(String text);
         void updateChartValue(float value);
-        void updateIbiText(String text);
-        void updateHeartRateText(String text);
         void updateSmoothedValuesText(String smoothedIbi, String smoothedBpm);
-        void updateBpmSdText(String text);
     }
     private UIUpdateCallback uiCallback;
     public void setUIUpdateCallback(UIUpdateCallback callback) {
         this.uiCallback = callback;
-    }
-
-    // ---------------------------------------------------
-    // 【メソッド：環境光に基づいた画像補正】
-    // ---------------------------------------------------
-    public double adjustImageBasedOnAmbientLight(Image img, double avgG) {
-        return avgG;
     }
 
     // ---------------------------------------------------
@@ -87,7 +77,7 @@ public class Logic1 implements LogicProcessor {
 
         if (recentCorrectedGreenValues.size() >= CORRECTED_GREEN_VALUE_WINDOW_SIZE) {
             double smoothedCorrectedGreenValue = 0.0;
-            int smoothingWindowSize1 = 6;
+            int smoothingWindowSize1 = 4;
             for (int i = 0; i < smoothingWindowSize1; i++) {
                 int index = recentCorrectedGreenValues.size() - 1 - i;
                 if (index >= 0) {
@@ -109,7 +99,24 @@ public class Logic1 implements LogicProcessor {
                     twiceSmoothedValue += smoothedCorrectedGreenValues.get(index);
                 }
             }
-            correctedGreenValue = (twiceSmoothedValue / Math.min(smoothingWindowSize2, smoothedCorrectedGreenValues.size())) % 100 * 2;
+            twiceSmoothedValue /= Math.min(smoothingWindowSize2, smoothedCorrectedGreenValues.size());
+            // 長めのウィンドウを使って局所的な最小値と最大値を計算
+            // 例として、直近20サンプルから局所的な最小値と最大値を計算
+            int longWindowSize = 40;
+            int startIdx = Math.max(0, smoothedCorrectedGreenValues.size() - longWindowSize);
+            double localMin = Double.POSITIVE_INFINITY;
+            double localMax = Double.NEGATIVE_INFINITY;
+            for (int i = startIdx; i < smoothedCorrectedGreenValues.size(); i++) {
+                double v = smoothedCorrectedGreenValues.get(i);
+                if (v < localMin) localMin = v;
+                if (v > localMax) localMax = v;
+            }
+            double range = localMax - localMin;
+            if (range < 1.0) {
+                range = 1.0;  // ゼロ除算防止
+            }
+            correctedGreenValue = ((twiceSmoothedValue - localMin) / range) * 100.0;
+            correctedGreenValue = Math.max(0, Math.min(100, correctedGreenValue));
 
             // window 配列に correctedGreenValue を記録し、ピーク検出に利用する
             window[windowIndex] = correctedGreenValue;
@@ -122,32 +129,34 @@ public class Logic1 implements LogicProcessor {
 
         // ピーク検出と心拍数計算
         double currentVal = window[(windowIndex + WINDOW_SIZE - 1) % WINDOW_SIZE];
-        double previous1 = window[(windowIndex + WINDOW_SIZE - 2) % WINDOW_SIZE];
-        double previous2 = window[(windowIndex + WINDOW_SIZE - 3) % WINDOW_SIZE];
-        double previous3 = window[(windowIndex + WINDOW_SIZE - 4) % WINDOW_SIZE];
-        double previous4 = window[(windowIndex + WINDOW_SIZE - 5) % WINDOW_SIZE];
-        double previous5 = window[(windowIndex + WINDOW_SIZE - 6) % WINDOW_SIZE];
+        double previous1  = window[(windowIndex + WINDOW_SIZE - 2) % WINDOW_SIZE];
+        double previous2  = window[(windowIndex + WINDOW_SIZE - 3) % WINDOW_SIZE];
+        double previous3  = window[(windowIndex + WINDOW_SIZE - 4) % WINDOW_SIZE];
+        double previous4  = window[(windowIndex + WINDOW_SIZE - 5) % WINDOW_SIZE];
 
-        double diff1 = previous1 - previous2;
-        double diff2 = currentVal - previous1;
+        if (framesSinceLastPeak >= REFRACTORY_FRAMES
+                && previous1 > previous2
+                && previous2 > previous3
+                && previous3 > previous4
+                && previous1 > currentVal) {
 
-        if (diff1 > 0 && diff2 < 0 && previous1 > previous2 && previous2 > previous3 &&
-                previous3 > previous4 && previous4 > previous5 && previous1 > currentVal) {
+            framesSinceLastPeak = 0;
+
             long currentTime = System.currentTimeMillis();
             if (lastPeakTime != 0) {
                 double interval = (currentTime - lastPeakTime) / 1000.0;
                 if (interval > 0.25 && interval < 1.2) {
                     double bpm = 60.0 / interval;
-                    double ibi = 60.0 / bpm * 1000.0;
                     if (bpmHistory.size() >= BPM_HISTORY_SIZE) {
                         bpmHistory.remove(0);
                     }
                     bpmHistory.add(bpm);
                     double meanBpm = getMean(bpmHistory);
-                    double bpmSD = getStdDev(bpmHistory);
-                    if (bpm >= meanBpm - meanBpm * 0.1 && bpm <= meanBpm + meanBpm * 0.1) {
+                    double bpmSD   = getStdDev(bpmHistory);
+                    if (bpm >= meanBpm - meanBpm * 0.1
+                            && bpm <= meanBpm + meanBpm * 0.1) {
                         bpmValue = bpm;
-                        IBI = 60.0 / bpmValue * 1000.0;
+                        IBI      = 60.0 / bpmValue * 1000.0;
                     }
                     lastPeakTime = currentTime;
                     updateCount++;
@@ -157,6 +166,8 @@ public class Logic1 implements LogicProcessor {
             }
             lastPeakTime = System.currentTimeMillis();
         }
+
+        framesSinceLastPeak++;
         return new LogicResult(correctedGreenValue, IBI, bpmValue, getStdDev(bpmHistory));
     }
 
