@@ -1,8 +1,6 @@
 package com.example.realtimehribicontrol;
 
-import android.media.Image;
 import android.util.Log;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Locale;
 
@@ -100,8 +98,9 @@ public class Logic1 implements LogicProcessor {
                 }
             }
             twiceSmoothedValue /= Math.min(smoothingWindowSize2, smoothedCorrectedGreenValues.size());
+
             // 長めのウィンドウを使って局所的な最小値と最大値を計算
-            // 例として、直近20サンプルから局所的な最小値と最大値を計算
+            // 例として、直近40サンプルから局所的な最小値と最大値を計算
             int longWindowSize = 40;
             int startIdx = Math.max(0, smoothedCorrectedGreenValues.size() - longWindowSize);
             double localMin = Double.POSITIVE_INFINITY;

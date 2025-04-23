@@ -1,30 +1,22 @@
 package com.example.realtimehribicontrol;
 
-import android.media.Image;
 import android.util.Log;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Locale;
 
-public class Logic3 implements LogicProcessor{
+public class Logic3 implements LogicProcessor {
 
     // 定数
     private static final int GREEN_VALUE_WINDOW_SIZE = 20;
     private static final int CORRECTED_GREEN_VALUE_WINDOW_SIZE = 20;
-    private static final int SAMPLE_RATE = 60;
-    private static final double LOW_PASS = 0.5;
-    private static final double HIGH_PASS = 5.0;
     private static final int WINDOW_SIZE = 240;
     private static final int BPM_HISTORY_SIZE = 20;
-
-    // メンバー変数
-    private float averageAmbientLight = -1f;
-    private float reductionFactor = 0.50f;  // Logic1用: 0.50f
     private ArrayList<Double> greenValues = new ArrayList<>();
     private ArrayList<Double> filteredValues = new ArrayList<>();
     private ArrayList<Double> recentGreenValues = new ArrayList<>();
     private ArrayList<Double> recentCorrectedGreenValues = new ArrayList<>();
     private ArrayList<Double> smoothedCorrectedGreenValues = new ArrayList<>();
+    private ArrayList<Double> smoothed2CorrectedGreenValues = new ArrayList<>();
     private ArrayList<Double> smoothedIbi = new ArrayList<>();
     private ArrayList<Double> smoothedBpmSd = new ArrayList<>();
     private double[] window = new double[WINDOW_SIZE];
@@ -32,14 +24,9 @@ public class Logic3 implements LogicProcessor{
     private ArrayList<Double> bpmHistory = new ArrayList<>();
     private long lastPeakTime = 0;
     private int updateCount = 0;
-    private int updateCountHR = 0;
-    private int AddCount = 0;
     private double lastIbiValue = -1;
-
-    // これらをLogic1の他のメンバ変数と同様に定義してください
-    private static final long MIN_PEAK_INTERVAL_MS = 300; // 300ms以上の間隔を要求（例）
-    private ArrayList<Double> peakHistory = new ArrayList<>();
-    private static final int PEAK_HISTORY_SIZE = 5; // 動的閾値に利用するピーク履歴のサイズ
+    private static final int REFRACTORY_FRAMES = 8;
+    private int framesSinceLastPeak = REFRACTORY_FRAMES;
 
     // 心拍関連
     private double bpmValue = 0.0;
@@ -49,10 +36,7 @@ public class Logic3 implements LogicProcessor{
     public interface UIUpdateCallback {
         void updateValueText(String text);
         void updateChartValue(float value);
-        void updateIbiText(String text);
-        void updateHeartRateText(String text);
         void updateSmoothedValuesText(String smoothedIbi, String smoothedBpm);
-        void updateBpmSdText(String text);
     }
     private UIUpdateCallback uiCallback;
     public void setUIUpdateCallback(UIUpdateCallback callback) {
@@ -60,65 +44,22 @@ public class Logic3 implements LogicProcessor{
     }
 
     // ---------------------------------------------------
-    // 【メソッド：環境光に基づいた画像補正】
-    // ---------------------------------------------------
-
-    public double adjustImageBasedOnAmbientLight(Image img, double avgG) {
-        ByteBuffer yBuffer = img.getPlanes()[0].getBuffer();
-        ByteBuffer uBuffer = img.getPlanes()[1].getBuffer();
-
-        yBuffer.rewind();
-        uBuffer.rewind();
-
-        double ySum = 0;
-        int pixelCount = 0;
-        int yCapacity = yBuffer.remaining();
-
-        // 4ピクセルごとにY値を取得
-        for (int i = 0; i < yCapacity; i += 12) {
-            ySum += (yBuffer.get(i) & 0xFF);
-            pixelCount++;
-        }
-
-        double avgY = ySum / pixelCount;
-
-        double reductionFactor = Math.min(Math.max((256 - avgY) / 256, 0), 1);
-        double scale = reductionFactor/2;
-
-        int sumU = 0;
-        pixelCount = 0;
-        int uCapacity = uBuffer.remaining();
-
-        // Uも4ピクセルごとに間引き
-        for (int i = 0; i < uCapacity; i += 4) {
-            int uValue = uBuffer.get(i) & 0xFF;
-            sumU += (int)(uValue * scale);
-            pixelCount++;
-        }
-
-        double correctedAvgG = (double) sumU / pixelCount;
-        return correctedAvgG;
-    }
-
-    // ---------------------------------------------------
     // 【メソッド：統合処理：グリーン値データ処理】
     // ---------------------------------------------------
-    public LogicResult processGreenValueData(double correctedAvgG) {
-
+    public LogicResult processGreenValueData(double avgG) {
         synchronized (greenValues) {
-            greenValues.add(correctedAvgG);
+            greenValues.add(avgG);
         }
         synchronized (recentGreenValues) {
             if (recentGreenValues.size() >= GREEN_VALUE_WINDOW_SIZE) {
                 recentGreenValues.remove(0);
             }
-            recentGreenValues.add(correctedAvgG);
+            recentGreenValues.add(avgG);
         }
-
         double latestGreenValue = greenValues.get(greenValues.size() - 1) % 30;
         double hundGreenValue = (latestGreenValue / 30.0) * 100.0;
 
-        double correctedGreenValue = hundGreenValue * 5 ;
+        double correctedGreenValue = hundGreenValue * 3 ;
 
         if (recentCorrectedGreenValues.size() >= CORRECTED_GREEN_VALUE_WINDOW_SIZE) {
             recentCorrectedGreenValues.remove(0);
@@ -127,7 +68,7 @@ public class Logic3 implements LogicProcessor{
 
         if (recentCorrectedGreenValues.size() >= CORRECTED_GREEN_VALUE_WINDOW_SIZE) {
             double smoothedCorrectedGreenValue = 0.0;
-            int smoothingWindowSize1 = 6;
+            int smoothingWindowSize1 = 3;
             for (int i = 0; i < smoothingWindowSize1; i++) {
                 int index = recentCorrectedGreenValues.size() - 1 - i;
                 if (index >= 0) {
@@ -142,7 +83,7 @@ public class Logic3 implements LogicProcessor{
             smoothedCorrectedGreenValues.add(smoothedCorrectedGreenValue);
 
             double twiceSmoothedValue = 0.0;
-            int smoothingWindowSize2 = 4;
+            int smoothingWindowSize2 = 3;
             for (int i = 0; i < smoothingWindowSize2; i++) {
                 int index = smoothedCorrectedGreenValues.size() - 1 - i;
                 if (index >= 0) {
@@ -150,14 +91,27 @@ public class Logic3 implements LogicProcessor{
                 }
             }
             twiceSmoothedValue /= Math.min(smoothingWindowSize2, smoothedCorrectedGreenValues.size());
+
+            smoothed2CorrectedGreenValues.add(twiceSmoothedValue);
+
+            double thirdSmoothedValue = 0.0;
+            int smoothingWindowSize3 = 2;
+            for (int i = 0; i < smoothingWindowSize3; i++) {
+                int index = smoothed2CorrectedGreenValues.size() - 1 - i;
+                if (index >= 0) {
+                    thirdSmoothedValue += smoothed2CorrectedGreenValues.get(index);
+                }
+            }
+            thirdSmoothedValue /= Math.min(smoothingWindowSize3, smoothed2CorrectedGreenValues.size());
+
             // 長めのウィンドウを使って局所的な最小値と最大値を計算
-            // 例として、直近20サンプルから局所的な最小値と最大値を計算
+            // 例として、直近40サンプルから局所的な最小値と最大値を計算
             int longWindowSize = 40;
-            int startIdx = Math.max(0, smoothedCorrectedGreenValues.size() - longWindowSize);
+            int startIdx = Math.max(0, smoothed2CorrectedGreenValues.size() - longWindowSize);
             double localMin = Double.POSITIVE_INFINITY;
             double localMax = Double.NEGATIVE_INFINITY;
-            for (int i = startIdx; i < smoothedCorrectedGreenValues.size(); i++) {
-                double v = smoothedCorrectedGreenValues.get(i);
+            for (int i = startIdx; i < smoothed2CorrectedGreenValues.size(); i++) {
+                double v = smoothed2CorrectedGreenValues.get(i);
                 if (v < localMin) localMin = v;
                 if (v > localMax) localMax = v;
             }
@@ -165,7 +119,7 @@ public class Logic3 implements LogicProcessor{
             if (range < 1.0) {
                 range = 1.0;  // ゼロ除算防止
             }
-            correctedGreenValue = ((twiceSmoothedValue - localMin) / range) * 100.0;
+            correctedGreenValue = ((thirdSmoothedValue - localMin) / range) * 100.0;
             correctedGreenValue = Math.max(0, Math.min(100, correctedGreenValue));
 
             // window 配列に correctedGreenValue を記録し、ピーク検出に利用する
@@ -177,52 +131,48 @@ public class Logic3 implements LogicProcessor{
         updateChart(correctedGreenValue);
 
         // ピーク検出と心拍数計算
-        // 現在のウィンドウの値を取得
-        double currentVal2 = window[(windowIndex + WINDOW_SIZE - 1) % WINDOW_SIZE];
-        double currentVal1 = window[(windowIndex + WINDOW_SIZE - 2) % WINDOW_SIZE];
-        double previous = window[(windowIndex + WINDOW_SIZE - 3) % WINDOW_SIZE];
-        double previous1 = window[(windowIndex + WINDOW_SIZE - 4) % WINDOW_SIZE];
-        double previous2 = window[(windowIndex + WINDOW_SIZE - 5) % WINDOW_SIZE];
-        double previous3 = window[(windowIndex + WINDOW_SIZE - 6) % WINDOW_SIZE];
+        double currentVal = window[(windowIndex + WINDOW_SIZE - 1) % WINDOW_SIZE];
+        double previous1  = window[(windowIndex + WINDOW_SIZE - 2) % WINDOW_SIZE];
+        double previous2  = window[(windowIndex + WINDOW_SIZE - 3) % WINDOW_SIZE];
+        double previous3  = window[(windowIndex + WINDOW_SIZE - 4) % WINDOW_SIZE];
+        double previous4  = window[(windowIndex + WINDOW_SIZE - 5) % WINDOW_SIZE];
 
+        if (framesSinceLastPeak >= REFRACTORY_FRAMES
+                && previous1 > previous2
+                && previous2 > previous3
+                && previous3 > previous4
+                && previous1 > currentVal) {
 
-        if (previous > previous1 && previous1 > previous2 &&
-                previous2 > previous3 && previous > currentVal1 && currentVal1 > currentVal2) {
+            framesSinceLastPeak = 0;
+
             long currentTime = System.currentTimeMillis();
-            // 最小ピーク間隔のチェック（既に条件文内でチェックされています）
-            if (lastPeakTime != 0 && (currentTime - lastPeakTime) < MIN_PEAK_INTERVAL_MS) {
-                return new LogicResult(correctedGreenValue, IBI, bpmValue, getStdDev(bpmHistory));
+            if (lastPeakTime != 0) {
+                double interval = (currentTime - lastPeakTime) / 1000.0;
+                if (interval > 0.25 && interval < 1.2) {
+                    double bpm = 60.0 / interval;
+                    if (bpmHistory.size() >= BPM_HISTORY_SIZE) {
+                        bpmHistory.remove(0);
+                    }
+                    bpmHistory.add(bpm);
+                    double meanBpm = getMean(bpmHistory);
+                    double bpmSD   = getStdDev(bpmHistory);
+                    if (bpm >= meanBpm - meanBpm * 0.1
+                            && bpm <= meanBpm + meanBpm * 0.1) {
+                        bpmValue = bpm;
+                        IBI      = 60.0 / bpmValue * 1000.0;
+                    }
+                    lastPeakTime = currentTime;
+                    updateCount++;
+
+                    return new LogicResult(correctedGreenValue, IBI, bpmValue, bpmSD);
+                }
             }
-            double interval = (currentTime - lastPeakTime) / 1000.0;
-            if (lastPeakTime != 0 && interval > 0.25 && interval < 1.2) {
-                double bpm = 60.0 / interval;
-                double ibi = 60.0 / bpm * 1000.0;
-                if (bpmHistory.size() >= BPM_HISTORY_SIZE) {
-                    bpmHistory.remove(0);
-                }
-                bpmHistory.add(bpm);
-                double meanBpm = getMean(bpmHistory);
-                double bpmSD = getStdDev(bpmHistory);
-                if (bpm >= meanBpm - meanBpm * 0.1 && bpm <= meanBpm + meanBpm * 0.1) {
-                    bpmValue = bpm;
-                    IBI = 60.0 / bpmValue * 1000.0;
-                }
-                // 記録用にピーク値を保存し、peakHistoryの更新
-                peakHistory.add(previous);
-                if (peakHistory.size() > PEAK_HISTORY_SIZE) {
-                    peakHistory.remove(0);
-                }
-                lastPeakTime = currentTime;
-                updateCount++;
-                return new LogicResult(correctedGreenValue, IBI, bpmValue, bpmSD);
-            }
-            lastPeakTime = currentTime;
+            lastPeakTime = System.currentTimeMillis();
         }
+
+        framesSinceLastPeak++;
         return new LogicResult(correctedGreenValue, IBI, bpmValue, getStdDev(bpmHistory));
-
     }
-
-
 
     // ---------------------------------------------------
     // 【メソッド：リアルタイム平滑化補間】
