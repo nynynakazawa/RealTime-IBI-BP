@@ -1,185 +1,280 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:gravity="center|top"
-    android:orientation="vertical">
+    android:background="#1e3333">
 
-    <!-- ロジック選択用のSpinnerを追加 -->
-    <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginTop="20dp"
-        android:padding="7dp">
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Select Processing Mode:" />
-        <Spinner
-            android:id="@+id/spinnerLogicSelection"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginLeft="10dp" />
-    </LinearLayout>
+    <!-- ツールバー -->
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/topAppBar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:backgroundTint="?attr/colorSurface"
+        android:title="Biometric Monitor"
+        android:titleTextColor="#78CCCC" />
 
     <FrameLayout
         android:id="@+id/mode_select_fragment_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:visibility="gone" />
+        android:visibility="gone"/>
 
-    <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center|top"
-        android:orientation="horizontal"
-        android:padding="0dp">
-        <EditText
-            android:id="@+id/editTextName"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:hint="Enter your name"
-            android:layout_centerHorizontal="true"
-            android:layout_marginTop="20dp"/>
-        <TextView
-            android:id="@+id/tvMode"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
+    <!-- 直接 ConstraintLayout を配置 -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        xmlns:android="http://schemas.android.com/apk/res/android"
+        xmlns:app="http://schemas.android.com/apk/res-auto"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:padding="16dp">
+
+        <ImageView
+            android:id="@+id/appIcon"
+            android:layout_width="70dp"
+            android:layout_height="70dp"
             android:layout_marginLeft="20dp"
-            android:text="mode : -1" />
-    </LinearLayout>
-    <com.github.mikephil.charting.charts.LineChart
-        android:id="@+id/lineChart"
-        android:layout_marginTop="30dp"
-        android:layout_width="380dp"
-        android:layout_height="300dp" />
-    <TextView
-        android:id="@+id/NowTextMessage"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="キャリブレーション中 "/>
-
-    <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center|top"
-        android:padding="16dp">
+            android:src="@mipmap/ic_launcher_foreground"
+            android:contentDescription="App Icon"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintStart_toStartOf="parent" />
 
         <TextView
-            android:id="@+id/greenValueTextView"
+            android:id="@+id/appTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Green : "/>
-        <TextView
-            android:id="@+id/BPMSD"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginLeft="40dp"
-            android:text="BPM SD : "/>
-    </LinearLayout>
-    <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center|top"
-        android:padding="16dp">
+            android:layout_marginStart="8dp"
+            android:text="RealTime-HR/BP"
+            android:textSize="30dp"
+            android:textColor="#78CCCC"
+            app:layout_constraintStart_toEndOf="@id/appIcon"
+            app:layout_constraintTop_toTopOf="@id/appIcon"
+            app:layout_constraintBottom_toBottomOf="@id/appIcon" />
 
         <TextView
-            android:id="@+id/ibiTextView"
+            android:id="@+id/labelMode"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="IBI : "/>
+            android:text="Select Processing Mode："
+            android:textSize="20dp"
+            android:textColor="#78CCCC"
+            app:layout_constraintTop_toBottomOf="@id/appIcon"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/spinnerLogicSelection"/>
+
+        <Spinner
+            android:id="@+id/spinnerLogicSelection"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            style="@style/CustomSpinnerText"
+            app:layout_constraintBaseline_toBaselineOf="@id/labelMode"
+            app:layout_constraintStart_toEndOf="@id/labelMode"
+            app:layout_constraintEnd_toEndOf="parent"/>
+
+        <LinearLayout
+            android:id="@+id/FileNameAndMode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center|top"
+            android:padding="0dp"
+            app:layout_constraintTop_toBottomOf="@id/labelMode"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <EditText
+                android:id="@+id/editTextName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:hint="Enter FileName"
+                android:textSize="20dp"
+                android:textColor="#78CCCC"/>
+
+            <TextView
+                android:id="@+id/tvMode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="mode : -1"
+                android:textSize="20dp"
+                android:textColor="#78CCCC"/>
+
+        </LinearLayout>
+
+        <!-- グラフ -->
+        <com.github.mikephil.charting.charts.LineChart
+            android:id="@+id/lineChart"
+            android:layout_width="0dp"
+            android:layout_height="350dp"
+            app:layout_constraintTop_toBottomOf="@id/FileNameAndMode"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"/>
+
+        <!-- キャリブレーション中テキスト -->
         <TextView
-            android:id="@+id/HRTextView"
+            android:id="@+id/NowTextMessage"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginLeft="40dp"
-            android:text="HeartRate : "/>
-    </LinearLayout>
+            android:text="キャリブレーション中"
+            android:textSize="20dp"
+            android:layout_marginTop="30dp"
+            android:textColor="#78CCCC"
+            app:layout_constraintTop_toBottomOf="@id/lineChart"
+            app:layout_constraintStart_toStartOf="parent"/>
 
-    <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center|top"
-        android:padding="16dp">
-
-        <TextView
-            android:id="@+id/SmoothedIbiTextView"
-            android:layout_width="wrap_content"
+        <TableLayout
+            android:id="@+id/Table"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Smoothed IBI : "/>
-        <TextView
-            android:id="@+id/SmoothedHRTextView"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginLeft="40dp"
-            android:text="Smoothed HR : "/>
-    </LinearLayout>
+            android:divider="#78CCCC"
+            android:showDividers="middle"
+            app:layout_constraintTop_toBottomOf="@id/NowTextMessage"
+            android:stretchColumns="*">
 
+            <!-- Green / BPM SD -->
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+                <TextView
+                    android:id="@+id/greenValueTextView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Green : "
+                    android:textSize="20dp"
+                    android:textColor="#78CCCC"/>
+                <TextView
+                    android:id="@+id/BPMSD"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="BPM SD : "
+                    android:textSize="20dp"
+                    android:textColor="#78CCCC"/>
+            </TableRow>
 
-    <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center|top"
-        android:padding="16dp">
+            <!-- IBI / HR -->
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+                <TextView
+                    android:id="@+id/ibiTextView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="IBI : "
+                    android:textSize="20dp"
+                    android:textColor="#78CCCC"/>
+                <TextView
+                    android:id="@+id/HRTextView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="HeartRate : "
+                    android:textSize="20dp"
+                    android:textColor="#78CCCC"/>
+            </TableRow>
 
+            <!-- Smoothed IBI / HR -->
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+                <TextView
+                    android:id="@+id/SmoothedIbiTextView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="IBI(Smooth) : "
+                    android:textSize="20dp"
+                    android:textColor="#78CCCC"/>
+                <TextView
+                    android:id="@+id/SmoothedHRTextView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="HR(Smooth) : "
+                    android:textSize="20dp"
+                    android:textColor="#78CCCC"/>
+            </TableRow>
 
-        <Button
+        </TableLayout>
+
+        <!-- ボタン群 -->
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/show_mode_select_fragment_button"
-            android:layout_width="wrap_content"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_centerInParent="true"
-            android:text="mode" />
+            android:text="Mode"
+            android:textSize="20dp"
+            android:textColor="#78CCCC"
+            app:layout_constraintTop_toBottomOf="@id/Table"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/start_button"
+            android:layout_marginTop="16dp"/>
 
-
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/start_button"
-            android:layout_width="wrap_content"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Start" />
+            android:text="Start"
+            android:textSize="20dp"
+            android:textColor="#78CCCC"
+            app:layout_constraintTop_toBottomOf="@id/Table"
+            app:layout_constraintStart_toEndOf="@id/show_mode_select_fragment_button"
+            app:layout_constraintEnd_toStartOf="@id/reset_button"
+            android:layout_marginStart="8dp"
+            android:layout_marginTop="16dp"/>
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/reset_button"
-            android:layout_width="wrap_content"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Reset" />
+            android:text="Reset"
+            android:textSize="20dp"
+            android:textColor="#78CCCC"
+            app:layout_constraintTop_toBottomOf="@id/Table"
+            app:layout_constraintStart_toEndOf="@id/start_button"
+            app:layout_constraintEnd_toEndOf="parent"
+            android:layout_marginStart="8dp"
+            android:layout_marginTop="16dp"/>
 
-    </LinearLayout>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_bp_measure"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Measure BP"
+            android:textSize="20dp"
+            android:textColor="#78CCCC"
+            app:layout_constraintTop_toBottomOf="@id/show_mode_select_fragment_button"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            android:layout_marginTop="16dp"/>
 
-    <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center|top"
-        android:padding="16dp">
-
-    <Button
-        android:id="@+id/btn_bp_measure"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Measure BP" />
-
-    </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center|top"
-        android:padding="16dp">
-
+        <!-- BP 結果 -->
         <TextView
             android:id="@+id/tvBPMax"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="BP Max : " />
+            android:text="BP Max : "
+            android:textSize="20dp"
+            android:textColor="#78CCCC"
+            app:layout_constraintTop_toBottomOf="@id/btn_bp_measure"
+            android:layout_marginTop="16dp"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/tvBPMin"
+            app:layout_constraintHorizontal_chainStyle="packed"/>
 
         <TextView
             android:id="@+id/tvBPMin"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginLeft="40dp"
-            android:text="BP Min : " />
-    </LinearLayout>
+            android:text="BP Min : "
+            android:textSize="20dp"
+            android:textColor="#78CCCC"
+            app:layout_constraintTop_toBottomOf="@id/btn_bp_measure"
+            android:layout_marginTop="16dp"
+            app:layout_constraintStart_toEndOf="@id/tvBPMax"
+            app:layout_constraintEnd_toEndOf="parent"/>
 
-
-</LinearLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

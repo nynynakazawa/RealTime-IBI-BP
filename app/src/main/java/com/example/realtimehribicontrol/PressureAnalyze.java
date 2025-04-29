@@ -13,6 +13,9 @@ import android.util.Range;
 import android.util.Size;
 import android.widget.Button;
 import android.widget.Toast;
+import android.util.Log;
+
+import android.content.res.AssetFileDescriptor;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.OptIn;
@@ -27,48 +30,99 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.common.util.concurrent.ListenableFuture;
+import org.tensorflow.lite.Interpreter;
 
+import java.io.FileInputStream;
+import java.nio.channels.FileChannel;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.DoubleStream;
 
 public class PressureAnalyze extends AppCompatActivity {
 
-    /* ======== constants ======== */
-    private static final int CAM_PERM = 88;
-    private static final long EXPOSURE_NS = 8_000_000L;   // 8 ms
-    private static final int ISO = 800;
-    private static final int BLOCK_MS = 8_000;            // 8 s each level
+    /* ---------- 固定パラメータ ---------- */
+    private static final int CAM_PERM       = 88;
+    private static final long EXPOSURE_NS   = 8_000_000L;        // 8 ms
+    private static final int  ISO           = 800;
+    private static final int  BLOCK_MS      = 8_000;             // 8 s × 3 レベル
 
-    /* ======== ui ======== */
+    /* ---------- UI ---------- */
     private Button btnGuide;
 
-    /* ======== camera / analysis ======== */
+    /* ---------- Camera / Analysis ---------- */
     private ListenableFuture<ProcessCameraProvider> providerFuture;
     private final ExecutorService analyzerExecutor = Executors.newSingleThreadExecutor();
 
-    /* ======== signal buffers ======== */
-    private double sumAmp;
-    private int ampSamples;
+    /* ---------- 生信号バッファ ---------- */
     private final double[] amps = new double[3];
-    private int blockIndex = 0; // 0‑LIGHT,1‑MED,2‑STRONG
+    private int   blockIndex   = 0;
+    private double sumAmp      = 0;
+    private int    ampSamples  = 0;
 
-    /* ======== smoothing & normalization buffers ======== */
-    private static final int SMOOTHING_WINDOW = 5;
-    private final Deque<Double> recentValues = new ArrayDeque<>();
-    private final Deque<Double> correctedWindow = new ArrayDeque<>();
-    private static final int LONG_WINDOW = 40;
+    /* ---------- HR & mNPV ---------- */
+    private static final int  SMOOTH_W     = 5;
+    private static final int  LONG_W       = 40;
+    private final Deque<Double> recentG    = new ArrayDeque<>();
+    private final Deque<Double> normWinG   = new ArrayDeque<>();
+    private final List<Long>    peakTimes  = new ArrayList<>();   // 心拍ピーク時刻
 
-    /* ======== handler for timed UI updates ======== */
-    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    /* ---------- UI Handler ---------- */
+    private final Handler uiH = new Handler(Looper.getMainLooper());
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
+    /* ---------- ML ---------- */
+    // ---★ ここから追加：モデル読み込み＆係数 -------------------------
+    private Interpreter tflite;
+    private double[] linCoefSBP = {110, 40, 25};   // {intercept, HRcoef, mNPVcoef}
+    private double[] linCoefDBP = { 70, 22, 18};
+
+    private void loadModels() {
+        try {                                  // ① TFLite を優先
+            AssetFileDescriptor afd = getAssets().openFd("bp_model.tflite");
+            FileInputStream fis = new FileInputStream(afd.getFileDescriptor());
+            FileChannel fc = fis.getChannel();
+            MappedByteBuffer mb = fc.map(
+                    FileChannel.MapMode.READ_ONLY,
+                    afd.getStartOffset(),
+                    afd.getLength()
+            );
+            fis.close();
+            tflite = new Interpreter(mb);
+        } catch (IOException e) {
+            tflite = null;                     // 無ければ線形回帰へフォールバック
+        }
+        try {                                  // ② オプション：LightGBM 係数
+            InputStream is = getAssets().open("bp_lgbm.txt");
+            BufferedReader br = new BufferedReader(new InputStreamReader(is));
+            // （簡易）ファイル先頭に intercept, HRcoef, mNPVcoef が CSV で入っている想定
+            String[] sbpParts = br.readLine().split(",");
+            String[] dbpParts = br.readLine().split(",");
+            for (int i = 0; i < 3; i++) {
+                linCoefSBP[i] = Double.parseDouble(sbpParts[i]);
+                linCoefDBP[i] = Double.parseDouble(dbpParts[i]);
+            }
+            br.close();
+        } catch (Exception ignore) {}
+    }
+    // ---★ ここまで追加 ---------------------------------------------
+
+    /* ---------- lifecycle ---------- */
+    @Override protected void onCreate(Bundle saved) {
+        super.onCreate(saved);
         setContentView(R.layout.activity_pressure_analyze);
+
+        loadModels();
+        Log.d("PressureAnalyze", "loadModels: tflite is " + (tflite != null ? "available" : "null"));
 
         btnGuide = findViewById(R.id.btnPressGuide);
         btnGuide.setOnClickListener(v -> startMeasurement());
@@ -77,154 +131,174 @@ public class PressureAnalyze extends AppCompatActivity {
                 != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this,
                     new String[]{Manifest.permission.CAMERA}, CAM_PERM);
-        } else {
-            initCamera();
-        }
+        } else initCamera();
     }
 
-    @Override
-    public void onRequestPermissionsResult(int req, @NonNull String[] perms,
-                                           @NonNull int[] res) {
-        super.onRequestPermissionsResult(req, perms, res);
-        if (req == CAM_PERM && res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED) {
-            initCamera();
-        } else {
-            Toast.makeText(this, "Camera permission denied", Toast.LENGTH_SHORT).show();
+    @Override public void onRequestPermissionsResult(int r,@NonNull String[] p,@NonNull int[] g){
+        super.onRequestPermissionsResult(r,p,g);
+        if(r==CAM_PERM && g.length>0 && g[0]==PackageManager.PERMISSION_GRANTED) initCamera();
+        else{
+            Toast.makeText(this,"Camera permission denied",Toast.LENGTH_SHORT).show();
             finish();
         }
     }
 
+    /* ---------- camera ---------- */
     private void initCamera() {
         providerFuture = ProcessCameraProvider.getInstance(this);
         providerFuture.addListener(() -> {
             try {
                 ProcessCameraProvider provider = providerFuture.get();
                 bindAnalysis(provider);
-            } catch (ExecutionException | InterruptedException e) {
-                e.printStackTrace();
-            }
+            } catch (ExecutionException | InterruptedException e) { e.printStackTrace(); }
         }, ContextCompat.getMainExecutor(this));
     }
 
     @OptIn(markerClass = androidx.camera.camera2.interop.ExperimentalCamera2Interop.class)
     private void bindAnalysis(ProcessCameraProvider provider) {
-        ImageAnalysis.Builder builder = new ImageAnalysis.Builder()
+        ImageAnalysis.Builder b = new ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setTargetResolution(new Size(240, 180));
+                .setTargetResolution(new Size(240,180));
 
-        Camera2Interop.Extender ext = new Camera2Interop.Extender<>(builder);
-        try {
-            ext.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE,
-                    CaptureRequest.CONTROL_AE_MODE_OFF);
+        Camera2Interop.Extender ext = new Camera2Interop.Extender<>(b);
+        try{
+            ext.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
             ext.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, EXPOSURE_NS);
             ext.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, ISO);
-        } catch (Exception ignored) {
-            ext.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, true);
-        }
-        ext.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, true);
-        ext.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                new Range<>(30, 30));
+        }catch(Exception ignored){}
+        ext.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK,true);
+        ext.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,new Range<>(30,30));
 
-        ImageAnalysis analysis = builder.build();
-        analysis.setAnalyzer(analyzerExecutor, this::processFrame);
+        ImageAnalysis ia = b.build();
+        ia.setAnalyzer(analyzerExecutor,this::processFrame);
 
-        CameraSelector selector = new CameraSelector.Builder()
-                .requireLensFacing(CameraSelector.LENS_FACING_FRONT)
-                .build();
+        CameraSelector cs = new CameraSelector.Builder()
+                .requireLensFacing(CameraSelector.LENS_FACING_FRONT).build();
 
         provider.unbindAll();
-        provider.bindToLifecycle(this, selector, analysis);
+        provider.bindToLifecycle(this,cs,ia);
     }
 
-    private void startMeasurement() {
+    /* ---------- measurement flow ---------- */
+    private void startMeasurement(){
         btnGuide.setEnabled(false);
-        blockIndex = 0;
-        sumAmp = 0; ampSamples = 0;
-        recentValues.clear();
-        correctedWindow.clear();
-        updateLabel(blockIndex);
-        uiHandler.postDelayed(blockSwitcher, BLOCK_MS);
+        blockIndex=0;sumAmp=0;ampSamples=0;
+        recentG.clear(); normWinG.clear(); peakTimes.clear();
+        updateLabel(0);
+        uiH.postDelayed(blockSwitcher, BLOCK_MS);
     }
-
     private final Runnable blockSwitcher = new Runnable() {
-        @Override public void run() {
+        @Override
+        public void run() {
             amps[blockIndex] = ampSamples > 0 ? sumAmp / ampSamples : 0;
+            Log.d("PressureAnalyze", String.format(
+                    "blockSwitcher: finished block %d, avgAmp=%.2f", blockIndex, amps[blockIndex]));
             blockIndex++;
-            sumAmp = 0; ampSamples = 0;
-            recentValues.clear();
+            sumAmp = 0;
+            ampSamples = 0;
+            recentG.clear();
 
             if (blockIndex < 3) {
                 updateLabel(blockIndex);
-                uiHandler.postDelayed(this, BLOCK_MS);
+                uiH.postDelayed(this, BLOCK_MS);
             } else {
                 estimateBP();
             }
         }
     };
-
-    private void updateLabel(int idx) {
-        switch (idx) {
-            case 0: btnGuide.setText("軽く押してください"); break;
-            case 1: btnGuide.setText("中程度に押してください"); break;
-            case 2: btnGuide.setText("強く押してください"); break;
+    private void updateLabel(int i){
+        switch(i){
+            case 0:btnGuide.setText("軽く押してください");break;
+            case 1:btnGuide.setText("中程度に押してください");break;
+            case 2:btnGuide.setText("強く押してください");break;
         }
     }
 
-    private void processFrame(@NonNull ImageProxy proxy) {
+    /* ---------- per-frame analysis ---------- */
+    private void processFrame(@NonNull ImageProxy proxy){
         @OptIn(markerClass = ExperimentalGetImage.class)
         android.media.Image img = proxy.getImage();
-        if (img != null && img.getFormat() == ImageFormat.YUV_420_888) {
+        if(img!=null && img.getFormat()==ImageFormat.YUV_420_888){
             double g = extractGreen(img);
-            recentValues.addLast(g);
-            if (recentValues.size() > SMOOTHING_WINDOW) recentValues.removeFirst();
-            double smoothG = recentValues.stream().mapToDouble(d->d).average().orElse(g);
 
-            // advanced normalization and dynamic range enhancement
-            correctedWindow.addLast(smoothG);
-            if (correctedWindow.size() > LONG_WINDOW) correctedWindow.removeFirst();
+            /* --- スムージング & ローカル正規化 --- */
+            recentG.addLast(g); if(recentG.size()>SMOOTH_W) recentG.removeFirst();
+            double sG = recentG.stream().mapToDouble(d->d).average().orElse(g);
 
-            // compute local range
-            double min=Double.MAX_VALUE, max=Double.MIN_VALUE;
-            for(double v: correctedWindow){ min=Math.min(min,v); max=Math.max(max,v);}
-            double range = max - min; if(range<1) range=1;
-            double normalized = ((smoothG - min)/range)*100;
+            normWinG.addLast(sG); if(normWinG.size()>LONG_W) normWinG.removeFirst();
+            double min = normWinG.stream().mapToDouble(d->d).min().orElse(sG);
+            double max = normWinG.stream().mapToDouble(d->d).max().orElse(sG);
+            double nG  = ((sG - min) / Math.max(max - min, 1)) * 100;
+            Log.d("PressureAnalyze", String.format(
+                    "processFrame: rawG=%.2f, smoothG=%.2f, normalizedG=%.2f, sumAmp=%.2f, ampSamples=%d",
+                    g, sG, nG, sumAmp, ampSamples));
 
-            sumAmp += normalized;
-            ampSamples++;
+            /* --- mNPV 計算用ピーク探索（単純ゼロ交差） --- */
+            if(recentG.size()==SMOOTH_W){          // 最低窓幅確保
+                double prev = ((ArrayDeque<Double>)recentG).peekFirst();
+                double curr = sG;
+                if(prev<20 && curr>20) peakTimes.add(System.currentTimeMillis());
+            }
+
+            sumAmp += nG; ampSamples++;
         }
         proxy.close();
     }
 
-    private double extractGreen(android.media.Image img) {
-        ByteBuffer uBuf = img.getPlanes()[1].getBuffer();
-        int w=img.getWidth(),h=img.getHeight();
-        int sx=w/4,sy=h/4,ex=3*w/4,ey=3*h/4;
-        int sum=0,cnt=0;
+    private double extractGreen(android.media.Image img){
+        ByteBuffer u = img.getPlanes()[1].getBuffer();
+        int w=img.getWidth(),h=img.getHeight(), sx=w/4,sy=h/4, ex=3*w/4,ey=3*h/4;
+        int s=0,c=0;
         for(int y=sy;y<ey;y++) for(int x=sx;x<ex;x++){
-            int idx=y*w+x; if(idx<uBuf.capacity()){ sum+=uBuf.get(idx)&0xFF; cnt++;}}
-        return cnt>0?(double)sum/cnt:0;
+            int idx=y*w+x; if(idx<u.capacity()){ s+=u.get(idx)&0xFF; c++;}}
+        return c>0?(double)s/c:0;
     }
 
-    private void estimateBP() {
-        double ratio1 = amps[1]/amps[0];
-        ratio1 = Math.abs(ratio1);
-        double ratio2 = amps[2]/amps[1];
-        ratio2 = Math.abs(ratio2);
+    /* ---------- BP estimation ---------- */
+    private void estimateBP(){
+        /* --- HR & mNPV 特徴量算出 --- */
+        double meanHR=75, meanNPV=1;   // デフォルト（失敗時）
+        Log.d("PressureAnalyze", String.format(
+                "estimateBP: amps=[%.2f, %.2f, %.2f], meanHR=%.2f, meanNPV=%.2f",
+                amps[0], amps[1], amps[2], meanHR, meanNPV));
+        if(peakTimes.size()>3){
+            List<Long> ibi=new ArrayList<>();
+            for(int i=1;i<peakTimes.size();i++) ibi.add(peakTimes.get(i)-peakTimes.get(i-1));
+            meanHR = 60000.0/ibi.stream().mapToLong(l->l).average().orElse(800);
+            meanNPV= DoubleStream.of(amps).average().orElse(1);
+        }
 
-        double sbp = 110 + 40*ratio1;
-        double dbp =  70 + 25*ratio2;
+        /* --- 回帰 or ML 推論 --- */
+        double sbp, dbp;
+        if (tflite != null) {
+            Log.d("PressureAnalyze", "estimateBP: running TFLite model with inputs HR=" + meanHR + ", mNPV=" + meanNPV);
+            float[] in = { (float) meanHR, (float) meanNPV };
+            float[][] out = new float[1][2];
+            tflite.run(in, out);
+            sbp = out[0][0];
+            dbp = out[0][1];
+            Log.d("PressureAnalyze", String.format(
+                    "estimateBP: TFLite output sbp=%.2f, dbp=%.2f", sbp, dbp));
+        } else {
+            Log.d("PressureAnalyze", "estimateBP: using linear regression with coeffs SBP=["
+                    + linCoefSBP[0] + "," + linCoefSBP[1] + "," + linCoefSBP[2]
+                    + "] DBP=[" + linCoefDBP[0] + "," + linCoefDBP[1] + "," + linCoefDBP[2] + "]");
+            sbp = linCoefSBP[0] + linCoefSBP[1] * meanHR + linCoefSBP[2] * meanNPV;
+            dbp = linCoefDBP[0] + linCoefDBP[1] * meanHR + linCoefDBP[2] * meanNPV;
+            Log.d("PressureAnalyze", String.format(
+                    "estimateBP: linear model output sbp=%.2f, dbp=%.2f", sbp, dbp));
+        }
 
-        Intent out = new Intent();
-        out.putExtra("BP_MAX", sbp);
-        out.putExtra("BP_MIN", dbp);
-        setResult(Activity.RESULT_OK, out);
+        Intent ret=new Intent();
+        ret.putExtra("BP_MAX",sbp);
+        ret.putExtra("BP_MIN",dbp);
+        setResult(Activity.RESULT_OK,ret);
         finish();
     }
 
-    @Override
-    protected void onDestroy() {
+    @Override protected void onDestroy(){
         super.onDestroy();
         analyzerExecutor.shutdown();
-        uiHandler.removeCallbacks(blockSwitcher);
+        uiH.removeCallbacks(blockSwitcher);
     }
 }

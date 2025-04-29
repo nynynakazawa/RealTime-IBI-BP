@@ -1,0 +1,15 @@
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?attr/colorOnPrimary">
+    <item>
+        <shape android:shape="rectangle">
+            <!-- 背景は透過のまま -->
+            <solid android:color="@android:color/transparent"/>
+            <!-- 境界線を5dp、色#58BC82に -->
+            <stroke
+                android:width="10dp"
+                android:color="#58BC82"/>
+            <!-- 角丸を10dpに -->
+            <corners android:radius="30dp"/>
+        </shape>
+    </item>
+</ripple>

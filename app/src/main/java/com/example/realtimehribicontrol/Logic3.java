@@ -237,8 +237,8 @@ public class Logic3 implements LogicProcessor {
     private void updateSmoothedValues(double smoothedIbi, double smoothedBpm) {
         Log.d("Logic1", "Smoothed IBI: " + smoothedIbi + ", Smoothed BPM: " + smoothedBpm);
         if(uiCallback != null) {
-            uiCallback.updateSmoothedValuesText("Smoothed IBI : " + String.format(Locale.getDefault(), "%.2f", smoothedIbi),
-                    "Smoothed HeartRate : " + String.format(Locale.getDefault(), "%.2f", smoothedBpm));
+            uiCallback.updateSmoothedValuesText("IBI(Smooth) : " + String.format(Locale.getDefault(), "%.2f", smoothedIbi),
+                    "HR(Smooth) : " + String.format(Locale.getDefault(), "%.2f", smoothedBpm));
         }
     }
 

@@ -4,16 +4,19 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:gravity="center"
-    android:background="@drawable/gradient_background"
+    android:background="#1e3333"
     android:padding="24dp"
     android:textColor="#000000">
 
     <Button
         android:id="@+id/btnPressGuide"
-        android:layout_width="wrap_content"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="300dp"
         android:layout_height="wrap_content"
-        android:textColor="#000000"
         android:text="軽くカメラに指を乗せてください"
-        android:textSize="24sp" />
+        android:textSize="20dp"
+        android:textColor="#78CCCC"
+        android:layout_marginTop="16dp"
+        />
 
 </LinearLayout>

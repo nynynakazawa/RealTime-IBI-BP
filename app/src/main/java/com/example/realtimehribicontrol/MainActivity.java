@@ -65,15 +65,26 @@ public class MainActivity extends AppCompatActivity
         tvBPMax = findViewById(R.id.tvBPMax);
         tvBPMin = findViewById(R.id.tvBPMin);
 
-        spinnerLogic.setAdapter(new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item,
-                new String[]{"Logic1", "Logic2", "Logic3", "Logic4", "Logic5", "Logic6"}));
+        String[] logics = {"Logic1","Logic2","Logic3","Logic4","Logic5","Logic6"};
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                this,
+                R.layout.spinner_item,               // 選択中アイテム用
+                logics
+        );
+        adapter.setDropDownViewResource(
+                R.layout.spinner_dropdown_item       // ドロップダウンリスト用
+        );
+        spinnerLogic.setAdapter(adapter);
 
         spinnerLogic.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                analyzer.setActiveLogic((String) p.getItemAtPosition(pos));
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                analyzer.setActiveLogic(parent.getItemAtPosition(position).toString());
             }
-            public void onNothingSelected(AdapterView<?> p) { analyzer.setActiveLogic("Logic6"); }
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+                analyzer.setActiveLogic("Logic6");
+            }
         });
 
         bpLauncher = registerForActivityResult(

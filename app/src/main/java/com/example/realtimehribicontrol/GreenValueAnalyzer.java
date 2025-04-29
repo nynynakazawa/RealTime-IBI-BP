@@ -28,6 +28,7 @@ import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
+import android.graphics.Color;
 
 
 public class GreenValueAnalyzer implements LifecycleObserver {
@@ -74,19 +75,27 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         this.tvSd = tvSd; this.tvHr = tvHr;
         tvSmIbi = tvSmI; tvSmHr = tvSmH;
 
-        dataSet = new LineDataSet(entries, "Value");
+        chart.getLegend().setEnabled(false);
+        dataSet = new LineDataSet(entries, "");
         dataSet.setLineWidth(2);
-        dataSet.setColor(ContextCompat.getColor(ctx, R.color.green_color));
+        dataSet.setColor(Color.parseColor("#78CCCC"));
+        dataSet.setDrawValues(false);  // 値ラベルを非表示
+
         data = new LineData(dataSet);
-        chart.setData(data); chart.getDescription().setEnabled(false);
+        chart.setData(data);
+        chart.getDescription().setEnabled(false);
 
         XAxis x = chart.getXAxis();
         x.setPosition(XAxis.XAxisPosition.BOTTOM);
         x.setDrawGridLines(false);
+        x.setTextSize(14f);  // X軸の目盛数字サイズを 14dp 相当に
 
         YAxis y = chart.getAxisLeft();
-        y.setAxisMinimum(0); y.setAxisMaximum(255);
+        y.setAxisMinimum(0);
+        y.setAxisMaximum(255);
         y.setDrawGridLines(false);
+        y.setTextSize(14f);  // Y軸の目盛数字サイズを 14dp 相当に
+
         chart.getAxisRight().setEnabled(false);
 
         ((LifecycleOwner) ctx).getLifecycle().addObserver(this);
@@ -225,8 +234,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             tvIbi.setText(  String.format("IBI : %.2f", ibi));
             tvHr.setText(   String.format("HeartRate : %.2f", hr));
             tvSd.setText(   String.format("BPMSD : %.2f", sd));
-            tvSmIbi.setText(String.format("Smoothed IBI : %.2f", smI));
-            tvSmHr.setText(String.format("Smoothed HeartRate : %.2f", smB));
+            tvSmIbi.setText(String.format("IBI(Smooth) : %.2f", smI));
+            tvSmHr.setText(String.format("HR(Smooth) : %.2f", smB));
 
             // グラフデータの更新
             if (entries.size() > 100) {
