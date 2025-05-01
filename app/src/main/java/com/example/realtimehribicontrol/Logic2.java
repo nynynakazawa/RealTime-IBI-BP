@@ -76,7 +76,7 @@ public class Logic2 implements LogicProcessor {
         if (recentCorrectedGreenValues.size() >= CORRECTED_GREEN_VALUE_WINDOW_SIZE) {
 
             double smoothedCorrectedGreenValue = 0.0;
-            int smoothingWindowSize1 = 3;
+            int smoothingWindowSize1 = 6;
             for (int i = 0; i < smoothingWindowSize1; i++) {
                 int index = recentCorrectedGreenValues.size() - 1 - i;
                 if (index >= 0) {
@@ -91,7 +91,7 @@ public class Logic2 implements LogicProcessor {
             smoothedCorrectedGreenValues.add(smoothedCorrectedGreenValue);
 
             double twiceSmoothedValue = 0.0;
-            int smoothingWindowSize2 = 3;
+            int smoothingWindowSize2 = 4;
             for (int i = 0; i < smoothingWindowSize2; i++) {
                 int index = smoothedCorrectedGreenValues.size() - 1 - i;
                 if (index >= 0) {
@@ -99,24 +99,7 @@ public class Logic2 implements LogicProcessor {
                 }
             }
             twiceSmoothedValue /= Math.min(smoothingWindowSize2, smoothedCorrectedGreenValues.size());
-
-            // 長めのウィンドウを使って局所的な最小値と最大値を計算
-            // 例として、直近40サンプルから局所的な最小値と最大値を計算
-            int longWindowSize = 40;
-            int startIdx = Math.max(0, smoothedCorrectedGreenValues.size() - longWindowSize);
-            double localMin = Double.POSITIVE_INFINITY;
-            double localMax = Double.NEGATIVE_INFINITY;
-            for (int i = startIdx; i < smoothedCorrectedGreenValues.size(); i++) {
-                double v = smoothedCorrectedGreenValues.get(i);
-                if (v < localMin) localMin = v;
-                if (v > localMax) localMax = v;
-            }
-            double range = localMax - localMin;
-            if (range < 1.0) {
-                range = 1.0;  // ゼロ除算防止
-            }
-            correctedGreenValue = ((twiceSmoothedValue - localMin) / range) * 100.0;
-            correctedGreenValue = Math.max(0, Math.min(100, correctedGreenValue));
+            correctedGreenValue= twiceSmoothedValue * 2;
 
             // window 配列に correctedGreenValue を記録し、ピーク検出に利用する
             window[windowIndex] = correctedGreenValue;
