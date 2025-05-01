@@ -13,7 +13,7 @@
         style="@style/Widget.MaterialComponents.Button.OutlinedButton"
         android:layout_width="300dp"
         android:layout_height="wrap_content"
-        android:text="軽くカメラに指を乗せてください"
+        android:text="軽くカメラに\n指を乗せてください"
         android:textSize="20dp"
         android:textColor="#78CCCC"
         android:layout_marginTop="16dp"

@@ -3,14 +3,14 @@
 
     <!-- テーマ -->
     <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">#58BC82</item>
+        <item name="colorPrimary">#78CCCC</item>
         <item name="colorOnPrimary">#FFFFFF</item>
         <item name="colorSecondary">#707070</item>
+        <item name="android:navigationBarColor">#1e3333</item>
         <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
     </style>
 
     <!-- モニタリングデータ用テキスト -->
-
     <style name="CustomSpinnerText" parent="@android:style/Widget.TextView.SpinnerItem">
         <item name="android:textSize">20sp</item>
         <item name="android:textColor">#58BC82</item>
@@ -27,4 +27,5 @@
         <item name="android:paddingHorizontal">24dp</item>
         <item name="android:textAllCaps">false</item>
     </style>
+
 </resources>

@@ -71,11 +71,13 @@ public class PressureAnalyze extends AppCompatActivity {
     private int    ampSamples  = 0;
 
     /* ---------- HR & mNPV ---------- */
-    private static final int  SMOOTH_W     = 5;
-    private static final int  LONG_W       = 40;
-    private final Deque<Double> recentG    = new ArrayDeque<>();
-    private final Deque<Double> normWinG   = new ArrayDeque<>();
-    private final List<Long>    peakTimes  = new ArrayList<>();   // 心拍ピーク時刻
+    private static final int  SMOOTH_W   = 5;
+    private static final int  LONG_W     = 40;
+    private static final double PEAK_TH  = 20.0;          // 追加：ピーク検出閾値
+    private final Deque<Double> recentG  = new ArrayDeque<>();
+    private final Deque<Double> normWinG = new ArrayDeque<>();
+    private final List<Long>    peakTimes= new ArrayList<>();
+    private double lastSmooth = Double.NaN;               // 追加：直前の平滑値
 
     /* ---------- UI Handler ---------- */
     private final Handler uiH = new Handler(Looper.getMainLooper());
@@ -83,8 +85,10 @@ public class PressureAnalyze extends AppCompatActivity {
     /* ---------- ML ---------- */
     // ---★ ここから追加：モデル読み込み＆係数 -------------------------
     private Interpreter tflite;
-    private double[] linCoefSBP = {110, 40, 25};   // {intercept, HRcoef, mNPVcoef}
-    private double[] linCoefDBP = { 70, 22, 18};
+    private double[] linCoefSBP = { 80, 0.5, 0.30 };      // 修正：実験的な小さい係数
+    private double[] linCoefDBP = { 50, 0.35, 0.25 };
+
+
 
     private void loadModels() {
         try {                                  // ① TFLite を優先
@@ -229,18 +233,19 @@ public class PressureAnalyze extends AppCompatActivity {
             double min = normWinG.stream().mapToDouble(d->d).min().orElse(sG);
             double max = normWinG.stream().mapToDouble(d->d).max().orElse(sG);
             double nG  = ((sG - min) / Math.max(max - min, 1)) * 100;
+
+            sumAmp += nG;
+            ampSamples++;
+
             Log.d("PressureAnalyze", String.format(
                     "processFrame: rawG=%.2f, smoothG=%.2f, normalizedG=%.2f, sumAmp=%.2f, ampSamples=%d",
                     g, sG, nG, sumAmp, ampSamples));
 
             /* --- mNPV 計算用ピーク探索（単純ゼロ交差） --- */
-            if(recentG.size()==SMOOTH_W){          // 最低窓幅確保
-                double prev = ((ArrayDeque<Double>)recentG).peekFirst();
-                double curr = sG;
-                if(prev<20 && curr>20) peakTimes.add(System.currentTimeMillis());
+            if (!Double.isNaN(lastSmooth) && lastSmooth < PEAK_TH && sG >= PEAK_TH) {
+                peakTimes.add(System.currentTimeMillis());
             }
-
-            sumAmp += nG; ampSamples++;
+            lastSmooth = sG;
         }
         proxy.close();
     }
@@ -256,43 +261,44 @@ public class PressureAnalyze extends AppCompatActivity {
 
     /* ---------- BP estimation ---------- */
     private void estimateBP(){
-        /* --- HR & mNPV 特徴量算出 --- */
-        double meanHR=75, meanNPV=1;   // デフォルト（失敗時）
-        Log.d("PressureAnalyze", String.format(
-                "estimateBP: amps=[%.2f, %.2f, %.2f], meanHR=%.2f, meanNPV=%.2f",
-                amps[0], amps[1], amps[2], meanHR, meanNPV));
-        if(peakTimes.size()>3){
-            List<Long> ibi=new ArrayList<>();
-            for(int i=1;i<peakTimes.size();i++) ibi.add(peakTimes.get(i)-peakTimes.get(i-1));
-            meanHR = 60000.0/ibi.stream().mapToLong(l->l).average().orElse(800);
-            meanNPV= DoubleStream.of(amps).average().orElse(1);
+
+        // --- IBI（心拍間隔）を計算する ---
+        List<Long> ibi = new ArrayList<>();
+        for(int i = 1; i < peakTimes.size(); i++){
+            ibi.add(peakTimes.get(i) - peakTimes.get(i-1));
         }
+
+        double meanHR;
+        if(ibi.size() >= 1){
+            // 1回以上ピークが検出できたら平均HR を算出
+            meanHR = 60000.0 / ibi.stream().mapToLong(l -> l).average().orElse(800);
+        } else {
+            // 検出できなければ従来のデフォルト
+            meanHR = 75;
+        }
+
+        // --- mNPV は常にブロック毎の平均振幅から算出 ---
+        double meanNPV = DoubleStream.of(amps)
+                .average()
+                .orElse(1);
 
         /* --- 回帰 or ML 推論 --- */
         double sbp, dbp;
-        if (tflite != null) {
-            Log.d("PressureAnalyze", "estimateBP: running TFLite model with inputs HR=" + meanHR + ", mNPV=" + meanNPV);
-            float[] in = { (float) meanHR, (float) meanNPV };
-            float[][] out = new float[1][2];
+        if(tflite != null){
+            float[] in  = { (float)meanHR, (float)meanNPV };
+            float[][] out= new float[1][2];
             tflite.run(in, out);
             sbp = out[0][0];
             dbp = out[0][1];
-            Log.d("PressureAnalyze", String.format(
-                    "estimateBP: TFLite output sbp=%.2f, dbp=%.2f", sbp, dbp));
         } else {
-            Log.d("PressureAnalyze", "estimateBP: using linear regression with coeffs SBP=["
-                    + linCoefSBP[0] + "," + linCoefSBP[1] + "," + linCoefSBP[2]
-                    + "] DBP=[" + linCoefDBP[0] + "," + linCoefDBP[1] + "," + linCoefDBP[2] + "]");
             sbp = linCoefSBP[0] + linCoefSBP[1] * meanHR + linCoefSBP[2] * meanNPV;
             dbp = linCoefDBP[0] + linCoefDBP[1] * meanHR + linCoefDBP[2] * meanNPV;
-            Log.d("PressureAnalyze", String.format(
-                    "estimateBP: linear model output sbp=%.2f, dbp=%.2f", sbp, dbp));
         }
 
-        Intent ret=new Intent();
-        ret.putExtra("BP_MAX",sbp);
-        ret.putExtra("BP_MIN",dbp);
-        setResult(Activity.RESULT_OK,ret);
+        Intent ret = new Intent();
+        ret.putExtra("BP_MAX", sbp);
+        ret.putExtra("BP_MIN", dbp);
+        setResult(Activity.RESULT_OK, ret);
         finish();
     }
 
