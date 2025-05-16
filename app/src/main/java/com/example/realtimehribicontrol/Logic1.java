@@ -122,6 +122,11 @@ public class Logic1 implements LogicProcessor {
             windowIndex = (windowIndex + 1) % WINDOW_SIZE;
         }
 
+        if (bpCallback != null) {
+            bpCallback.onFrame(correctedGreenValue, IBI);
+        }
+
+
         Log.d("Logic1", "normalizeAndSmoothData() final correctedGreenValue = " + correctedGreenValue);
         updateValueText(correctedGreenValue);
         updateChart(correctedGreenValue);
@@ -263,5 +268,11 @@ public class Logic1 implements LogicProcessor {
         bpmHistory.clear();
 
     }
+
+    public interface BPFrameCallback {
+        void onFrame(double correctedGreenValue, double smoothedIbiMs);
+    }
+    private BPFrameCallback bpCallback;
+    public void setBPFrameCallback(BPFrameCallback cb){ this.bpCallback = cb; }
 
 }

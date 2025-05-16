@@ -30,7 +30,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import android.graphics.Color;
 
-
 public class GreenValueAnalyzer implements LifecycleObserver {
 
     // ===== UI =====
@@ -62,6 +61,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     // ===== ハンドラ =====
     private final Handler ui = new Handler(Looper.getMainLooper());
+
+
+    private final RealtimeBP bpEstimator = new RealtimeBP();
 
     // ===== コンストラクタ =====
     public GreenValueAnalyzer(
@@ -121,6 +123,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     // ===== カメラ起動 =====
     public void startCamera() {
+        Logic1 l1 = (Logic1) logicMap.computeIfAbsent("Logic1", k -> new Logic1());
+        l1.setBPFrameCallback(bpEstimator::update);
+
         if (camOpen) return;
         ListenableFuture<ProcessCameraProvider> f =
                 ProcessCameraProvider.getInstance(ctx);
@@ -133,6 +138,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             } catch (Exception ignored) { }
         }, ContextCompat.getMainExecutor(ctx));  // ‘context’ → ‘ctx’
     }
+
 
     // Camera2Interop の Experimental API を利用するので OptIn を付与
     @OptIn(markerClass = androidx.camera.camera2.interop.ExperimentalCamera2Interop.class)
@@ -374,7 +380,18 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
     }
 
+    public double getLatestSmoothedBpm() {
+        if (recSmBpm.isEmpty()) {
+            return 0.0;
+        }
+        return recSmBpm.get(recSmBpm.size() - 1);
+    }
+
     // ===== カメラ操作 =====
     public void stop()            { camOpen = false; }
     public void restartCamera()   { stop(); startCamera(); }
+
+    public LogicProcessor getLogicProcessor(String key) {
+        return logicMap.get(key);
+    }
 }

@@ -28,7 +28,7 @@ public class MainActivity extends AppCompatActivity
 
     // ===== 定数 =====
     private static final int REQUEST_WRITE_STORAGE = 112, CAMERA_PERMISSION_REQUEST_CODE = 101;
-    private static final int MODE_1 = 1, MODE_2 = 2, MODE_3 = 3, MODE_4 = 4, MODE_9 = 9, MODE_10 = 10, REQ_BP = 201;
+    private static final int MODE_1 = 1, MODE_2 = 2, MODE_3 = 3, MODE_4 = 4, MODE_5 = 5, MODE_9 = 9, MODE_10 = 10, REQ_BP = 201;
 
     // ===== UI =====
     private Button startButton, resetButton, modeBtn, bpMeasureButton;
@@ -44,13 +44,18 @@ public class MainActivity extends AppCompatActivity
     // ===== ランチャー =====
     private ActivityResultLauncher<Intent> bpLauncher;
 
+    private awakeMIDI awakePlayer;
+    private RealtimeBP bpEstimator;
+    private TextView tvSBPRealtime, tvDBPRealtime;
+
     // ===== onCreate =====
-    @Override protected void onCreate(Bundle s) {
+    @Override protected void onCreate(Bundle s){
         super.onCreate(s);
         setContentView(R.layout.activity_main);
         requestCameraPermission();
         initUi();
         initAnalyzer();
+        initRealtimeBP();
         handler = new Handler();
     }
 
@@ -103,8 +108,10 @@ public class MainActivity extends AppCompatActivity
                     .replace(R.id.mode_select_fragment_container,
                             new ModeSelectionFragment())
                     .commit();
-            findViewById(R.id.mode_select_fragment_container)
-                    .setVisibility(View.VISIBLE);
+            FrameLayout container = findViewById(R.id.mode_select_fragment_container);
+            container.setVisibility(View.VISIBLE);
+            container.bringToFront();
+            container.requestLayout();
             v.setVisibility(View.GONE);
         });
 
@@ -159,6 +166,30 @@ public class MainActivity extends AppCompatActivity
             }
         }
     }
+
+    private void initRealtimeBP() {
+        // 1. インスタンス作成＆View のバインド
+        bpEstimator   = new RealtimeBP();
+        tvSBPRealtime = findViewById(R.id.tvSBPRealtime);
+        tvDBPRealtime = findViewById(R.id.tvDBPRealtime);
+
+        // 2. UI 更新リスナ登録
+        bpEstimator.setListener((sbp, dbp) ->
+                runOnUiThread(() -> {
+                    tvSBPRealtime.setText(
+                            String.format(Locale.getDefault(), "SBP : %.1f", sbp));
+                    tvDBPRealtime.setText(
+                            String.format(Locale.getDefault(), "DBP : %.1f", dbp));
+                })
+        );
+
+        // 3. Logic1 に波形コールバックを設定（既に analyzer 初期化済みの前提）
+        LogicProcessor lp = analyzer.getLogicProcessor("Logic1");
+        if (lp instanceof Logic1) {
+            ((Logic1) lp).setBPFrameCallback(bpEstimator::update);
+        }
+    }
+
 
     private void showPermissionSettingsDialog() {
         new AlertDialog.Builder(this)
@@ -236,10 +267,17 @@ public class MainActivity extends AppCompatActivity
         });
     }
 
+
     // ===== Mode初期化 =====
     private void initializeMode() {
-        if (mode == MODE_3 || mode == MODE_4)
+        if (mode == MODE_5) {
+            // raw フォルダに Rock16.mid を置いておく想定
+            Uri midiUri = Uri.parse("android.resource://" + getPackageName() + "/raw/rock16");
+            awakePlayer = new awakeMIDI(this, analyzer, null);
+        }
+        if (mode == MODE_3 || mode == MODE_4) {
             stimuliGen = new RandomStimuliGeneration(this);
+        }
     }
     private void setMode(int m) {
         runOnUiThread(() ->
@@ -251,13 +289,20 @@ public class MainActivity extends AppCompatActivity
         isRecording = true;
         Toast.makeText(this, "Start recording", Toast.LENGTH_SHORT).show();
         analyzer.startRecording();
-        if (mode == MODE_9 || mode == MODE_10) startTrainingLoop();
-        else {
+
+        if (mode == MODE_5) {
+            awakePlayer.start();    // BPM に合わせて MIDI 再生＆ループ
+        } else if (mode == MODE_9 || mode == MODE_10) {
+            startTrainingLoop();
+        } else {
             recordTask = this::startTrainingLoop;
             handler.postDelayed(recordTask, 60000);
         }
     }
     private void stopRecording() {
+        if (mode == MODE_5 && awakePlayer != null) {
+            awakePlayer.stop();
+        }
         isRecording = false;
         Toast.makeText(this, "Stop recording", Toast.LENGTH_SHORT).show();
         analyzer.stopRecording();
@@ -339,4 +384,5 @@ public class MainActivity extends AppCompatActivity
 
     // ===== getter =====
     public double getLatestIbiValue() { return analyzer.getLatestIbi(); }
+
 }

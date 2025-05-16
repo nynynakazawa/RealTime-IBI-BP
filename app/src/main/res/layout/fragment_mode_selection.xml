@@ -4,7 +4,10 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="#1e3333"
-    android:padding="16dp">
+    android:padding="16dp"
+    android:elevation="10dp"
+    android:focusable="true"
+    android:focusableInTouchMode="true">>
 
     <RadioGroup
         android:id="@+id/modeRadioGroup"
@@ -36,6 +39,12 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Mode 4 Random" />
+
+        <RadioButton
+            android:id="@+id/mode_5"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Mode 5 (Awake MIDI)" />
 
         <RadioButton
             android:id="@+id/mode_IBI_test"

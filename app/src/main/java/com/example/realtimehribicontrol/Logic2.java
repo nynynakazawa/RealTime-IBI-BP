@@ -9,15 +9,10 @@ public class Logic2 implements LogicProcessor {
     // 定数
     private static final int GREEN_VALUE_WINDOW_SIZE = 20;
     private static final int CORRECTED_GREEN_VALUE_WINDOW_SIZE = 20;
-    private static final int SAMPLE_RATE = 60;
-    private static final double LOW_PASS = 0.5;
-    private static final double HIGH_PASS = 5.0;
     private static final int WINDOW_SIZE = 240;
     private static final int BPM_HISTORY_SIZE = 20;
 
     // メンバー変数
-    private float averageAmbientLight = -1f;
-    private float reductionFactor = 0.50f;  // Logic1用: 0.50f
     private ArrayList<Double> greenValues = new ArrayList<>();
     private ArrayList<Double> filteredValues = new ArrayList<>();
     private ArrayList<Double> recentGreenValues = new ArrayList<>();
@@ -99,10 +94,10 @@ public class Logic2 implements LogicProcessor {
                 }
             }
             twiceSmoothedValue /= Math.min(smoothingWindowSize2, smoothedCorrectedGreenValues.size());
-            correctedGreenValue= twiceSmoothedValue * 2;
+            correctedGreenValue= twiceSmoothedValue;
 
             // window 配列に correctedGreenValue を記録し、ピーク検出に利用する
-            window[windowIndex] = correctedGreenValue;
+            window[windowIndex] = correctedGreenValue*3;
             windowIndex = (windowIndex + 1) % WINDOW_SIZE;
         }
 

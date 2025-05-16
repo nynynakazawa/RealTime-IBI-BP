@@ -18,7 +18,6 @@ import android.content.res.AssetFileDescriptor;
 import android.widget.TextView;
 import android.os.CountDownTimer;
 
-
 import androidx.annotation.NonNull;
 import androidx.annotation.OptIn;
 import androidx.appcompat.app.AppCompatActivity;
@@ -58,6 +57,10 @@ public class PressureAnalyze extends AppCompatActivity {
     private static final long EXPOSURE_NS = 8_000_000L;   // 露出時間 (8ms)
     private static final int ISO          = 800;          // ISO感度
     private static final int BLOCK_MS     = 8_000;        // 各圧力レベルの測定時間 (8秒)
+    // 「軽く押してください」だけ 20 秒にするための定数
+    private static final int FIRST_BLOCK_MS = 20_000;
+    // ブロック開始時刻
+    private long blockStartTime;
     private TextView tvCountdown;         // カウントダウン表示用
     private CountDownTimer countDownTimer; // 各ブロックのカウントダウンタイマー
     // ===== UI =====
@@ -74,21 +77,35 @@ public class PressureAnalyze extends AppCompatActivity {
     private int ampSamples = 0;                   // サンプル数
 
     // ===== HR & mNPV =====
-    private static final int SMOOTH_W  = 5;                // 平滑化ウィンドウ幅
-    private static final int LONG_W    = 40;               // 正規化ウィンドウ幅
-    private static final double PEAK_TH= 20.0;             // ピーク検出閾値
+
+    // ===== 信号補正用バッファ =====
+    private final List<Double> greenValues                   = new ArrayList<>();
+    private final List<Double> recentCorrectedGreenValues    = new ArrayList<>();
+    private final List<Double> smoothedCorrectedGreenValues  = new ArrayList<>();
+
+    // 一連の correctedGreenValue 保持数（お好みで調整）
+    private static final int CORRECTED_GREEN_VALUE_WINDOW_SIZE = 40;
     private final Deque<Double> recentG    = new ArrayDeque<>(); // 最近の生グリーン値
     private final Deque<Double> normWinG   = new ArrayDeque<>(); // 正規化用ウィンドウ
     private final List<Long>    peakTimes  = new ArrayList<>();  // ピーク時刻リスト
-    private double lastSmooth = Double.NaN;                    // 直前の平滑化値
+    private final List<Double> smoothedBpmHistory = new ArrayList<>();
+    private double lastSmoothedBpmValue = 0.0;
+    private static final int WINDOW_SIZE = 8;          // 8 フレーム分の履歴
+    private final double[] window = new double[WINDOW_SIZE];
+    private int windowIndex = 0;
+    private static final int REFRACTORY_FRAMES = 6;    // Refractory period ≈ 200 ms（30 fps 前提）
+    private int framesSinceLastPeak = REFRACTORY_FRAMES;
+    private final List<Double> bpmHistory = new ArrayList<>();
+    private static final int BPM_HISTORY_SIZE = 10;
+    private long lastPeakTime = 0;                     // 直前のピーク時刻
 
     // ===== UI Handler =====
     private final Handler uiH = new Handler(Looper.getMainLooper());
 
     // ===== ML =====
-    private Interpreter tflite;                   // TFLiteモデル用インタプリタ
-    private double[] linCoefSBP = { 80, 0.5, 0.30 };   // 線形回帰SBP係数 {切片, HR係数, mNPV係数}
-    private double[] linCoefDBP = { 50, 0.35, 0.25 };   // 線形回帰DBP係数
+    private Interpreter tflite;  // TFLiteモデル用インタプリタ
+    private double[] linCoefSBP = { 55, 0.5,  0.03 };   // 線形回帰SBP係数 {切片, HR係数, mNPV係数}
+    private double[] linCoefDBP = { 40, 0.3,  0.02 };  // 線形回帰DBP係数
 
     // ===== モデル読み込みメソッド =====
     private void loadModels() {
@@ -205,22 +222,18 @@ public class PressureAnalyze extends AppCompatActivity {
 
     // ===== 各ブロック８秒カウントダウン開始メソッド =====
     private void startBlockCountdown() {
-        // 既存のタイマーがあればキャンセル
         if (countDownTimer != null) {
             countDownTimer.cancel();
         }
-        // 8秒を1000msごとにカウントダウン
-        countDownTimer = new CountDownTimer(BLOCK_MS, 1000) {
-            @Override
-            public void onTick(long millisUntilFinished) {
-                // 整数秒を表示
-                int seconds = (int)(millisUntilFinished / 1000);
-                tvCountdown.setText(String.valueOf(seconds));
+        // ブロックごとに継続時間を切り替え
+        long duration = (blockIndex == 0) ? FIRST_BLOCK_MS : BLOCK_MS;
+        blockStartTime = System.currentTimeMillis();
+        countDownTimer = new CountDownTimer(duration, 1000) {
+            @Override public void onTick(long millisUntilFinished) {
+                tvCountdown.setText(String.valueOf((int)(millisUntilFinished/1000)));
             }
-            @Override
-            public void onFinish() {
+            @Override public void onFinish() {
                 tvCountdown.setText("0");
-                // タイマー終了後に次のブロック処理へ
                 uiH.post(blockSwitcher);
             }
         }.start();
@@ -264,31 +277,101 @@ public class PressureAnalyze extends AppCompatActivity {
         if (img != null && img.getFormat() == ImageFormat.YUV_420_888) {
             double g = extractGreen(img);  // 生グリーン値取得
 
-            // --- スムージング処理 ---
-            recentG.addLast(g);
-            if (recentG.size() > SMOOTH_W) recentG.removeFirst();
-            double sG = recentG.stream().mapToDouble(d->d).average().orElse(g);
+            // --- ①: 生グリーン値を補正バッファに追加 ---
+            greenValues.add(g);
 
-            // --- 正規化処理 ---
-            normWinG.addLast(sG);
-            if (normWinG.size() > LONG_W) normWinG.removeFirst();
-            double min = normWinG.stream().mapToDouble(d->d).min().orElse(sG);
-            double max = normWinG.stream().mapToDouble(d->d).max().orElse(sG);
-            double nG  = ((sG - min) / Math.max(max - min, 1)) * 100;
+            // --- ②: 新しい信号補正処理（既に組み込まれているもの）---
+            double correctedGreenValue = greenValues.get(greenValues.size() - 1) * 10;
 
-            sumAmp += nG;      // 合計に加算
-            ampSamples++;      // サンプル数インクリメント
+            if (recentCorrectedGreenValues.size() >= CORRECTED_GREEN_VALUE_WINDOW_SIZE) {
+                recentCorrectedGreenValues.remove(0);
+            }
+            recentCorrectedGreenValues.add(correctedGreenValue);
+
+            if (recentCorrectedGreenValues.size() >= CORRECTED_GREEN_VALUE_WINDOW_SIZE) {
+
+                double smoothedCorrectedGreenValue = 0.0;
+                int smoothingWindowSize1 = 6;
+                for (int i = 0; i < smoothingWindowSize1; i++) {
+                    int index = recentCorrectedGreenValues.size() - 1 - i;
+                    if (index >= 0) {
+                        smoothedCorrectedGreenValue += recentCorrectedGreenValues.get(index);
+                    }
+                }
+                smoothedCorrectedGreenValue /= Math.min(smoothingWindowSize1, recentCorrectedGreenValues.size());
+
+                if (smoothedCorrectedGreenValues.size() >= CORRECTED_GREEN_VALUE_WINDOW_SIZE) {
+                    smoothedCorrectedGreenValues.remove(0);
+                }
+                smoothedCorrectedGreenValues.add(smoothedCorrectedGreenValue);
+
+                double twiceSmoothedValue = 0.0;
+                int smoothingWindowSize2 = 4;
+                for (int i = 0; i < smoothingWindowSize2; i++) {
+                    int index = smoothedCorrectedGreenValues.size() - 1 - i;
+                    if (index >= 0) {
+                        twiceSmoothedValue += smoothedCorrectedGreenValues.get(index);
+                    }
+                }
+                twiceSmoothedValue /= Math.min(smoothingWindowSize2, smoothedCorrectedGreenValues.size());
+                correctedGreenValue = twiceSmoothedValue;
+            }
+
+            sumAmp += correctedGreenValue;
+            ampSamples++;
+
 
             Log.d("PressureAnalyze", String.format(
-                    "processFrame: rawG=%.2f, smoothG=%.2f, normalizedG=%.2f, sumAmp=%.2f, ampSamples=%d",
-                    g, sG, nG, sumAmp, ampSamples
+                    "processFrame: rawG=%.2f, correctedG=%.2f, sumAmp=%.2f, ampSamples=%d",
+                    g, correctedGreenValue, sumAmp, ampSamples
             ));
 
-            // --- ピーク検出（単純ゼロ交差） ---
-            if (!Double.isNaN(lastSmooth) && lastSmooth < PEAK_TH && sG >= PEAK_TH) {
-                peakTimes.add(System.currentTimeMillis());
+            // --- 高精度ピーク検出ロジック ---
+            window[windowIndex] = correctedGreenValue;
+            windowIndex = (windowIndex + 1) % WINDOW_SIZE;
+
+            double cur  = window[(windowIndex + WINDOW_SIZE - 1) % WINDOW_SIZE];
+            double p1   = window[(windowIndex + WINDOW_SIZE - 2) % WINDOW_SIZE];
+            double p2   = window[(windowIndex + WINDOW_SIZE - 3) % WINDOW_SIZE];
+            double p3   = window[(windowIndex + WINDOW_SIZE - 4) % WINDOW_SIZE];
+            double p4   = window[(windowIndex + WINDOW_SIZE - 5) % WINDOW_SIZE];
+
+            // 下降後に山形になっている箇所をピークと判断
+            if (framesSinceLastPeak >= REFRACTORY_FRAMES
+                    && p1 > p2 && p2 > p3 && p3 > p4 && p1 > cur) {
+                framesSinceLastPeak = 0;
+                long now = System.currentTimeMillis();
+
+                // --- ピーク時刻の記録＆BPM検出＋平滑化（最初の12秒でも実行）---
+                peakTimes.add(now);
+                if (lastPeakTime != 0) {
+                    double intervalSec = (now - lastPeakTime) / 1000.0;   // RR間隔
+                    if (intervalSec > 0.4 && intervalSec < 1.5) {
+                        double newBPM = 60.0 / intervalSec;
+
+                        if (bpmHistory.size() >= BPM_HISTORY_SIZE) {
+                            bpmHistory.remove(0);
+                        }
+                        bpmHistory.add(newBPM);
+
+                        double prev = smoothedBpmHistory.isEmpty()
+                                ? newBPM
+                                : smoothedBpmHistory.get(smoothedBpmHistory.size() - 1);
+                        double smoothedBpmValue = (prev + newBPM) / 2.0;
+                        smoothedBpmHistory.add(smoothedBpmValue);
+                        lastSmoothedBpmValue = smoothedBpmValue;
+                    }
+                }
+                lastPeakTime = now;
+
+                // --- sumAmp／ampSamples は最後の8秒のみ反映 ---
+                if (blockIndex != 0
+                        || now >= blockStartTime + (FIRST_BLOCK_MS - BLOCK_MS)) {
+                    sumAmp += correctedGreenValue;
+                    ampSamples++;
+                }
             }
-            lastSmooth = sG;
+            framesSinceLastPeak++;
         }
         proxy.close(); // リソース解放
     }
@@ -330,7 +413,12 @@ public class PressureAnalyze extends AppCompatActivity {
         // --- mNPV は3ブロック平均振幅の平均 ---
         double meanNPV = DoubleStream.of(amps).average().orElse(1);
 
-        // --- ML or 線形回帰で推定 ---
+        // --- LOG ---
+        Log.d("PressureAnalyze", String.format(
+                "CALIB: meanHR=%.2f, meanNPV=%.2f", meanHR, meanNPV
+        ));
+
+        // --- ML or 線形回帰で推定(現在は線形回帰) ---
         double sbp, dbp;
         if (tflite != null) {
             float[] in  = { (float) meanHR, (float) meanNPV };
