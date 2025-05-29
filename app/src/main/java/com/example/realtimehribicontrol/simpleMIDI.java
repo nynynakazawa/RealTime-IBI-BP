@@ -7,38 +7,45 @@ import android.media.PlaybackParams;
 import android.net.Uri;
 import android.os.Handler;
 import android.util.Log;
+import android.content.Context;
+import android.os.Vibrator;
+import android.os.VibrationEffect;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Deque;
 
 /**
- * awakeMIDI
+ * simpleMIDI
  * ────────────────────────────────────────
  * • MediaPlayer で MIDI をループ再生
  * • 最新3回の Smoothed BPM 平均＋10% でテンポ調整
  * • API31+ 端末では HapticEffectController による音声同期ハプティクス
  */
-public class awakeMIDI {
-    private static final String TAG = "awakeMIDI";
+public class simpleMIDI {
+    private static final String TAG = "simpleMIDI";
 
     private final MediaPlayer player;
     private final Handler handler = new Handler();
 
     private Runnable hrPollTask;
+    private final Context ctx;
 
     private final int bars = 4;
     private final double baseTempo;
     private final Deque<Double> recentBpm = new ArrayDeque<>(3);
     private static final int BPM_HISTORY = 3;
-
+    private final double tempoOffsetRatio;
     private final GreenValueAnalyzer analyzer;
     private final HapticEffectController hapticController;
 
-    public awakeMIDI(Context ctx,
-                     GreenValueAnalyzer analyzer,
-                     Uri midiUri) {
+    public simpleMIDI(Context ctx,
+                      GreenValueAnalyzer analyzer,
+                      Uri midiUri,
+                      double tempoOffsetRatio) {
+        this.ctx = ctx;
         this.analyzer = analyzer;
+        this.tempoOffsetRatio = tempoOffsetRatio;   // 新フィールドに保存
         player = new MediaPlayer();
 
         // データソース設定（URI が null の場合は raw/rock16 をフォールバック）
@@ -47,7 +54,7 @@ public class awakeMIDI {
                 player.setDataSource(ctx, midiUri);
             } else {
                 AssetFileDescriptor afd =
-                        ctx.getResources().openRawResourceFd(R.raw.base);
+                        ctx.getResources().openRawResourceFd(R.raw.bass);
                 player.setDataSource(
                         afd.getFileDescriptor(),
                         afd.getStartOffset(),
@@ -83,7 +90,7 @@ public class awakeMIDI {
                     double sum = 0;
                     for (double b : recentBpm) sum += b;
                     double avg = sum / recentBpm.size();
-                    double target = avg * 1.1;
+                    double target = avg * (1.0 + tempoOffsetRatio);  // ±任意オフセット
                     updateTempoSafely(target);
                 }
                 handler.postDelayed(hrPollTask, 1000);
@@ -93,14 +100,22 @@ public class awakeMIDI {
 
     /** 再生開始 **/
     public void start() {
-        player.setLooping(false); // 明示的に false
-        player.setOnCompletionListener(mp -> {
-            mp.seekTo(0);
-            mp.start();  // 再スタートでループ
-        });
+        // MediaPlayer の組み込みループ機能を使って、終了直後にシームレスに再生をループ
+        player.setLooping(true);
         player.start();
+
+        // --- 振動の強度を指定できるように VibrationEffect を生成して再生 ---
+        Vibrator vibrator = (Vibrator) ctx.getSystemService(Context.VIBRATOR_SERVICE);
+        if (vibrator != null && vibrator.hasVibrator()) {
+            // 振動の強度を最大 (1–255 の範囲) = 255 を指定
+            VibrationEffect effect = VibrationEffect.createOneShot(50, 255);
+            vibrator.vibrate(effect);
+        }
+
+        // 既存のハプティクスコントローラーも動かしたい場合
         hapticController.start();
-        handler.post(hrPollTask); // 心拍ポーリングは継続
+
+        handler.post(hrPollTask);
     }
 
     /** 再生停止 **/

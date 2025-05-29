@@ -28,12 +28,12 @@ public class MainActivity extends AppCompatActivity
 
     // ===== 定数 =====
     private static final int REQUEST_WRITE_STORAGE = 112, CAMERA_PERMISSION_REQUEST_CODE = 101;
-    private static final int MODE_1 = 1, MODE_2 = 2, MODE_3 = 3, MODE_4 = 4, MODE_5 = 5, MODE_9 = 9, MODE_10 = 10, REQ_BP = 201;
+    private static final int MODE_1 = 1, MODE_2 = 2, MODE_3 = 3, MODE_4 = 4, MODE_5 = 5, MODE_6 = 6, MODE_9 = 9, MODE_10 = 10, REQ_BP = 201;
 
     // ===== UI =====
     private Button startButton, resetButton, modeBtn, bpMeasureButton;
     private EditText editTextName; private Spinner spinnerLogic;
-    private TextView tvBPMax, tvBPMin;
+    private TextView tvBPMax, tvBPMin,tvSBPRealtime,tvDBPRealtime, tvSBPAvg, tvDBPAvg;
 
     // ===== 解析と状態 =====
     private GreenValueAnalyzer analyzer; private RandomStimuliGeneration stimuliGen;
@@ -43,10 +43,8 @@ public class MainActivity extends AppCompatActivity
 
     // ===== ランチャー =====
     private ActivityResultLauncher<Intent> bpLauncher;
-
-    private awakeMIDI awakePlayer;
+    private simpleMIDI simpleMIDIPlayer;
     private RealtimeBP bpEstimator;
-    private TextView tvSBPRealtime, tvDBPRealtime;
 
     // ===== onCreate =====
     @Override protected void onCreate(Bundle s){
@@ -56,6 +54,7 @@ public class MainActivity extends AppCompatActivity
         initUi();
         initAnalyzer();
         initRealtimeBP();
+        analyzer.setBpEstimator(bpEstimator);
         handler = new Handler();
     }
 
@@ -115,19 +114,12 @@ public class MainActivity extends AppCompatActivity
             v.setVisibility(View.GONE);
         });
 
-        startButton.setOnClickListener(v -> {
-            if (mode != -1) { initializeMode(); startRecording(); }
-            else Toast.makeText(this, "Please select a mode",
-                    Toast.LENGTH_SHORT).show();
-        });
+        startButton.setOnClickListener(v -> startRecording());
+
         resetButton.setOnClickListener(v -> analyzer.reset());
         bpMeasureButton.setOnClickListener(v ->
                 bpLauncher.launch(new Intent(this, PressureAnalyze.class))
         );
-
-        requestWritePermission();
-        if (Settings.System.canWrite(this)) setBrightness(255);
-        else startActivity(new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS));
     }
 
     // ===== Analyzer初期化 =====
@@ -172,16 +164,20 @@ public class MainActivity extends AppCompatActivity
         bpEstimator   = new RealtimeBP();
         tvSBPRealtime = findViewById(R.id.tvSBPRealtime);
         tvDBPRealtime = findViewById(R.id.tvDBPRealtime);
+        tvSBPAvg      = findViewById(R.id.tvSBPAvg);
+        tvDBPAvg      = findViewById(R.id.tvDBPAvg);
 
         // 2. UI 更新リスナ登録
-        bpEstimator.setListener((sbp, dbp) ->
-                runOnUiThread(() -> {
-                    tvSBPRealtime.setText(
-                            String.format(Locale.getDefault(), "SBP : %.1f", sbp));
-                    tvDBPRealtime.setText(
-                            String.format(Locale.getDefault(), "DBP : %.1f", dbp));
-                })
-        );
+        bpEstimator.setListener((sbp, dbp, sbpAvg, dbpAvg) -> runOnUiThread(() -> {
+            tvSBPRealtime.setText(String.format(Locale.getDefault(),
+                    "SBP : %.1f", sbp));
+            tvDBPRealtime.setText(String.format(Locale.getDefault(),
+                    "DBP : %.1f", dbp));
+            tvSBPAvg.setText(String.format(Locale.getDefault(),
+                    "SBP(Average) : %.1f", sbpAvg));
+            tvDBPAvg.setText(String.format(Locale.getDefault(),
+                    "DBP(Average) : %.1f", dbpAvg));
+        }));
 
         // 3. Logic1 に波形コールバックを設定（既に analyzer 初期化済みの前提）
         LogicProcessor lp = analyzer.getLogicProcessor("Logic1");
@@ -230,32 +226,6 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
-    // ===== 書き込み許可 =====
-    private void requestWritePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                Intent i = new Intent(
-                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-                i.setData(Uri.parse("package:" + getPackageName()));
-                startActivityForResult(i, REQUEST_WRITE_STORAGE);
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                checkSelfPermission(
-                        android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                        != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(
-                    new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE},
-                    REQUEST_WRITE_STORAGE);
-        }
-    }
-
-    // ===== 画面輝度 =====
-    private void setBrightness(int b) {
-        ContentResolver c = getContentResolver();
-        Settings.System.putInt(c, Settings.System.SCREEN_BRIGHTNESS, b);
-        WindowManager.LayoutParams lp = getWindow().getAttributes();
-        lp.screenBrightness = b / 255f; getWindow().setAttributes(lp);
-    }
 
     // ===== BP表示更新 =====
     private void updateBPRange(double max, double min) {
@@ -268,17 +238,6 @@ public class MainActivity extends AppCompatActivity
     }
 
 
-    // ===== Mode初期化 =====
-    private void initializeMode() {
-        if (mode == MODE_5) {
-            // raw フォルダに Rock16.mid を置いておく想定
-            Uri midiUri = Uri.parse("android.resource://" + getPackageName() + "/raw/rock16");
-            awakePlayer = new awakeMIDI(this, analyzer, null);
-        }
-        if (mode == MODE_3 || mode == MODE_4) {
-            stimuliGen = new RandomStimuliGeneration(this);
-        }
-    }
     private void setMode(int m) {
         runOnUiThread(() ->
                 ((TextView) findViewById(R.id.tvMode)).setText("mode : " + m));
@@ -287,35 +246,81 @@ public class MainActivity extends AppCompatActivity
     // ===== Recording / Training =====
     private void startRecording() {
         isRecording = true;
-        Toast.makeText(this, "Start recording", Toast.LENGTH_SHORT).show();
         analyzer.startRecording();
+        Toast.makeText(this, "5分間の記録を開始しました", Toast.LENGTH_SHORT).show();
 
-        if (mode == MODE_5) {
-            awakePlayer.start();    // BPM に合わせて MIDI 再生＆ループ
-        } else if (mode == MODE_9 || mode == MODE_10) {
-            startTrainingLoop();
-        } else {
-            recordTask = this::startTrainingLoop;
-            handler.postDelayed(recordTask, 60000);
-        }
+        // 5分間のカウントダウンタイマー＋ポップアップ表示
+        new CountDownTimer(5 * 60 * 1000, 1000) {
+            AlertDialog timerDialog;
+
+            @Override
+            public void onTick(long millisUntilFinished) {
+                String msg = "残り " + (millisUntilFinished / 1000) + " 秒";
+                if (timerDialog == null) {
+                    timerDialog = new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("記録中…")
+                            .setMessage(msg)
+                            .setCancelable(false)
+                            .create();
+                    timerDialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                    timerDialog.show();
+                } else {
+                    timerDialog.setMessage(msg);
+                }
+            }
+
+            @Override
+            public void onFinish() {
+                if (timerDialog != null) timerDialog.dismiss();
+
+                // 停止＆CSV保存
+                stopRecording();
+                saveIbiToCsv();
+                saveGreenValuesToCsv();
+                Toast.makeText(MainActivity.this,
+                        "記録を終了しました", Toast.LENGTH_SHORT).show();
+            }
+        }.start();
     }
+
     private void stopRecording() {
-        if (mode == MODE_5 && awakePlayer != null) {
-            awakePlayer.stop();
+        if ((mode == MODE_5 || mode == MODE_6) && simpleMIDIPlayer != null) {
+            simpleMIDIPlayer.stop();
         }
         isRecording = false;
         Toast.makeText(this, "Stop recording", Toast.LENGTH_SHORT).show();
         analyzer.stopRecording();
     }
-    private void startTrainingLoop() {
-        Toast.makeText(this, "Start your assignment", Toast.LENGTH_SHORT).show();
-        new Thread(new TrainingLoop()).start();
-    }
 
     // ===== Mode選択コールバック =====
-    @Override public void onModeSelected(int m) {
-        mode = m; setMode(m);
+    @Override
+    public void onModeSelected(int m) {
+        // ── 既に再生中なら停止 ──
+        if (simpleMIDIPlayer != null) {
+            simpleMIDIPlayer.stop();
+            simpleMIDIPlayer = null;
+        }
+        if (simpleMIDIPlayer != null) {
+            simpleMIDIPlayer.stop();
+            simpleMIDIPlayer = null;
+        }
+
+        // ── モード切替処理 ──
+        mode = m;
+        setMode(m);
         Toast.makeText(this, "Selected Mode: " + m, Toast.LENGTH_SHORT).show();
+
+        // ── モードに応じて即再生開始 ──
+        if (mode == MODE_5) {
+            // simpleMIDI を用いて心拍数+10% のテンポで再生
+            simpleMIDIPlayer =  new simpleMIDI(this, analyzer, null, +0.10);
+            simpleMIDIPlayer.start();
+        } else if (mode == MODE_6) {
+            // simpleMIDI を用いて心拍数-10% のテンポで再生
+            simpleMIDIPlayer = new simpleMIDI(this, analyzer, null, -0.10);
+            simpleMIDIPlayer.start();
+        }
+        // ※他のモードでは何もしない
     }
 
     // ===== 戻るボタン処理 =====
@@ -330,41 +335,6 @@ public class MainActivity extends AppCompatActivity
         } else super.onBackPressed();
     }
 
-    // ===== TrainingLoop内部クラス =====
-    private class TrainingLoop implements Runnable {
-        public void run() {
-            int cnt = 0;
-            try {
-                switch (mode) {
-                    case MODE_1: case MODE_2: Thread.sleep(1_800_000); break;
-                    case MODE_3: case MODE_4:
-                        while (true) {
-                            nowIbi = analyzer.getLatestIbi();
-                            RandomStimuliGeneration.RandomResult info =
-                                    stimuliGen.randomDec2Bin(nowIbi);
-                            stimuliList.add(info.stimuli);
-                            if (info.done) break;
-                        } break;
-                    case MODE_9: Thread.sleep(60_000); break;
-                    case MODE_10:
-                        while (cnt < 20) {
-                            analyzer.startRecording(); Thread.sleep(20_000);
-                            analyzer.stopRecording(); saveIbiToCsv(cnt);
-                            analyzer.clearRecordedData(); cnt++;
-                            if (cnt < 20) Thread.sleep(10_000);
-                        } break;
-                }
-            } catch (Exception e) {
-                Log.e("TrainingLoop", "err", e);
-            } finally {
-                runOnUiThread(() -> {
-                    analyzer.stopRecording();
-                    if (mode != MODE_10) saveIbiToCsv();
-                    saveGreenValuesToCsv(); setMode(-1);
-                });
-            }
-        }
-    }
 
     // ===== CSV保存 =====
     public void saveIbiToCsv() { saveIbiToCsv(-1); }
@@ -381,8 +351,5 @@ public class MainActivity extends AppCompatActivity
         analyzer.saveGreenValuesToCsv(editTextName.getText().toString()
                 + mode + ts);
     }
-
-    // ===== getter =====
-    public double getLatestIbiValue() { return analyzer.getLatestIbi(); }
 
 }

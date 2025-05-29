@@ -3,6 +3,10 @@ package com.example.realtimehribicontrol;
 import android.util.Log;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Photoplethysmography (PPG) の形態学的特徴量を用いた
@@ -25,10 +29,17 @@ public class RealtimeBP {
     /** 最後の拍動開始時刻 (ms) */
     private long lastBeatStart = System.currentTimeMillis();
 
+    /** 平均用ウィンドウ (10 拍) */
+    private static final int AVG_BEATS = 10;
+
+    /** 直近 N 拍の推定 SBP / DBP を保持 */
+    private final Deque<Double> sbpHist = new ArrayDeque<>(AVG_BEATS);
+    private final Deque<Double> dbpHist = new ArrayDeque<>(AVG_BEATS);
+
     /* ===== リスナ：推定結果受信用 ===== */
     public interface BPListener {
-        /** SBP / DBP 更新時に呼び出される */
-        void onBpUpdated(double sbp, double dbp);
+        void onBpUpdated(double sbp, double dbp,
+                         double sbpAvg, double dbpAvg);
     }
     private BPListener listener;
 
@@ -36,6 +47,9 @@ public class RealtimeBP {
     public void setListener(BPListener l) {
         this.listener = l;
     }
+
+
+    private double lastSbp, lastDbp, lastSbpAvg, lastDbpAvg;
 
     /**
      * Logic1 から毎フレーム呼び出される更新メソッド
@@ -99,9 +113,57 @@ public class RealtimeBP {
                 "SBP %.1f / DBP %.1f  (AI %.2f  HR %.1f  TTP/PW %.2f)",
                 sbp, dbp, ai, hr, ttp / pw));
 
-        // リスナへ結果を通知
-        if (listener != null) {
-            listener.onBpUpdated(sbp, dbp);
-        }
+        sbpHist.addLast(sbp); if (sbpHist.size() > AVG_BEATS) sbpHist.pollFirst();
+        dbpHist.addLast(dbp); if (dbpHist.size() > AVG_BEATS) dbpHist.pollFirst();
+
+        double sbpAvg = robustAverage(sbpHist);
+        double dbpAvg = robustAverage(dbpHist);
+
+        /* リスナ通知 (平均付き) */
+        /* リスナ通知 (平均付き) */
+        if (listener != null) listener.onBpUpdated(sbp, dbp, sbpAvg, dbpAvg);
+
+        // ── 最新推定値を保存 ──
+        lastSbp    = sbp;
+        lastDbp    = dbp;
+        lastSbpAvg = sbpAvg;
+        lastDbpAvg = dbpAvg;
     }
+
+
+    private double robustAverage(Deque<Double> hist) {
+        List<Double> list = new ArrayList<>(hist);
+        if (list.isEmpty()) return 0.0;
+
+        // 1) 中央値を求める
+        Collections.sort(list);
+        double median = list.get(list.size() / 2);
+
+        // 2) 偏差リストを作成し、その中央値 (MAD) を求める
+        List<Double> deviations = list.stream()
+                .map(v -> Math.abs(v - median))
+                .sorted()
+                .collect(Collectors.toList());
+        double mad = deviations.get(deviations.size() / 2);
+
+        // 3) 閾値 = 3 × MAD (ハンペルフィルタ相当)
+        double threshold = 3 * mad;
+
+        // 4) 中央値±閾値内のデータだけフィルタ
+        List<Double> filtered = list.stream()
+                .filter(v -> Math.abs(v - median) <= threshold)
+                .collect(Collectors.toList());
+
+        // 5) フィルタ後の平均を返す (全て除外された場合は median を返す)
+        return filtered.stream()
+                .mapToDouble(v -> v)
+                .average()
+                .orElse(median);
+    }
+
+    public double getLastSbp()    { return lastSbp; }
+    public double getLastDbp()    { return lastDbp; }
+    public double getLastSbpAvg() { return lastSbpAvg; }
+    public double getLastDbpAvg() { return lastDbpAvg; }
+
 }

@@ -126,8 +126,6 @@ public class Logic1 implements LogicProcessor {
             bpCallback.onFrame(correctedGreenValue, IBI);
         }
 
-
-        Log.d("Logic1", "normalizeAndSmoothData() final correctedGreenValue = " + correctedGreenValue);
         updateValueText(correctedGreenValue);
         updateChart(correctedGreenValue);
 

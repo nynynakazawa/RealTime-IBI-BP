@@ -207,6 +207,28 @@
                     android:textSize="20dp"
                     android:textColor="#78CCCC"/>
             </TableRow>
+
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+
+                <TextView
+                    android:id="@+id/tvSBPAvg"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SBP(Average) : --"
+                    android:textSize="20dp"
+                    android:textColor="#78CCCC"/>
+
+                <TextView
+                    android:id="@+id/tvDBPAvg"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="DBP(Average) : --"
+                    android:textSize="20dp"
+                    android:textColor="#78CCCC"/>
+            </TableRow>
         </TableLayout>
 
         <!-- ボタン群 -->

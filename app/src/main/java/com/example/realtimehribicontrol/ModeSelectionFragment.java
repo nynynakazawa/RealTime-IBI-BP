@@ -24,6 +24,7 @@ public class ModeSelectionFragment extends Fragment {
     private static final int MODE_3 = 3;
     private static final int MODE_4 = 4;
     private static final int MODE_5 = 5;
+    private static final int MODE_6 = 6;
     private static final int MODE_9 = 9;
     private static final int MODE_10 = 10;
 
@@ -76,7 +77,9 @@ public class ModeSelectionFragment extends Fragment {
             return MODE_4;
         } else if (selectedId == R.id.mode_5) {
             return MODE_5;
-        } else if (selectedId == R.id.mode_IBI_test) {
+        } else if (selectedId == R.id.mode_6) {
+            return MODE_6;
+        }else if (selectedId == R.id.mode_IBI_test) {
             return MODE_9;
         } else if (selectedId == R.id.mode_20sec) {
             return MODE_10;

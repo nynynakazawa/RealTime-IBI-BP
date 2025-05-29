@@ -56,14 +56,20 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private double  IBI;
 
     // ===== ロジック =====
+    // ===== ロジック =====
     private final Map<String, LogicProcessor> logicMap = new HashMap<>();
     private String activeLogic = "Logic6";
 
     // ===== ハンドラ =====
     private final Handler ui = new Handler(Looper.getMainLooper());
 
+    // 外部から注入されるBP推定器
+    private RealtimeBP bpEstimator;
 
-    private final RealtimeBP bpEstimator = new RealtimeBP();
+    // MainActivity側の同じReatimeBPをセット
+    public void setBpEstimator(RealtimeBP estimator) {
+        this.bpEstimator = estimator;
+    }
 
     // ===== コンストラクタ =====
     public GreenValueAnalyzer(
@@ -124,7 +130,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     // ===== カメラ起動 =====
     public void startCamera() {
         Logic1 l1 = (Logic1) logicMap.computeIfAbsent("Logic1", k -> new Logic1());
-        l1.setBPFrameCallback(bpEstimator::update);
+        if (bpEstimator != null) {
+            l1.setBPFrameCallback(bpEstimator::update);
+        }
 
         if (camOpen) return;
         ListenableFuture<ProcessCameraProvider> f =
@@ -321,16 +329,29 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
         try (FileWriter writer = new FileWriter(csvFile)) {
             // ヘッダー行
-            writer.append("IBI, bpmSD, Smoothed IBI, Smoothed BPM, Timestamp\n");
+            writer.append("IBI, bpmSD, Smoothed IBI, Smoothed BPM, SBP, DBP, SBP_Avg, DBP_Avg, Timestamp\n");
+
 
             // 記録データを CSV に書き出し
+            double prevIbi = Double.NaN;
             for (int i = 0; i < recIbi.size(); i++) {
+                double ibi = recIbi.get(i);
+                // IBI が更新されていない場合は行を追加しない
+                if (!Double.isNaN(prevIbi) && Double.compare(ibi, prevIbi) == 0) {
+                    continue;
+                }
+                prevIbi = ibi;
+
                 String ts = sdf.format(new Date(recIbiTs.get(i)));
                 writer
                         .append(String.format(Locale.getDefault(), "%.2f", recIbi.get(i))).append(", ")
                         .append(String.format(Locale.getDefault(), "%.2f", recSd.get(i))).append(", ")
                         .append(String.format(Locale.getDefault(), "%.2f", recSmIbi.get(i))).append(", ")
                         .append(String.format(Locale.getDefault(), "%.2f", recSmBpm.get(i))).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", bpEstimator.getLastSbp())).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", bpEstimator.getLastDbp())).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", bpEstimator.getLastSbpAvg())).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", bpEstimator.getLastDbpAvg())).append(", ")
                         .append(ts)
                         .append("\n");
             }
@@ -346,6 +367,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             );
         }
     }
+
     public void saveGreenValuesToCsv(String name) {
         saveCsv(name + "_Green",
                 Arrays.asList("Green", "Timestamp"),

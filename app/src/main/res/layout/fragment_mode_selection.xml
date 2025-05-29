@@ -13,7 +13,7 @@
         android:id="@+id/modeRadioGroup"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginLeft="150dp"
+        android:layout_marginLeft="100dp"
         android:layout_marginTop="120dp">
 
         <RadioButton
@@ -45,6 +45,12 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Mode 5 (Awake MIDI)" />
+
+        <RadioButton
+            android:id="@+id/mode_6"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Mode 6 (Relax MIDI)" />
 
         <RadioButton
             android:id="@+id/mode_IBI_test"
