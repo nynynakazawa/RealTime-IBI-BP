@@ -163,6 +163,11 @@ public class Logic1 implements LogicProcessor {
                     lastPeakTime = currentTime;
                     updateCount++;
 
+                    // IBI 更新が終わった直後にだけ、BP 推定用コールバックを呼び出す
+                    if (bpCallback != null) {
+                        bpCallback.onFrame(correctedGreenValue, IBI);
+                    }
+
                     return new LogicResult(correctedGreenValue, IBI, bpmValue, bpmSD);
                 }
             }

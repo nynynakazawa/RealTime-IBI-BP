@@ -54,8 +54,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     // ===== 状態 =====
     private boolean camOpen;
     private double  IBI;
+    private boolean isRecordingActive = false;
 
-    // ===== ロジック =====
     // ===== ロジック =====
     private final Map<String, LogicProcessor> logicMap = new HashMap<>();
     private String activeLogic = "Logic6";
@@ -196,29 +196,40 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             if (lp != null) {
                 LogicResult r = lp.processGreenValueData(g);
 
-                recValue.add(r.getCorrectedGreenValue());
-                recIbi.add(r.getIbi());
-                recSd.add(r.getBpmSd());
-                recValTs.add(System.currentTimeMillis());
-                recIbiTs.add(System.currentTimeMillis());
+                // ★ isRecordingActive フラグが true の場合のみデータを記録
+                if (isRecordingActive) {
+                    recValue.add(r.getCorrectedGreenValue());
+                    recIbi.add(r.getIbi());
+                    recSd.add(r.getBpmSd());
+                    recValTs.add(System.currentTimeMillis());
+                    recIbiTs.add(System.currentTimeMillis());
 
-                lp.calculateSmoothedValueRealTime(
-                        r.getIbi(), r.getBpmSd());
+                    lp.calculateSmoothedValueRealTime(
+                            r.getIbi(), r.getBpmSd());
 
-                double smI = lp.getLastSmoothedIbi();
-                double smB = (60_000) / smI;
+                    double smI = lp.getLastSmoothedIbi();
+                    double smB = (60_000) / smI;
 
-                recSmIbi.add(smI);
-                recSmBpm.add(smB);
-
+                    recSmIbi.add(smI);
+                    recSmBpm.add(smB);
+                }
+                // ★ IBIの更新とUI更新は記録状態に関わらず行う (リアルタイム表示のため)
                 IBI = r.getIbi();
+                double currentSmI = lp.getLastSmoothedIbi(); // 記録していなくても平滑化IBIは計算される可能性があるため取得
+                double currentSmB = (currentSmI > 0) ? (60_000 / currentSmI) : 0;
+
                 updateUi(r.getCorrectedGreenValue(),
                         r.getIbi(), r.getHeartRate(),
-                        r.getBpmSd(), smI, smB);
+                        r.getBpmSd(),
+                        // ★ UI表示用の平滑化値は、記録中はその時の最新、記録中でなければ直近の計算値を使う
+                        isRecordingActive ? recSmIbi.isEmpty() ? 0 : recSmIbi.get(recSmIbi.size()-1) : currentSmI,
+                        isRecordingActive ? recSmBpm.isEmpty() ? 0 : recSmBpm.get(recSmBpm.size()-1) : currentSmB
+                );
             }
         }
         proxy.close();
     }
+
 
     private double getGreen(Image img) {
         ByteBuffer u = img.getPlanes()[1].getBuffer();
@@ -302,6 +313,24 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
 
         // 記録データリストをクリア
+        clearRecordedData(); // ★ 既存のクリアメソッドを呼び出す
+
+        // UI を初期状態に更新
+        updateUi(0, 0, 0, 0, 0, 0);
+        isRecordingActive = false; // ★ リセット時に記録フラグもオフにする
+    }
+
+    // ★ 修正: startRecording メソッド
+    public void startRecording() {
+        clearRecordedData(); // 新しい記録を開始する前に、以前のデータをクリア
+        isRecordingActive = true;
+    }
+
+    public void stopRecording()  {
+        isRecordingActive = false;
+    }
+
+    public void clearRecordedData() {
         recValue.clear();
         recIbi.clear();
         recSd.clear();
@@ -309,40 +338,41 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         recSmBpm.clear();
         recValTs.clear();
         recIbiTs.clear();
-
-        // UI を初期状態に更新
-        updateUi(0, 0, 0, 0, 0, 0);
-    }
-
-    public void startRecording() {}
-    public void stopRecording()  {}
-    public void clearRecordedData() {
-        recValue.clear(); recIbi.clear(); recSd.clear();
-        recSmIbi.clear(); recSmBpm.clear();
     }
 
     // ===== CSV保存 =====
     public void saveIbiToCsv(String name) {
+
         SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_IBI_data.csv");
+
+        // recIbi が空の場合はトースト表示して終了
+        if (recIbi.isEmpty()) {
+            ui.post(() ->
+                    Toast.makeText(ctx, "記録された心拍間隔データがありません", Toast.LENGTH_SHORT).show()
+            );
+            return;
+        }
 
         try (FileWriter writer = new FileWriter(csvFile)) {
             // ヘッダー行
             writer.append("IBI, bpmSD, Smoothed IBI, Smoothed BPM, SBP, DBP, SBP_Avg, DBP_Avg, Timestamp\n");
 
-
             // 記録データを CSV に書き出し
             double prevIbi = Double.NaN;
             for (int i = 0; i < recIbi.size(); i++) {
                 double ibi = recIbi.get(i);
-                // IBI が更新されていない場合は行を追加しない
+                // IBI が更新されていない場合は行を追加しない (このロジックは維持)
                 if (!Double.isNaN(prevIbi) && Double.compare(ibi, prevIbi) == 0) {
+                    // ただし、タイムスタンプが異なる場合は別のイベントとして記録するべきかもしれない。
+                    // 現状はIBI値のみで判断している。
+                    // もし、同じIBIでも連続して記録したい場合はこの continue を削除または条件変更。
                     continue;
                 }
                 prevIbi = ibi;
 
-                String ts = sdf.format(new Date(recIbiTs.get(i)));
+                String ts = sdf.format(new Date(recIbiTs.get(i))); // recIbiTs を使う
                 writer
                         .append(String.format(Locale.getDefault(), "%.2f", recIbi.get(i))).append(", ")
                         .append(String.format(Locale.getDefault(), "%.2f", recSd.get(i))).append(", ")
@@ -356,7 +386,6 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                         .append("\n");
             }
 
-            // Handler 名は 'ui'（フィールド）を使います
             ui.post(() ->
                     Toast.makeText(ctx, "心拍間隔データ 保存完了", Toast.LENGTH_SHORT).show()
             );
@@ -369,6 +398,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     }
 
     public void saveGreenValuesToCsv(String name) {
+        // こちらも recValue が空の場合の処理を追加した方が親切
+        if (recValue.isEmpty()) {
+            ui.post(() ->
+                    Toast.makeText(ctx, "記録された画像信号データがありません", Toast.LENGTH_SHORT).show()
+            );
+            return;
+        }
         saveCsv(name + "_Green",
                 Arrays.asList("Green", "Timestamp"),
                 recValue, recValTs);

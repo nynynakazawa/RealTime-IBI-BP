@@ -13,11 +13,7 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
-
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        ndk {
-            abiFilters "arm64-v8a", "armeabi-v7a"
-        }
     }
 
     buildTypes {
@@ -52,15 +48,6 @@ dependencies {
     implementation "androidx.camera:camera-lifecycle:1.2.0"
     implementation "androidx.camera:camera-view:1.2.0"
     implementation "androidx.camera:camera-extensions:1.2.0"
-
-    implementation 'org.deeplearning4j:deeplearning4j-core:1.0.0-beta7'
-    implementation 'org.nd4j:nd4j-native:1.0.0-beta7'
-    implementation 'org.nd4j:nd4j-native-api:1.0.0-beta7'
-    implementation 'org.nd4j:nd4j-native:1.0.0-beta7:android-arm64'
-    implementation 'org.bytedeco:javacpp:1.5.7'
-    implementation 'org.bytedeco:openblas:0.3.9-1.5.7:android-arm64'
-    implementation 'org.bytedeco:leptonica:1.78.0-1.5.7:android-arm64'
-    implementation 'org.slf4j:slf4j-simple:1.7.32'
 
     implementation 'com.github.PhilJay:MPAndroidChart:v3.1.0'
 

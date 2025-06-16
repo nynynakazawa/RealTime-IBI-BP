@@ -28,7 +28,7 @@ public class MainActivity extends AppCompatActivity
 
     // ===== 定数 =====
     private static final int REQUEST_WRITE_STORAGE = 112, CAMERA_PERMISSION_REQUEST_CODE = 101;
-    private static final int MODE_1 = 1, MODE_2 = 2, MODE_3 = 3, MODE_4 = 4, MODE_5 = 5, MODE_6 = 6, MODE_9 = 9, MODE_10 = 10, REQ_BP = 201;
+    private static final int MODE_1 = 1, MODE_2 = 2, MODE_3 = 3, MODE_4 = 4, MODE_5 = 5, MODE_6 = 6, MODE_7=7, MODE_8=8, MODE_9 = 9, MODE_10 = 10, REQ_BP = 201;
 
     // ===== UI =====
     private Button startButton, resetButton, modeBtn, bpMeasureButton;
@@ -38,8 +38,6 @@ public class MainActivity extends AppCompatActivity
     // ===== 解析と状態 =====
     private GreenValueAnalyzer analyzer; private RandomStimuliGeneration stimuliGen;
     private int mode = -1; private boolean isRecording; private Handler handler; private Runnable recordTask;
-    private final List<String> stimuliList = new ArrayList<>();
-    private double nowIbi;
 
     // ===== ランチャー =====
     private ActivityResultLauncher<Intent> bpLauncher;
