@@ -305,7 +305,7 @@ public class MidiHaptic {
         float baseTempo = (midiFileBaseTempo > 0.0) ? (float) midiFileBaseTempo : 120f;
         float speed = (float) (targetTempo / baseTempo);
 
-        speed = Math.max(0.5f, Math.min(2.0f, speed));
+        speed = Math.max(0.5f, Math.min(4.0f, speed));
 
         try {
             PlaybackParams params = player.getPlaybackParams();

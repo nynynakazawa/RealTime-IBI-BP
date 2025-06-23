@@ -283,7 +283,7 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void stopRecording() {
-        if ((mode == MODE_5 || mode == MODE_6) && midiHapticPlayer != null) {
+        if ((mode >= MODE_3 && mode <= MODE_8) && midiHapticPlayer != null) {
             midiHapticPlayer.stop();
         }
         isRecording = false;
@@ -310,16 +310,34 @@ public class MainActivity extends AppCompatActivity
         Toast.makeText(this, "Selected Mode: " + m, Toast.LENGTH_SHORT).show();
 
         // ── モードに応じて即再生開始 ──
-        if (mode == MODE_5) {
-            // MidiHaptic を用いて心拍数+10% のテンポで再生
+        if (mode == MODE_3) {                                  // bass  +10%
             midiHapticPlayer = new MidiHaptic(this, analyzer, null, +0.10);
             midiHapticPlayer.start();
-        } else if (mode == MODE_6) {
-            // MidiHaptic を用いて心拍数-10% のテンポで再生
+
+        } else if (mode == MODE_4) {                           // bass  -10%
             midiHapticPlayer = new MidiHaptic(this, analyzer, null, -0.10);
             midiHapticPlayer.start();
+
+        } else if (mode == MODE_5) {                           // musica +10%
+            Uri u = Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.musica);
+            midiHapticPlayer = new MidiHaptic(this, analyzer, u, +1.20);
+            midiHapticPlayer.start();
+
+        } else if (mode == MODE_6) {                           // musicb +10%
+            Uri u = Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.musicb);
+            midiHapticPlayer = new MidiHaptic(this, analyzer, u, +1.20);
+            midiHapticPlayer.start();
+
+        } else if (mode == MODE_7) {                           // musicc -10%
+            Uri u = Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.musicc);
+            midiHapticPlayer = new MidiHaptic(this, analyzer, u, -0.10);
+            midiHapticPlayer.start();
+
+        } else if (mode == MODE_8) {                           // musicd -10%
+            Uri u = Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.musicd);
+            midiHapticPlayer = new MidiHaptic(this, analyzer, u, -0.10);
+            midiHapticPlayer.start();
         }
-        // ※他のモードでは何もしない
     }
 
     // ===== 戻るボタン処理 =====

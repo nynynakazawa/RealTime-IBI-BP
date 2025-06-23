@@ -20,49 +20,49 @@
             android:id="@+id/mode_1"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Mode 1(None)" />
+            android:text="Mode 1 (None)" />
 
         <RadioButton
             android:id="@+id/mode_2"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Mode 2(None)" />
+            android:text="Mode 2 (Random)" />
 
         <RadioButton
             android:id="@+id/mode_3"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Mode 3 Random" />
+            android:text="Mode 3 (Awake Dram)" />
 
         <RadioButton
             android:id="@+id/mode_4"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Mode 4 Random" />
+            android:text="Mode 4 (Relax Dram)" />
 
         <RadioButton
             android:id="@+id/mode_5"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Mode 5 (Awake Dram)" />
+            android:text="Mode 5 (Awake musicA)" />
 
         <RadioButton
             android:id="@+id/mode_6"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Mode 6 (Relax Dram)" />
+            android:text="Mode 6 (Awake musicB)" />
 
         <RadioButton
             android:id="@+id/mode_7"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Mode 7 (Awake Music)" />
+            android:text="Mode 7 (Relax musicC)" />
 
         <RadioButton
             android:id="@+id/mode_8"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Mode 8 (Relax Music)" />
+            android:text="Mode 8 (Relax MusicD)" />
 
         <RadioButton
             android:id="@+id/mode_IBI_test"
