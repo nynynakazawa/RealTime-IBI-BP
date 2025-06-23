@@ -195,6 +195,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
             if (lp != null) {
                 LogicResult r = lp.processGreenValueData(g);
+                lp.calculateSmoothedValueRealTime(r.getIbi(), r.getBpmSd());
 
                 // ★ isRecordingActive フラグが true の場合のみデータを記録
                 if (isRecordingActive) {

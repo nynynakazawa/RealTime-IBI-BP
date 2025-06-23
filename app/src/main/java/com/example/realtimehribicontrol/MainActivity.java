@@ -2,13 +2,11 @@
 package com.example.realtimehribicontrol;
 
 import android.app.Activity;
-import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.*;
 import android.provider.Settings;
-import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.*;
@@ -41,7 +39,8 @@ public class MainActivity extends AppCompatActivity
 
     // ===== ランチャー =====
     private ActivityResultLauncher<Intent> bpLauncher;
-    private simpleMIDI simpleMIDIPlayer;
+    private MidiHaptic midiHapticPlayer;
+
     private RealtimeBP bpEstimator;
 
     // ===== onCreate =====
@@ -54,6 +53,8 @@ public class MainActivity extends AppCompatActivity
         initRealtimeBP();
         analyzer.setBpEstimator(bpEstimator);
         handler = new Handler();
+        analyzer.startRecording();
+        analyzer.stopRecording();
     }
 
     // ===== UI初期化 =====
@@ -282,8 +283,8 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void stopRecording() {
-        if ((mode == MODE_5 || mode == MODE_6) && simpleMIDIPlayer != null) {
-            simpleMIDIPlayer.stop();
+        if ((mode == MODE_5 || mode == MODE_6) && midiHapticPlayer != null) {
+            midiHapticPlayer.stop();
         }
         isRecording = false;
         Toast.makeText(this, "Stop recording", Toast.LENGTH_SHORT).show();
@@ -294,13 +295,13 @@ public class MainActivity extends AppCompatActivity
     @Override
     public void onModeSelected(int m) {
         // ── 既に再生中なら停止 ──
-        if (simpleMIDIPlayer != null) {
-            simpleMIDIPlayer.stop();
-            simpleMIDIPlayer = null;
+        if (midiHapticPlayer != null) {
+            midiHapticPlayer.stop();
+            midiHapticPlayer = null;
         }
-        if (simpleMIDIPlayer != null) {
-            simpleMIDIPlayer.stop();
-            simpleMIDIPlayer = null;
+        if (midiHapticPlayer != null) {
+            midiHapticPlayer.stop();
+            midiHapticPlayer = null;
         }
 
         // ── モード切替処理 ──
@@ -310,13 +311,13 @@ public class MainActivity extends AppCompatActivity
 
         // ── モードに応じて即再生開始 ──
         if (mode == MODE_5) {
-            // simpleMIDI を用いて心拍数+10% のテンポで再生
-            simpleMIDIPlayer =  new simpleMIDI(this, analyzer, null, +0.10);
-            simpleMIDIPlayer.start();
+            // MidiHaptic を用いて心拍数+10% のテンポで再生
+            midiHapticPlayer = new MidiHaptic(this, analyzer, null, +0.10);
+            midiHapticPlayer.start();
         } else if (mode == MODE_6) {
-            // simpleMIDI を用いて心拍数-10% のテンポで再生
-            simpleMIDIPlayer = new simpleMIDI(this, analyzer, null, -0.10);
-            simpleMIDIPlayer.start();
+            // MidiHaptic を用いて心拍数-10% のテンポで再生
+            midiHapticPlayer = new MidiHaptic(this, analyzer, null, -0.10);
+            midiHapticPlayer.start();
         }
         // ※他のモードでは何もしない
     }
