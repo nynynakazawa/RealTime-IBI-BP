@@ -103,7 +103,7 @@ public class MidiHaptic {
             if (midiUri != null) {
                 player.setDataSource(ctx, midiUri);
             } else {
-                AssetFileDescriptor afd = ctx.getResources().openRawResourceFd(R.raw.bass);
+                AssetFileDescriptor afd = ctx.getResources().openRawResourceFd(R.raw.drum);
                 player.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
                 afd.close();
             }
@@ -231,9 +231,9 @@ public class MidiHaptic {
             float scale = event.velocity / 127.0f;
             if (isDrum) {
                 // 【修正⑤】VibrationEffect.PRIMITIVE_CLICK が正しい定数名
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, scale, 50);
+                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, scale, 30);
             } else {
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, scale * 0.7f, 30);
+                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_SPIN, scale, 50);
             }
             vibrator.vibrate(composition.compose());
         } else {
@@ -253,7 +253,7 @@ public class MidiHaptic {
             if (this.midiUri != null) {
                 inputStream = ctx.getContentResolver().openInputStream(this.midiUri);
             } else {
-                inputStream = ctx.getResources().openRawResource(R.raw.bass);
+                inputStream = ctx.getResources().openRawResource(R.raw.drum);
             }
             if (inputStream != null) {
                 parseMidiFile(inputStream);

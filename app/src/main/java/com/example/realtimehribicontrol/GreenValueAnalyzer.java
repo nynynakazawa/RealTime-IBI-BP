@@ -41,6 +41,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private final List<Entry> entries = new ArrayList<>();
     private final LineDataSet dataSet;
     private final LineData data;
+    private String activeLogic = "Logic1";
 
     // ===== 記録 =====
     private final List<Double> recValue = new ArrayList<>(),
@@ -58,7 +59,6 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     // ===== ロジック =====
     private final Map<String, LogicProcessor> logicMap = new HashMap<>();
-    private String activeLogic = "Logic6";
 
     // ===== ハンドラ =====
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -112,15 +112,11 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     // ===== ロジック選択 =====
     public void setActiveLogic(String n) {
-        activeLogic = n;
+        this.activeLogic = n;                // ★修正
         logicMap.computeIfAbsent(n, k -> {
             switch (k) {
-                case "Logic1": return new Logic1();
+                default:       return new Logic1();
                 case "Logic2": return new Logic2();
-                case "Logic3": return new Logic3();
-                case "Logic4": return new Logic4();
-                case "Logic5": return new Logic5();
-                default:       return new Logic6();
             }
         });
     }
@@ -307,10 +303,6 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         for (LogicProcessor lp : logicMap.values()) {
             if (lp instanceof Logic1)    ((Logic1)lp).reset();
             else if (lp instanceof Logic2)((Logic2)lp).reset();
-            else if (lp instanceof Logic3)((Logic3)lp).reset();
-            else if (lp instanceof Logic4)((Logic4)lp).reset();
-            else if (lp instanceof Logic5)((Logic5)lp).reset();
-            else if (lp instanceof Logic6)((Logic6)lp).reset();
         }
 
         // 記録データリストをクリア

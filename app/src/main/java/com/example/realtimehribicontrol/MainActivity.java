@@ -68,7 +68,7 @@ public class MainActivity extends AppCompatActivity
         tvBPMax = findViewById(R.id.tvBPMax);
         tvBPMin = findViewById(R.id.tvBPMin);
 
-        String[] logics = {"Logic1","Logic2","Logic3","Logic4","Logic5","Logic6"};
+        String[] logics = {"Logic1","Logic2"};
         ArrayAdapter<String> adapter = new ArrayAdapter<>(
                 this,
                 R.layout.spinner_item,               // 選択中アイテム用
@@ -86,7 +86,7 @@ public class MainActivity extends AppCompatActivity
             }
             @Override
             public void onNothingSelected(AdapterView<?> parent) {
-                analyzer.setActiveLogic("Logic6");
+                analyzer.setActiveLogic("Logic1");
             }
         });
 
