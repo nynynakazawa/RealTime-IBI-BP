@@ -122,6 +122,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     }
 
     public double getLatestIbi() { return IBI; }
+    
+    public double getCurrentIBI() { return IBI; }
 
     // ===== カメラ起動 =====
     public void startCamera() {

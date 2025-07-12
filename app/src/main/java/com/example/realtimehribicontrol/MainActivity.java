@@ -20,6 +20,10 @@ import androidx.fragment.app.Fragment;
 import com.github.mikephil.charting.charts.LineChart;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import android.os.Handler;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import android.os.Looper;
 
 public class MainActivity extends AppCompatActivity
         implements ModeSelectionFragment.OnModeSelectedListener {
@@ -42,6 +46,19 @@ public class MainActivity extends AppCompatActivity
     private MidiHaptic midiHapticPlayer;
 
     private RealtimeBP bpEstimator;
+
+    // ===== 強化学習関連 =====
+    private IBIControlEnv environment;
+    private DQNAgent agent1, agent2, agent3, agent4;
+    private boolean isRLMode = false;
+
+    // ===== ランダム刺激関連 =====
+    private RandomStimuliGeneration randomStimuliGen;
+    private Handler randomStimuliHandler = new Handler();
+    private Runnable randomStimuliRunnable;
+    private boolean isRandomStimuliMode = false;
+
+    private final ExecutorService rlExecutor = Executors.newFixedThreadPool(2);
 
     // ===== onCreate =====
     @Override protected void onCreate(Bundle s){
@@ -286,6 +303,17 @@ public class MainActivity extends AppCompatActivity
         if ((mode >= MODE_3 && mode <= MODE_8) && midiHapticPlayer != null) {
             midiHapticPlayer.stop();
         }
+        
+        // 強化学習モードの停止
+        if ((mode == MODE_9 || mode == MODE_10) && isRLMode) {
+            stopReinforcementLearning();
+        }
+        
+        // ランダム刺激モードの停止
+        if (mode == MODE_2 && isRandomStimuliMode) {
+            stopRandomStimuli();
+        }
+        
         isRecording = false;
         Toast.makeText(this, "Stop recording", Toast.LENGTH_SHORT).show();
         analyzer.stopRecording();
@@ -299,9 +327,11 @@ public class MainActivity extends AppCompatActivity
             midiHapticPlayer.stop();
             midiHapticPlayer = null;
         }
-        if (midiHapticPlayer != null) {
-            midiHapticPlayer.stop();
-            midiHapticPlayer = null;
+        if (isRLMode) {
+            stopReinforcementLearning();
+        }
+        if (isRandomStimuliMode) {
+            stopRandomStimuli();
         }
 
         // ── モード切替処理 ──
@@ -337,6 +367,21 @@ public class MainActivity extends AppCompatActivity
             Uri u = Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.musicd);
             midiHapticPlayer = new MidiHaptic(this, analyzer, u, -0.10);
             midiHapticPlayer.start();
+
+        } else if (mode == MODE_9) {                           // 交感神経優位モード（強化学習）
+            isRLMode = true;
+            initReinforcementLearning();
+            Toast.makeText(this, "交感神経優位モード（強化学習）を開始しました", Toast.LENGTH_SHORT).show();
+
+        } else if (mode == MODE_10) {                          // 副交感神経優位モード（強化学習）
+            isRLMode = true;
+            initReinforcementLearning();
+            Toast.makeText(this, "副交感神経優位モード（強化学習）を開始しました", Toast.LENGTH_SHORT).show();
+
+        } else if (mode == MODE_2) {                           // ランダム刺激
+            isRandomStimuliMode = true;
+            startRandomStimuli();
+            Toast.makeText(this, "ランダム刺激モードを開始しました", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -369,4 +414,106 @@ public class MainActivity extends AppCompatActivity
                 + mode + ts);
     }
 
+    // ===== 強化学習初期化 =====
+    private void initReinforcementLearning() {
+        // 環境とエージェントの初期化
+        environment = new IBIControlEnv(mode, this);
+        agent1 = new DQNAgent(3, 2);
+        agent2 = new DQNAgent(3, 2);
+        agent3 = new DQNAgent(3, 4);
+        agent4 = new DQNAgent(3, 16);
+        
+        // 環境のリセット
+        environment.reset();
+        
+        // 強化学習ループの開始
+        startReinforcementLearning();
+    }
+
+    // ===== 強化学習ループ =====
+    private void startReinforcementLearning() {
+        if (!isRLMode) return;
+
+        double currentIbi = analyzer.getCurrentIBI();
+        if (currentIbi <= 0) {
+            new Handler(Looper.getMainLooper()).postDelayed(this::startReinforcementLearning, 1000);
+            return;
+        }
+
+        int[] state = environment.getState();
+        int action1 = agent1.selectAction(state);
+        int action2 = agent2.selectAction(state);
+        int action3 = agent3.selectAction(state);
+        int action4 = agent4.selectAction(state);
+
+        rlExecutor.execute(() -> {
+            // ここはバックグラウンドスレッド
+            IBIControlEnv.getInfo stepInfo = environment.step(action1, action2, action3, action4);
+
+            // 振動刺激はすでに非同期化されているのでOK
+
+            // stepGetResultも重い場合はここで実行
+            double newIbi = analyzer.getCurrentIBI();
+            IBIControlEnv.StepResult result = environment.stepGetResult(newIbi, stepInfo.checkFlag, stepInfo.stimuli, stepInfo.place);
+
+            // UIスレッドに戻して次の処理
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                if (!isRLMode) return;
+
+                agent1.storeExperience(environment.getState(), action1, result.reward, result.state, result.done, 1.0);
+                agent2.storeExperience(environment.getState(), action2, result.reward, result.state, result.done, 1.0);
+                agent3.storeExperience(environment.getState(), action3, result.reward, result.state, result.done, 1.0);
+                agent4.storeExperience(environment.getState(), action4, result.reward, result.state, result.done, 1.0);
+
+                agent1.train(32);
+                agent2.train(32);
+                agent3.train(32);
+                agent4.train(32);
+
+                if (result.done) {
+                    environment.reset();
+                    Toast.makeText(this, "強化学習エピソード完了", Toast.LENGTH_SHORT).show();
+                }
+
+                if (isRLMode) {
+                    startReinforcementLearning();
+                }
+            }, 2000);
+        });
+    }
+
+    // ===== 強化学習停止 =====
+    private void stopReinforcementLearning() {
+        isRLMode = false;
+        if (environment != null) {
+            environment.reset();
+        }
+        rlExecutor.shutdownNow(); // スレッドプールを停止
+    }
+
+    // ===== ランダム刺激開始 =====
+    private void startRandomStimuli() {
+        if (randomStimuliGen == null) {
+            randomStimuliGen = new RandomStimuliGeneration(this);
+        }
+        randomStimuliRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (!isRandomStimuliMode) return;
+                double ibi = analyzer.getCurrentIBI();
+                if (ibi > 0) {
+                    randomStimuliGen.randomDec2Bin(ibi);
+                }
+                randomStimuliHandler.postDelayed(this, 2000); // 2秒ごとに刺激
+            }
+        };
+        randomStimuliHandler.post(randomStimuliRunnable);
+    }
+    // ===== ランダム刺激停止 =====
+    private void stopRandomStimuli() {
+        isRandomStimuliMode = false;
+        if (randomStimuliHandler != null && randomStimuliRunnable != null) {
+            randomStimuliHandler.removeCallbacks(randomStimuliRunnable);
+        }
+    }
 }

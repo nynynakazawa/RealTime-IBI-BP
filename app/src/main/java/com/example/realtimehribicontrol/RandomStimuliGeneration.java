@@ -3,6 +3,8 @@ package com.example.realtimehribicontrol;
 import android.content.Context;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.os.Handler;
+import android.os.Looper;
 
 import java.util.Random;
 
@@ -12,6 +14,8 @@ public class RandomStimuliGeneration {
     private static final long STIMULI_TIME_1 = 50;
     private static final long STIMULI_TIME_2 = 50;
     private static final int MAX_RANDOM_VALUE = 256;
+
+    private Handler vibHandler = new Handler(Looper.getMainLooper());
 
     private Random random = new Random();
     private Context context;
@@ -31,7 +35,7 @@ public class RandomStimuliGeneration {
             action /= 2;
         }
 
-        handleVibration(stimuli, nowIBI);
+        handleVibrationAsync(stimuli, nowIBI);
         if (count==50){
             done=true;
         }else {
@@ -58,25 +62,29 @@ public class RandomStimuliGeneration {
         }
     }
 
-    private void handleVibration(int[] stimuli, double nowIBI) {
+    private void handleVibrationAsync(int[] stimuli, double nowIBI) {
         double interval = nowIBI / 4;
         double interval1 = nowIBI / 4 - STIMULI_TIME_1;
         double interval2 = nowIBI / 4 - STIMULI_TIME_2;
-
         Vibrator vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
-
-        for (int j = 0; j < 5; j++) {
-            for (int i = 0; i < stimuli.length; i++) {
-                long stimuliTime = (i == 1 || i == 4) ? STIMULI_TIME_1 : STIMULI_TIME_2;
-                double sleepInterval = (i == 1 || i == 4) ? interval1 : interval2;
-
-                if (stimuli[i] == 1 && vibrator != null) {
-                    vibrateDevice(vibrator, stimuliTime);
-                    sleepThread(sleepInterval);
-                } else if (stimuli[i] == 0) {
-                    sleepThread(interval);
-                }
-            }
+    
+        runVibrationStep(vibrator, stimuli, 0, 0, interval, interval1, interval2);
+    }
+    
+    private void runVibrationStep(Vibrator vibrator, int[] stimuli, int j, int i, double interval, double interval1, double interval2) {
+        if (j >= 5) return;
+        if (i >= stimuli.length) {
+            vibHandler.postDelayed(() -> runVibrationStep(vibrator, stimuli, j + 1, 0, interval, interval1, interval2), 0);
+            return;
+        }
+        long stimuliTime = (i == 1 || i == 4) ? STIMULI_TIME_1 : STIMULI_TIME_2;
+        double sleepInterval = (i == 1 || i == 4) ? interval1 : interval2;
+    
+        if (stimuli[i] == 1 && vibrator != null) {
+            vibrateDevice(vibrator, stimuliTime);
+            vibHandler.postDelayed(() -> runVibrationStep(vibrator, stimuli, j, i + 1, interval, interval1, interval2), (long) sleepInterval);
+        } else {
+            vibHandler.postDelayed(() -> runVibrationStep(vibrator, stimuli, j, i + 1, interval, interval1, interval2), (long) interval);
         }
     }
 
@@ -85,13 +93,5 @@ public class RandomStimuliGeneration {
         VibrationEffect vibrationEffect = VibrationEffect.createOneShot(stimuliTime, VibrationEffect.DEFAULT_AMPLITUDE);
         vibrator.vibrate(vibrationEffect);
 
-    }
-
-    private void sleepThread(double interval) {
-        try {
-            Thread.sleep((long) interval);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
     }
 }

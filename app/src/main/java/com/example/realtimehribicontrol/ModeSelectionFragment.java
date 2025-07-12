@@ -85,9 +85,9 @@ public class ModeSelectionFragment extends Fragment {
             return MODE_7;
         } else if (selectedId == R.id.mode_8) {
             return MODE_8;
-        }else if (selectedId == R.id.mode_IBI_test) {
+        } else if (selectedId == R.id.mode_9) {
             return MODE_9;
-        } else if (selectedId == R.id.mode_20sec) {
+        } else if (selectedId == R.id.mode_10) {
             return MODE_10;
         } else {
             return -1;

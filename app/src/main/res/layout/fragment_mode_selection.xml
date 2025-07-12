@@ -65,16 +65,16 @@
             android:text="Mode 8 (Relax MusicD)" />
 
         <RadioButton
-            android:id="@+id/mode_IBI_test"
+            android:id="@+id/mode_9"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Mode IBI test 1min " />
+            android:text="Mode 9 (Awake PER)" />
 
         <RadioButton
-            android:id="@+id/mode_20sec"
+            android:id="@+id/mode_10"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Mode 20 sec " />
+            android:text="Mode 10 (Relax PER)" />
 
         <RadioButton
             android:id="@+id/back"
