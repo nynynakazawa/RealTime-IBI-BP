@@ -9,10 +9,15 @@ public class Logic2 implements LogicProcessor {
     // 定数
     private static final int GREEN_VALUE_WINDOW_SIZE = 20;
     private static final int CORRECTED_GREEN_VALUE_WINDOW_SIZE = 20;
+    private static final int SAMPLE_RATE = 60;
+    private static final double LOW_PASS = 0.5;
+    private static final double HIGH_PASS = 5.0;
     private static final int WINDOW_SIZE = 240;
     private static final int BPM_HISTORY_SIZE = 20;
 
     // メンバー変数
+    private float averageAmbientLight = -1f;
+    private float reductionFactor = 0.50f;  // Logic1用: 0.50f
     private ArrayList<Double> greenValues = new ArrayList<>();
     private ArrayList<Double> filteredValues = new ArrayList<>();
     private ArrayList<Double> recentGreenValues = new ArrayList<>();
@@ -44,6 +49,13 @@ public class Logic2 implements LogicProcessor {
         this.uiCallback = callback;
     }
 
+    // ----- BP推定用コールバック -----
+    public interface BPFrameCallback {
+        void onFrame(double correctedGreenValue, double smoothedIbiMs);
+    }
+    private BPFrameCallback bpCallback;
+    public void setBPFrameCallback(BPFrameCallback cb){ this.bpCallback = cb; }
+
     // ---------------------------------------------------
     // 【メソッド：統合処理：グリーン値データ処理】
     // ---------------------------------------------------
@@ -69,9 +81,8 @@ public class Logic2 implements LogicProcessor {
         recentCorrectedGreenValues.add(correctedGreenValue);
 
         if (recentCorrectedGreenValues.size() >= CORRECTED_GREEN_VALUE_WINDOW_SIZE) {
-
             double smoothedCorrectedGreenValue = 0.0;
-            int smoothingWindowSize1 = 6;
+            int smoothingWindowSize1 = 4;
             for (int i = 0; i < smoothingWindowSize1; i++) {
                 int index = recentCorrectedGreenValues.size() - 1 - i;
                 if (index >= 0) {
@@ -94,14 +105,34 @@ public class Logic2 implements LogicProcessor {
                 }
             }
             twiceSmoothedValue /= Math.min(smoothingWindowSize2, smoothedCorrectedGreenValues.size());
-            correctedGreenValue= twiceSmoothedValue;
+
+            // 長めのウィンドウを使って局所的な最小値と最大値を計算
+            // 例として、直近40サンプルから局所的な最小値と最大値を計算
+            int longWindowSize = 40;
+            int startIdx = Math.max(0, smoothedCorrectedGreenValues.size() - longWindowSize);
+            double localMin = Double.POSITIVE_INFINITY;
+            double localMax = Double.NEGATIVE_INFINITY;
+            for (int i = startIdx; i < smoothedCorrectedGreenValues.size(); i++) {
+                double v = smoothedCorrectedGreenValues.get(i);
+                if (v < localMin) localMin = v;
+                if (v > localMax) localMax = v;
+            }
+            double range = localMax - localMin;
+            if (range < 1.0) {
+                range = 1.0;  // ゼロ除算防止
+            }
+            correctedGreenValue = ((twiceSmoothedValue - localMin) / range) * 100.0;
+            correctedGreenValue = Math.max(0, Math.min(100, correctedGreenValue));
 
             // window 配列に correctedGreenValue を記録し、ピーク検出に利用する
-            window[windowIndex] = correctedGreenValue*3;
+            window[windowIndex] = correctedGreenValue;
             windowIndex = (windowIndex + 1) % WINDOW_SIZE;
         }
 
-        Log.d("Logic1", "normalizeAndSmoothData() final correctedGreenValue = " + correctedGreenValue);
+        if (bpCallback != null) {
+            bpCallback.onFrame(correctedGreenValue, IBI);
+        }
+
         updateValueText(correctedGreenValue);
         updateChart(correctedGreenValue);
 
@@ -138,6 +169,11 @@ public class Logic2 implements LogicProcessor {
                     }
                     lastPeakTime = currentTime;
                     updateCount++;
+
+                    // IBI 更新が終わった直後にだけ、BP 推定用コールバックを呼び出す
+                    if (bpCallback != null) {
+                        bpCallback.onFrame(correctedGreenValue, IBI);
+                    }
 
                     return new LogicResult(correctedGreenValue, IBI, bpmValue, bpmSD);
                 }
@@ -225,7 +261,6 @@ public class Logic2 implements LogicProcessor {
     }
 
     public void reset() {
-
         greenValues.clear();
         filteredValues.clear();
         recentGreenValues.clear();
@@ -240,7 +275,5 @@ public class Logic2 implements LogicProcessor {
         lastPeakTime = 0;
         updateCount = 0;
         bpmHistory.clear();
-
     }
-
 }

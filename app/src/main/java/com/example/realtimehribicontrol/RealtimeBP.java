@@ -57,6 +57,7 @@ public class RealtimeBP {
      * @param smoothedIbiMs       平滑化済み IBI (ms)
      */
     public void update(double correctedGreenValue, double smoothedIbiMs) {
+        Log.d("RealtimeBP", "update called: value=" + correctedGreenValue + ", IBI=" + smoothedIbiMs);
         // バッファにサンプルを追加
         beatBuf.addLast(correctedGreenValue);
         // 古いサンプルは捨てる
@@ -67,7 +68,7 @@ public class RealtimeBP {
         long now = System.currentTimeMillis();
 
         // IBI (ms) が経過したら 1 拍分とみなして処理
-        if (now - lastBeatStart >= smoothedIbiMs && beatBuf.size() > 15) {
+        if (now - lastBeatStart >= smoothedIbiMs && beatBuf.size() > 5) {
             estimateAndNotify(smoothedIbiMs);
             // バッファクリア & 拍動開始時刻を更新
             beatBuf.clear();
