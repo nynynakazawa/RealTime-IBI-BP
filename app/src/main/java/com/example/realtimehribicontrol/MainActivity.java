@@ -33,9 +33,10 @@ public class MainActivity extends AppCompatActivity
     private static final int MODE_1 = 1, MODE_2 = 2, MODE_3 = 3, MODE_4 = 4, MODE_5 = 5, MODE_6 = 6, MODE_7=7, MODE_8=8, MODE_9 = 9, MODE_10 = 10, REQ_BP = 201;
 
     // ===== UI =====
-    private Button startButton, resetButton, modeBtn, bpMeasureButton;
+    private Button startButton, resetButton, modeBtn/*, bpMeasureButton*/;
     private EditText editTextName; private Spinner spinnerLogic;
-    private TextView tvBPMax, tvBPMin,tvSBPRealtime,tvDBPRealtime, tvSBPAvg, tvDBPAvg;
+    private TextView /*tvBPMax, tvBPMin,*/tvSBPRealtime,tvDBPRealtime, tvSBPAvg, tvDBPAvg;
+    private TextView tvFNumber, tvISO, tvExposureTime, tvColorTemperature, tvWhiteBalance, tvFocusDistance, tvAperture, tvSensorSensitivity;
 
     // ===== 解析と状態 =====
     private GreenValueAnalyzer analyzer; private RandomStimuliGeneration stimuliGen;
@@ -58,7 +59,8 @@ public class MainActivity extends AppCompatActivity
     private Runnable randomStimuliRunnable;
     private boolean isRandomStimuliMode = false;
 
-    private final ExecutorService rlExecutor = Executors.newFixedThreadPool(2);
+    private ExecutorService rlExecutor;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     // ===== onCreate =====
     @Override protected void onCreate(Bundle s){
@@ -69,6 +71,21 @@ public class MainActivity extends AppCompatActivity
         initAnalyzer();
         initRealtimeBP();
         analyzer.setBpEstimator(bpEstimator);
+        
+        // Camera X API 色温度関連情報のコールバックを設定
+        analyzer.setCameraInfoCallback((fNumber, iso, exposureTime, colorTemperature, whiteBalanceMode, focusDistance, aperture, sensorSensitivity) -> {
+            runOnUiThread(() -> {
+                tvFNumber.setText(String.format(Locale.getDefault(), "F-Number: %.1f", fNumber));
+                tvISO.setText(String.format(Locale.getDefault(), "ISO: %d", iso));
+                tvExposureTime.setText(String.format(Locale.getDefault(), "Exposure: %d", exposureTime));
+                tvColorTemperature.setText(String.format(Locale.getDefault(), "Color Temp: %.0f", colorTemperature));
+                tvWhiteBalance.setText(String.format(Locale.getDefault(), "WB Mode: %d", whiteBalanceMode));
+                tvFocusDistance.setText(String.format(Locale.getDefault(), "Focus: %.2f", focusDistance));
+                tvAperture.setText(String.format(Locale.getDefault(), "Aperture: %.1f", aperture));
+                tvSensorSensitivity.setText(String.format(Locale.getDefault(), "Sensor: %.0f", sensorSensitivity));
+            });
+        });
+        
         handler = new Handler();
         analyzer.startRecording();
         analyzer.stopRecording();
@@ -81,9 +98,19 @@ public class MainActivity extends AppCompatActivity
         resetButton = findViewById(R.id.reset_button);
         editTextName = findViewById(R.id.editTextName);
         spinnerLogic = findViewById(R.id.spinnerLogicSelection);
-        bpMeasureButton = findViewById(R.id.btn_bp_measure);
-        tvBPMax = findViewById(R.id.tvBPMax);
-        tvBPMin = findViewById(R.id.tvBPMin);
+//        bpMeasureButton = findViewById(R.id.btn_bp_measure);
+//        tvBPMax = findViewById(R.id.tvBPMax);
+//        tvBPMin = findViewById(R.id.tvBPMin);
+        
+        // Camera X API 色温度関連情報のTextViewを初期化
+        tvFNumber = findViewById(R.id.tvFNumber);
+        tvISO = findViewById(R.id.tvISO);
+        tvExposureTime = findViewById(R.id.tvExposureTime);
+        tvColorTemperature = findViewById(R.id.tvColorTemperature);
+        tvWhiteBalance = findViewById(R.id.tvWhiteBalance);
+        tvFocusDistance = findViewById(R.id.tvFocusDistance);
+        tvAperture = findViewById(R.id.tvAperture);
+        tvSensorSensitivity = findViewById(R.id.tvSensorSensitivity);
 
         String[] logics = {"Logic1","Logic2"};
         ArrayAdapter<String> adapter = new ArrayAdapter<>(
@@ -107,7 +134,7 @@ public class MainActivity extends AppCompatActivity
             }
         });
 
-        bpLauncher = registerForActivityResult(
+        /*bpLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
                 r -> {
                     if (r.getResultCode() == Activity.RESULT_OK && r.getData() != null) {
@@ -116,7 +143,7 @@ public class MainActivity extends AppCompatActivity
                                 d.getDoubleExtra("BP_MIN", 0));
                         analyzer.restartCamera();
                     }
-                });
+                });*/
 
         modeBtn.setOnClickListener(v -> {
             getSupportFragmentManager().beginTransaction()
@@ -133,9 +160,9 @@ public class MainActivity extends AppCompatActivity
         startButton.setOnClickListener(v -> startRecording());
 
         resetButton.setOnClickListener(v -> analyzer.reset());
-        bpMeasureButton.setOnClickListener(v ->
+        /*bpMeasureButton.setOnClickListener(v ->
                 bpLauncher.launch(new Intent(this, PressureAnalyze.class))
-        );
+        );*/
     }
 
     // ===== Analyzer初期化 =====
@@ -228,30 +255,30 @@ public class MainActivity extends AppCompatActivity
     }
 
     // ===== onActivityResult =====
-    @Override protected void onActivityResult(int req, int res, Intent data) {
-        super.onActivityResult(req, res, data);
-        if (req == REQUEST_WRITE_STORAGE &&
-                !Environment.isExternalStorageManager())
-            Toast.makeText(this, "Permission denied.",
-                    Toast.LENGTH_SHORT).show();
-
-        if (req == REQ_BP && res == Activity.RESULT_OK && data != null) {
-            updateBPRange(data.getDoubleExtra("BP_MAX", 0),
-                    data.getDoubleExtra("BP_MIN", 0));
-            analyzer.startCamera();
-        }
-    }
+//    @Override protected void onActivityResult(int req, int res, Intent data) {
+//        super.onActivityResult(req, res, data);
+//        if (req == REQUEST_WRITE_STORAGE &&
+//                !Environment.isExternalStorageManager())
+//            Toast.makeText(this, "Permission denied.",
+//                    Toast.LENGTH_SHORT).show();
+//
+//        if (req == REQ_BP && res == Activity.RESULT_OK && data != null) {
+//            updateBPRange(data.getDoubleExtra("BP_MAX", 0),
+//                    data.getDoubleExtra("BP_MIN", 0));
+//            analyzer.startCamera();
+//        }
+//    }
 
 
     // ===== BP表示更新 =====
-    private void updateBPRange(double max, double min) {
+    /*private void updateBPRange(double max, double min) {
         runOnUiThread(() -> {
             tvBPMax.setText(String.format(Locale.getDefault(),
                     "BP Max : %.1f", max));
             tvBPMin.setText(String.format(Locale.getDefault(),
                     "BP Min : %.1f", min));
         });
-    }
+    }*/
 
 
     private void setMode(int m) {
@@ -426,7 +453,7 @@ public class MainActivity extends AppCompatActivity
         // 環境のリセット
         environment.reset();
         
-        // 強化学習ループの開始
+        rlExecutor = Executors.newSingleThreadExecutor();
         startReinforcementLearning();
     }
 
@@ -436,59 +463,53 @@ public class MainActivity extends AppCompatActivity
 
         double currentIbi = analyzer.getCurrentIBI();
         if (currentIbi <= 0) {
-            new Handler(Looper.getMainLooper()).postDelayed(this::startReinforcementLearning, 1000);
+            mainHandler.postDelayed(this::startReinforcementLearning, 500);
             return;
         }
 
         int[] state = environment.getState();
-        int action1 = agent1.selectAction(state);
-        int action2 = agent2.selectAction(state);
-        int action3 = agent3.selectAction(state);
-        int action4 = agent4.selectAction(state);
+        int a1 = agent1.selectAction(state);
+        int a2 = agent2.selectAction(state);
+        int a3 = agent3.selectAction(state);
+        int a4 = agent4.selectAction(state);
 
         rlExecutor.execute(() -> {
-            // ここはバックグラウンドスレッド
-            IBIControlEnv.getInfo stepInfo = environment.step(action1, action2, action3, action4);
-
-            // 振動刺激はすでに非同期化されているのでOK
-
-            // stepGetResultも重い場合はここで実行
+            // ── Heavy part on worker ──
+            IBIControlEnv.getInfo stepInfo = environment.step(a1, a2, a3, a4);
             double newIbi = analyzer.getCurrentIBI();
-            IBIControlEnv.StepResult result = environment.stepGetResult(newIbi, stepInfo.checkFlag, stepInfo.stimuli, stepInfo.place);
+            IBIControlEnv.StepResult r = environment.stepGetResult(
+                    newIbi, stepInfo.checkFlag, stepInfo.stimuli, stepInfo.place);
 
-            // UIスレッドに戻して次の処理
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                if (!isRLMode) return;
+            // store & train (heavy)  ─────
+            agent1.storeExperience(state, a1, r.reward, r.state, r.done, 1.0);
+            agent2.storeExperience(state, a2, r.reward, r.state, r.done, 1.0);
+            agent3.storeExperience(state, a3, r.reward, r.state, r.done, 1.0);
+            agent4.storeExperience(state, a4, r.reward, r.state, r.done, 1.0);
 
-                agent1.storeExperience(environment.getState(), action1, result.reward, result.state, result.done, 1.0);
-                agent2.storeExperience(environment.getState(), action2, result.reward, result.state, result.done, 1.0);
-                agent3.storeExperience(environment.getState(), action3, result.reward, result.state, result.done, 1.0);
-                agent4.storeExperience(environment.getState(), action4, result.reward, result.state, result.done, 1.0);
-
+            if (stepInfo.counter % 4 == 0) {            // 学習頻度を間引く
                 agent1.train(32);
                 agent2.train(32);
                 agent3.train(32);
                 agent4.train(32);
+            }
 
-                if (result.done) {
-                    environment.reset();
-                    Toast.makeText(this, "強化学習エピソード完了", Toast.LENGTH_SHORT).show();
-                }
+            if (r.done) environment.reset();
 
-                if (isRLMode) {
-                    startReinforcementLearning();
-                }
-            }, 2000);
+            // ── back to UI only forスケジューリング ──
+            mainHandler.postDelayed(() -> {
+                if (isRLMode) startReinforcementLearning();
+            }, 100);   // 100 ms 程度で十分滑らか
         });
     }
 
     // ===== 強化学習停止 =====
     private void stopReinforcementLearning() {
         isRLMode = false;
-        if (environment != null) {
-            environment.reset();
+        if (environment != null) environment.reset();
+        if (rlExecutor != null) {
+            rlExecutor.shutdown();
+            rlExecutor = null;
         }
-        rlExecutor.shutdownNow(); // スレッドプールを停止
     }
 
     // ===== ランダム刺激開始 =====

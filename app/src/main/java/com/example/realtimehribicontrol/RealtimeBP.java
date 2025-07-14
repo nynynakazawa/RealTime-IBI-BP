@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.Locale;
 
 /**
  * Photoplethysmography (PPG) の形態学的特徴量を用いた
@@ -16,7 +17,13 @@ import java.util.stream.Collectors;
  * 1. 1 拍分の correctedGreenValue（正規化済み PPG 振幅）をバッファリング
  * 2. 形態学的特徴: 最大振幅 (S), 拍末振幅 (D), time-to-peak (TTP), 拍幅 (PW)
  * 3. hemodynamic 特徴: オーグメンテーション指数 (AI = (S - D) / S), 心拍数 (HR)
- * 4. 線形回帰モデルで SBP / DBP を推定
+ * 4. ISO感度依存の誤差を補正した改良線形回帰モデルで SBP / DBP を推定
+ * 
+ * ─ 改良点 ─
+ * - ISO正規化: 参照ISO (600) を基準とした相対ISO値
+ * - 振幅補正: sNorm = sAmp * isoNorm
+ * - 追加説明変数: isoNorm, sNorm, relTTP
+ * - 動的ISO値の取得と適用
  */
 public class RealtimeBP {
 
@@ -35,6 +42,9 @@ public class RealtimeBP {
     /** 直近 N 拍の推定 SBP / DBP を保持 */
     private final Deque<Double> sbpHist = new ArrayDeque<>(AVG_BEATS);
     private final Deque<Double> dbpHist = new ArrayDeque<>(AVG_BEATS);
+    
+    /** 現在のISO値（動的に更新） */
+    private int currentISO = 600; // デフォルト値
 
     /* ===== リスナ：推定結果受信用 ===== */
     public interface BPListener {
@@ -46,6 +56,12 @@ public class RealtimeBP {
     /** リスナ登録メソッド */
     public void setListener(BPListener l) {
         this.listener = l;
+    }
+    
+    /** ISO値を更新するメソッド */
+    public void updateISO(int iso) {
+        this.currentISO = iso;
+        Log.d("RealtimeBP", "ISO updated: " + iso);
     }
 
 
@@ -104,15 +120,30 @@ public class RealtimeBP {
         double pw   = n;       // pulse width [サンプル数]
         double hr   = 60000.0 / ibiMs;  // 心拍数 [bpm]
 
-        // --- 線形回帰モデル (文献平均係数を仮設定) ---
-        final double a0 = 79,  a1 = 62,   a2 = 0.55, a3 = 0.24;  // SBP
-        final double b0 = 46,  b1 = 38,   b2 = 0.35, b3 = 0.17;  // DBP
-        double sbp = a0 + a1 * ai + a2 * hr + a3 * (ttp / pw);
-        double dbp = b0 + b1 * ai + b2 * hr + b3 * (ttp / pw);
+        // --- ISO正規化と補正 ---
+        double isoNorm = currentISO / 600.0; // 参照ISO (600) を基準に正規化
+        double sNorm = sAmp * isoNorm; // 振幅補正
+        
+        // --- 改良された線形回帰モデル（ISO感度依存の誤差を補正） ---
+        // SBP推定式: 62 + 55*ai + 0.60*hr + 18*relTTP + 0.12*sNorm + 5*isoNorm
+        // DBP推定式: 40 + 38*ai + 0.35*hr + 12*relTTP + 0.10*sNorm + 3*isoNorm
+        double relTTP = ttp / pw; // 相対的なtime-to-peak
+
+        // ai, hr, relTTP, sNorm をLogcatに出力
+        Log.d("RealtimeBP", String.format(Locale.getDefault(),
+                "特徴量: ai=%.4f, hr=%.2f, relTTP=%.4f, sNorm=%.4f",
+                ai, hr, relTTP, sNorm));
+        
+        final double a0 = 62, a1 = 55, a2 = 0.60, a3 = 18, a4 = 0.12, a5 = 5;  // SBP
+        final double b0 = 40, b1 = 38, b2 = 0.35, b3 = 12, b4 = 0.10, b5 = 3;  // DBP
+        
+        // sNormのみ使用（ISO補正済み）
+        double sbp = a0 + a1 * ai + a2 * hr + a3 * relTTP + a4 * sNorm;
+        double dbp = b0 + b1 * ai + b2 * hr + b3 * relTTP + b4 * sNorm;
 
         Log.d("RealtimeBP", String.format(
-                "SBP %.1f / DBP %.1f  (AI %.2f  HR %.1f  TTP/PW %.2f)",
-                sbp, dbp, ai, hr, ttp / pw));
+                "SBP %.1f / DBP %.1f  (AI %.2f  HR %.1f  TTP/PW %.2f  ISO %d  sNorm %.2f  isoNorm %.2f)",
+                sbp, dbp, ai, hr, relTTP, currentISO, sNorm, isoNorm));
 
         sbpHist.addLast(sbp); if (sbpHist.size() > AVG_BEATS) sbpHist.pollFirst();
         dbpHist.addLast(dbp); if (dbpHist.size() > AVG_BEATS) dbpHist.pollFirst();

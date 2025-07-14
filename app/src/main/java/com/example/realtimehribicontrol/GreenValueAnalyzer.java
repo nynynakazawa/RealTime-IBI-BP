@@ -6,6 +6,7 @@ import android.graphics.ImageFormat;
 import android.media.Image;
 import android.os.*;
 import android.hardware.camera2.CaptureRequest;
+import android.util.Log;
 import android.util.Range;
 import android.util.Size;
 import android.widget.TextView;
@@ -18,6 +19,14 @@ import androidx.core.content.ContextCompat;
 import androidx.lifecycle.LifecycleObserver;
 import androidx.lifecycle.LifecycleOwner;
 import androidx.camera.camera2.interop.Camera2Interop;
+import androidx.camera.camera2.interop.Camera2CameraInfo;
+import androidx.camera.camera2.interop.Camera2CameraControl;
+import androidx.camera.core.Preview;
+import androidx.camera.core.Camera;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.CaptureResult;
 import com.github.mikephil.charting.charts.LineChart;
 import com.github.mikephil.charting.components.XAxis;
 import com.github.mikephil.charting.components.YAxis;
@@ -29,6 +38,8 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
 import android.graphics.Color;
+import android.hardware.camera2.CameraCaptureSession;
+import android.hardware.camera2.TotalCaptureResult;
 
 public class GreenValueAnalyzer implements LifecycleObserver {
 
@@ -56,6 +67,17 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private boolean camOpen;
     private double  IBI;
     private boolean isRecordingActive = false;
+    
+    // カメラ設定値のキャッシュ
+    private float currentFNumber = 0.0f;
+    private int currentISO = 0;
+    private long currentExposureTime = 0;
+    private int currentWhiteBalanceMode = 0;
+    private float currentFocusDistance = 0.0f;
+    
+    // カメラ関連
+    private ProcessCameraProvider cameraProvider;
+    private CameraSelector cameraSelector;
 
     // ===== ロジック =====
     private final Map<String, LogicProcessor> logicMap = new HashMap<>();
@@ -69,6 +91,17 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     // MainActivity側の同じReatimeBPをセット
     public void setBpEstimator(RealtimeBP estimator) {
         this.bpEstimator = estimator;
+    }
+    
+    // Camera X API 色温度関連情報のコールバック
+    public interface CameraInfoCallback {
+        void onCameraInfoUpdated(float fNumber, int iso, long exposureTime, 
+                                float colorTemperature, int whiteBalanceMode, 
+                                float focusDistance, float aperture, float sensorSensitivity);
+    }
+    private CameraInfoCallback cameraInfoCallback;
+    public void setCameraInfoCallback(CameraInfoCallback callback) {
+        this.cameraInfoCallback = callback;
     }
 
     // ===== コンストラクタ =====
@@ -149,36 +182,141 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     // Camera2Interop の Experimental API を利用するので OptIn を付与
     @OptIn(markerClass = androidx.camera.camera2.interop.ExperimentalCamera2Interop.class)
     private void bindImageAnalysis(@NonNull ProcessCameraProvider cameraProvider) {
-        // ImageAnalysis のビルダー設定
         ImageAnalysis.Builder builder = new ImageAnalysis.Builder()
                 .setTargetResolution(new Size(240, 180))
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST);
 
-        // Camera2Interop を用いて FPS レンジを設定
-        Camera2Interop.Extender ext = new Camera2Interop.Extender<>(builder);
+        // Camera2InteropでCaptureCallbackを追加
+        Camera2Interop.Extender<ImageAnalysis> ext = new Camera2Interop.Extender<>(builder);
         ext.setCaptureRequestOption(
                 CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
                 new Range<>(30, 30));
+        ext.setSessionCaptureCallback(new CameraCaptureSession.CaptureCallback() {
+            @Override
+            public void onCaptureCompleted(@NonNull CameraCaptureSession session,
+                                           @NonNull CaptureRequest request,
+                                           @NonNull TotalCaptureResult result) {
+                // 動的な値を取得
+                Float aperture = result.get(CaptureResult.LENS_APERTURE);
+                Integer iso = result.get(CaptureResult.SENSOR_SENSITIVITY);
+                Long exposure = result.get(CaptureResult.SENSOR_EXPOSURE_TIME);
+                Integer wbMode = result.get(CaptureResult.CONTROL_AWB_MODE);
+                Float focus = result.get(CaptureResult.LENS_FOCUS_DISTANCE);
 
-        // ImageAnalysis のインスタンス生成
+                // nullチェックとデフォルト値
+                float fNumberValue = (aperture != null) ? aperture : 0.0f;
+                int isoValue = (iso != null) ? iso : 0;
+                long exposureTimeValue = (exposure != null) ? exposure : 0;
+                int wbModeValue = (wbMode != null) ? wbMode : 0;
+                float focusValue = (focus != null) ? focus : 0.0f;
+
+                                 // コールバックでUIに反映
+                 if (cameraInfoCallback != null) {
+                     cameraInfoCallback.onCameraInfoUpdated(
+                             fNumberValue, isoValue, exposureTimeValue, 0.0f, // 色温度は取得不可
+                             wbModeValue, focusValue, fNumberValue, isoValue
+                     );
+                 }
+                 
+                 // RealtimeBPにISO値を更新
+                 if (bpEstimator != null) {
+                     bpEstimator.updateISO(isoValue);
+                 }
+            }
+        });
+
         ImageAnalysis imageAnalysis = builder.build();
-
-        // シングルスレッドの Executor を作成
         Executor processingExecutor = Executors.newSingleThreadExecutor();
 
-        // フロントカメラを選択
         CameraSelector cameraSelector = new CameraSelector.Builder()
                 .requireLensFacing(CameraSelector.LENS_FACING_FRONT)
                 .build();
 
-        // Analyzer を設定して画像解析を行う
         imageAnalysis.setAnalyzer(processingExecutor, this::processImage);
 
-        // ライフサイクルにバインド
         cameraProvider.bindToLifecycle(
                 (LifecycleOwner) ctx,
                 cameraSelector,
                 imageAnalysis);
+    }
+    
+    // Camera X API の色温度関連情報を取得
+    @OptIn(markerClass = androidx.camera.camera2.interop.ExperimentalCamera2Interop.class)
+    private void setupCameraInfoCapture(ProcessCameraProvider cameraProvider, CameraSelector cameraSelector) {
+        try {
+            // Camera2CameraInfo を取得
+            Camera camera = cameraProvider.bindToLifecycle(
+                    (LifecycleOwner) ctx,
+                    cameraSelector,
+                    new Preview.Builder().build());
+            
+            Camera2CameraInfo camera2Info = Camera2CameraInfo.from(camera.getCameraInfo());
+            String cameraId = camera2Info.getCameraId();
+            
+            // Camera2CameraControl を取得
+            Camera2CameraControl camera2Control = Camera2CameraControl.from(camera.getCameraControl());
+            
+            // 定期的にカメラ情報を取得
+            Handler handler = new Handler(Looper.getMainLooper());
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (camOpen && cameraInfoCallback != null) {
+                        try {
+                            // Camera2CameraInfo から情報を取得
+                            CameraCharacteristics characteristics = 
+                                ((CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE))
+                                .getCameraCharacteristics(cameraId);
+                            
+                            // 現在のカメラ設定値を取得するため、ImageAnalysisのCaptureResultを使用
+                            // 注意: 実際の値はImageAnalysisのコールバックで取得する必要があります
+                            
+                            // F-Number (レンズの絞り値) - 利用可能な値の範囲から取得
+                            float[] fNumbers = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES);
+                            float fNumberValue = (fNumbers != null && fNumbers.length > 0) ? fNumbers[0] : 0.0f;
+                            
+                            // ISO感度範囲 - 利用可能な値の範囲から取得
+                            Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
+                            int isoValue = (isoRange != null) ? isoRange.getLower() : 0;
+                            
+                            // 露出時間範囲 - 利用可能な値の範囲から取得
+                            Range<Long> exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+                            long exposureTimeValue = (exposureRange != null) ? exposureRange.getLower() : 0;
+                            
+                            // 利用可能なホワイトバランスモード
+                            int[] awbModes = characteristics.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
+                            float colorTempValue = (awbModes != null && awbModes.length > 0) ? awbModes[0] : 0.0f;
+                            
+                            // 現在のホワイトバランスモード（実際の値はCaptureRequestから取得する必要がある）
+                            int wbModeValue = 0; // デフォルト値
+                            
+                            // フォーカス距離
+                            Float focusDistance = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
+                            float focusDistanceValue = (focusDistance != null) ? focusDistance : 0.0f;
+                            
+                            // 絞り値（F-Numberと同じ）
+                            float apertureValue = fNumberValue;
+                            
+                            // センサー感度（ISOと同じ）
+                            float sensorSensitivityValue = isoValue;
+                            
+                            // コールバックで情報を送信
+                            cameraInfoCallback.onCameraInfoUpdated(
+                                fNumberValue, isoValue, exposureTimeValue, colorTempValue,
+                                wbModeValue, focusDistanceValue, apertureValue, sensorSensitivityValue
+                            );
+                            
+                        } catch (Exception e) {
+                            Log.e("GreenValueAnalyzer", "Error getting camera info: " + e.getMessage());
+                        }
+                    }
+                    handler.postDelayed(this, 1000); // 1秒ごとに更新
+                }
+            }, 1000);
+            
+        } catch (Exception e) {
+            Log.e("GreenValueAnalyzer", "Error setting up camera info capture: " + e.getMessage());
+        }
     }
 
     // ===== フレーム解析 =====
@@ -187,6 +325,68 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         Image img = proxy.getImage();
         if (img != null &&
                 img.getFormat() == ImageFormat.YUV_420_888) {
+
+            // カメラ設定情報を取得（1秒ごとに更新）
+            if (cameraInfoCallback != null && System.currentTimeMillis() % 1000 < 33) { // 約30fpsなので1秒に1回程度
+                try {
+                    // フロントカメラのIDを直接指定（一般的に"1"）
+                    String cameraId = "1";
+                    
+                    // CameraCharacteristicsから現在の設定値を取得
+                    CameraCharacteristics characteristics = 
+                        ((CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE))
+                        .getCameraCharacteristics(cameraId);
+                    
+                    // 実際の動的な値を取得するため、Camera2CameraControlを使用
+                    Camera camera = cameraProvider.bindToLifecycle(
+                            (LifecycleOwner) ctx,
+                            cameraSelector,
+                            new Preview.Builder().build());
+                    
+                    Camera2CameraControl camera2Control = Camera2CameraControl.from(camera.getCameraControl());
+                    
+                    // 現在のカメラ設定値を取得
+                    // 注意: 一部の値は依然として固定値になる可能性があります
+                    
+                    // F-Number (利用可能な絞り値の範囲から取得)
+                    float[] fNumbers = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES);
+                    float fNumberValue = (fNumbers != null && fNumbers.length > 0) ? fNumbers[0] : 0.0f;
+                    
+                    // ISO感度 (利用可能な範囲の最小値)
+                    Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
+                    int isoValue = (isoRange != null) ? isoRange.getLower() : 0;
+                    
+                    // 露出時間 (利用可能な範囲の最小値)
+                    Range<Long> exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+                    long exposureTimeValue = (exposureRange != null) ? exposureRange.getLower() : 0;
+                    
+                    // ホワイトバランスモード (利用可能なモードの最初の値)
+                    int[] awbModes = characteristics.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
+                    float colorTempValue = (awbModes != null && awbModes.length > 0) ? awbModes[0] : 0.0f;
+                    
+                    // 現在のホワイトバランスモード (デフォルト値)
+                    int wbModeValue = 0;
+                    
+                    // フォーカス距離 (最小フォーカス距離)
+                    Float focusDistance = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
+                    float focusDistanceValue = (focusDistance != null) ? focusDistance : 0.0f;
+                    
+                    // 絞り値（F-Numberと同じ）
+                    float apertureValue = fNumberValue;
+                    
+                    // センサー感度（ISOと同じ）
+                    float sensorSensitivityValue = isoValue;
+                    
+                    // コールバックで情報を送信
+                    cameraInfoCallback.onCameraInfoUpdated(
+                        fNumberValue, isoValue, exposureTimeValue, colorTempValue,
+                        wbModeValue, focusDistanceValue, apertureValue, sensorSensitivityValue
+                    );
+                    
+                } catch (Exception e) {
+                    Log.e("GreenValueAnalyzer", "Error getting camera info in processImage: " + e.getMessage());
+                }
+            }
 
             double g = getGreen(img);
             LogicProcessor lp = logicMap.get(activeLogic);

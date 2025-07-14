@@ -273,44 +273,149 @@
             android:layout_marginStart="8dp"
             android:layout_marginTop="16dp"/>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_bp_measure"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:text="Measure BP"
-            android:textSize="20dp"
-            android:textColor="#78CCCC"
-            app:layout_constraintTop_toBottomOf="@id/show_mode_select_fragment_button"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            android:layout_marginTop="16dp"/>
+<!--        <com.google.android.material.button.MaterialButton-->
+<!--            android:id="@+id/btn_bp_measure"-->
+<!--            style="@style/Widget.MaterialComponents.Button.OutlinedButton"-->
+<!--            android:layout_width="0dp"-->
+<!--            android:layout_height="wrap_content"-->
+<!--            android:text="Measure BP"-->
+<!--            android:textSize="20dp"-->
+<!--            android:textColor="#78CCCC"-->
+<!--            app:layout_constraintTop_toBottomOf="@id/show_mode_select_fragment_button"-->
+<!--            app:layout_constraintStart_toStartOf="parent"-->
+<!--            app:layout_constraintEnd_toEndOf="parent"-->
+<!--            android:layout_marginTop="16dp"/>-->
 
         <!-- BP 結果 -->
-        <TextView
-            android:id="@+id/tvBPMax"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="BP Max : "
-            android:textSize="20dp"
-            android:textColor="#78CCCC"
-            app:layout_constraintTop_toBottomOf="@id/btn_bp_measure"
-            android:layout_marginTop="16dp"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toStartOf="@id/tvBPMin"
-            app:layout_constraintHorizontal_chainStyle="packed"/>
+<!--        <TextView-->
+<!--            android:id="@+id/tvBPMax"-->
+<!--            android:layout_width="wrap_content"-->
+<!--            android:layout_height="wrap_content"-->
+<!--            android:text="BP Max : "-->
+<!--            android:textSize="20dp"-->
+<!--            android:textColor="#78CCCC"-->
+<!--            app:layout_constraintTop_toBottomOf="@id/btn_bp_measure"-->
+<!--            android:layout_marginTop="16dp"-->
+<!--            app:layout_constraintStart_toStartOf="parent"-->
+<!--            app:layout_constraintEnd_toStartOf="@id/tvBPMin"-->
+<!--            app:layout_constraintHorizontal_chainStyle="packed"/>-->
 
-        <TextView
-            android:id="@+id/tvBPMin"
-            android:layout_width="wrap_content"
+<!--        <TextView-->
+<!--            android:id="@+id/tvBPMin"-->
+<!--            android:layout_width="wrap_content"-->
+<!--            android:layout_height="wrap_content"-->
+<!--            android:text="BP Min : "-->
+<!--            android:textSize="20dp"-->
+<!--            android:textColor="#78CCCC"-->
+<!--            app:layout_constraintTop_toBottomOf="@id/btn_bp_measure"-->
+<!--            android:layout_marginTop="16dp"-->
+<!--            app:layout_constraintStart_toEndOf="@id/tvBPMax"-->
+<!--            app:layout_constraintEnd_toEndOf="parent"/>-->
+
+        <!-- Camera X API 色温度関連情報 -->
+        <TableLayout
+            android:id="@+id/cameraInfoTable"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="BP Min : "
-            android:textSize="20dp"
-            android:textColor="#78CCCC"
-            app:layout_constraintTop_toBottomOf="@id/btn_bp_measure"
+            android:stretchColumns="*"
+            app:layout_constraintTop_toBottomOf="@id/reset_button"
             android:layout_marginTop="16dp"
-            app:layout_constraintStart_toEndOf="@id/tvBPMax"
-            app:layout_constraintEnd_toEndOf="parent"/>
+            android:background="#1A78CCCC"
+            android:padding="8dp">
+
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Camera X API Info"
+                    android:textSize="18dp"
+                    android:textColor="#78CCCC"
+                    android:textStyle="bold"/>
+            </TableRow>
+
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+                <TextView
+                    android:id="@+id/tvFNumber"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="F-Number: --"
+                    android:textSize="16dp"
+                    android:textColor="#78CCCC"/>
+                <TextView
+                    android:id="@+id/tvISO"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="ISO: --"
+                    android:textSize="16dp"
+                    android:textColor="#78CCCC"/>
+            </TableRow>
+
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+                <TextView
+                    android:id="@+id/tvExposureTime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Exposure: --"
+                    android:textSize="16dp"
+                    android:textColor="#78CCCC"/>
+                <TextView
+                    android:id="@+id/tvColorTemperature"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Color Temp: --"
+                    android:textSize="16dp"
+                    android:textColor="#78CCCC"/>
+            </TableRow>
+
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+                <TextView
+                    android:id="@+id/tvWhiteBalance"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="WB Mode: --"
+                    android:textSize="16dp"
+                    android:textColor="#78CCCC"/>
+                <TextView
+                    android:id="@+id/tvFocusDistance"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Focus: --"
+                    android:textSize="16dp"
+                    android:textColor="#78CCCC"/>
+            </TableRow>
+
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+                <TextView
+                    android:id="@+id/tvAperture"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Aperture: --"
+                    android:textSize="16dp"
+                    android:textColor="#78CCCC"/>
+                <TextView
+                    android:id="@+id/tvSensorSensitivity"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Sensor: --"
+                    android:textSize="16dp"
+                    android:textColor="#78CCCC"/>
+            </TableRow>
+        </TableLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

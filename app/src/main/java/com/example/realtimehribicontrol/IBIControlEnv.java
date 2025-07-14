@@ -91,13 +91,15 @@ public class IBIControlEnv {
 
     // 非同期で振動刺激を実行
     private void handleStimuliAsync(int[] stimuli) {
-        double interval0 = beforeIbi / 4;
-        long stimuliTime1 = 50;
-        double interval1 = beforeIbi / 4 - stimuliTime1;
-        long stimuliTime2 = 50;
-        double interval2 = beforeIbi / 4 - stimuliTime2;
-        Vibrator vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
-        runVibrationStep(vibrator, stimuli, 0, 0, interval0, stimuliTime1, interval1, stimuliTime2, interval2);
+        long[] pattern = new long[stimuli.length * 2];
+        long unit = (long)(beforeIbi / 4);
+        for (int i = 0; i < stimuli.length; i++) {
+            pattern[i * 2]     = unit;               // オフ時間
+            pattern[i * 2 + 1] = stimuli[i] == 1 ? 50 : 0;  // オン時間
+        }
+        Vibrator vib = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+        VibrationEffect effect = VibrationEffect.createWaveform(pattern, -1);
+        vib.vibrate(effect);                         // UI スレッドに影響しない
     }
 
     private void runVibrationStep(Vibrator vibrator, int[] stimuli, int j, int i, double interval0, long stimuliTime1, double interval1, long stimuliTime2, double interval2) {
