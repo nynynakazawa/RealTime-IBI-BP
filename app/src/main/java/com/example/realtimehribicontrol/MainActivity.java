@@ -226,6 +226,8 @@ public class MainActivity extends AppCompatActivity
         LogicProcessor lp = analyzer.getLogicProcessor("Logic1");
         if (lp instanceof Logic1) {
             ((Logic1) lp).setBPFrameCallback(bpEstimator::update);
+            // ここで必ずsetLogicRefを呼ぶ！
+            bpEstimator.setLogicRef((Logic1) lp);
         }
     }
 

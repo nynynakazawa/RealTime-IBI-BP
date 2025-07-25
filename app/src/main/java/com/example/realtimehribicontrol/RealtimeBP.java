@@ -69,22 +69,22 @@ public class RealtimeBP {
     /** ISO値を更新するメソッド */
     public void updateISO(int iso) {
         this.currentISO = iso;
-        Log.d("RealtimeBP", "ISO updated: " + iso);
     }
 
 
     private double lastSbp, lastDbp, lastSbpAvg, lastDbpAvg;
     private double lastAiRaw, lastAiAt75;
     private double lastAiRawPct, lastAiAt75Pct;
+    // relTTP用フィールドを追加
+    private double lastRelTTP;
 
     /** AI の HR 補正傾き [%/bpm] */
     private static final double AI_HR_SLOPE_PCT_PER_BPM = -0.39;
-    /** SBP 回帰係数  */
-    private static final double C0 = 60,  C1 = 45,  C2 = 0.45,
-    C3 = 15,  C4 = 0.06, C5 = -20;
-    /** DBP 回帰係数 */
-    private static final double D0 = 45,  D1 = 25,  D2 = 0.15,
-        D3 =  6,  D4 = 0.02, D5 =   0;
+    // --- 回帰係数（調整後） ---
+    private static final double C0 = 80,  C1 = 30,  C2 = 0.2,
+        C3 = 2,  C4 = 0.01, C5 = -10;
+    private static final double D0 = 60,  D1 = 15,  D2 = 0.1,
+        D3 = 1,  D4 = 0.005, D5 = 0;
     /**
      * Logic1 から毎フレーム呼び出される更新メソッド
      * @param correctedGreenValue 正規化済み PPG 振幅 (0–100%)
@@ -118,70 +118,102 @@ public class RealtimeBP {
         Log.d("RealtimeBP", "estimateAndNotify called");
         // --- 形態学的特徴抽出 ---
         int n = beatBuf.size();
-        // バッファを配列化
         double[] beatArr = new double[n];
         int j = 0;
         for (double v : beatBuf) beatArr[j++] = v;
-        // Savitzky-Golayフィルタで平滑化
-        double[] smooth = savitzkyGolay5_3(beatArr);
-        // foot検出
-        int footIdx = detectFoot(smooth);
-        // foot〜次foot直前までを1拍とする（次footがなければ末尾まで）
-        int endIdx = n;
-        // S・Dピーク検出
-        int[] peaks = detectSPeakAndDPeak(smooth);
-        int idxPeak = peaks[0];
-        int idxD = peaks[1];
-        double sAmp = smooth[idxPeak];
-        double dAmp = smooth[idxD];
-        double hr   = 60000.0 / ibiMs;  // 心拍数 [bpm]
-        // --- AI calculation and regression (unit: %, HR correction, clamp) ---
-        // aiRawFrac = (sAmp - dAmp) / max(sAmp,1e-9)
-        double aiRawFrac = (sAmp - dAmp) / Math.max(sAmp, 1e-9);
-        // aiRawPct  = aiRawFrac * 100
-        double aiRawPct = aiRawFrac * 100.0;
-        // aiAt75Pct = aiRawPct + AI_HR_SLOPE_PCT_PER_BPM * (hr - 75)
-        double aiAt75Pct = aiRawPct + AI_HR_SLOPE_PCT_PER_BPM * (hr - 75);
-        // aiAt75Frac = aiAt75Pct / 100
-        double aiAt75Frac = aiAt75Pct / 100.0;
-        // clamp aiAt75Frac ∈ [-0.5,1.0]
-        aiAt75Frac = clamp(aiAt75Frac, -0.5, 1.0);
-        // TTP/PW時間正規化
-        double ttpMs = idxPeak * (1000.0 / frameRate);
-        double relTTP = ttpMs / ibiMs;
-        double pw = n; // サンプル数（暫定）
-        // --- ISO正規化と補正 ---
-        double isoNorm = currentISO / 600.0;
-        double sNorm = sAmp * isoNorm;
-        double isoDev = isoNorm - 1.0;
+        // ここでAIraw等の算出
+        if (logicRef != null) {
+            updateAIfromLogicWindow(60, ibiMs);
+        }
         // --- 回帰式 ---
-        double sbp = C0 + C1*aiAt75Frac + C2*hr + C3*relTTP + C4*sNorm + C5*isoDev;
-        double dbp = D0 + D1*aiAt75Frac + D2*hr + D3*relTTP + D4*sNorm + D5*isoDev;
+        double hr   = 60000.0 / ibiMs;  // 心拍数 [bpm]
+        double isoNorm = currentISO / 600.0;
+        double sNorm = 0.0; // sValをupdateAIfromLogicWindowで保存する場合はここで取得
+        double isoDev = isoNorm - 1.0;
+        // --- 回帰式に使う値をログ出力 ---
+        double sPeak = 0.0;
+        if (logicRef != null && logicRef.lastPeakEvent != null) {
+            sPeak = logicRef.lastPeakEvent.value;
+        }
+        sNorm = sPeak * isoNorm;
+
+        double sbp = C0 + C1*lastAiAt75 + C2*hr + C3*lastRelTTP + C4*sNorm + C5*isoDev;
+        double dbp = D0 + D1*lastAiAt75 + D2*hr + D3*lastRelTTP + D4*sNorm + D5*isoDev;
+
+        Log.d("RealtimeBP", String.format(
+            "回帰式入力: Ai75=%.2f, RelTTP=%.2f, hr=%.2f, sNorm=%.2f, isoDev=%.2f, sbp=%.2f, dbp=%.2f",
+            lastAiAt75, lastRelTTP, hr, sNorm, isoDev, sbp, dbp
+        ));
+
         // clamp sbp, dbp
         sbp = clamp(sbp, 60, 200);
         dbp = clamp(dbp, 40, 150);
         // --- 保存 ---
-        lastAiRaw = aiRawFrac;
-        lastAiAt75 = aiAt75Frac;
-        lastAiRawPct = aiRawPct;
-        lastAiAt75Pct = aiAt75Pct;
-        Log.d("RealtimeBP", String.format(
-                "SBP %.1f / DBP %.1f  (AIraw %.2f%%  AI@75 %.2f%%  HR %.1f  relTTP %.2f  ISO %d  sNorm %.2f  isoDev %.2f)",
-                sbp, dbp, aiRawPct, aiAt75Pct, hr, relTTP, currentISO, sNorm, isoDev));
-        Log.d("RealtimeBP", String.format(
-                "[Metrics] footIdx=%d, S idx=%d, D idx=%d, aiAt75=%.3f",
-                footIdx, idxPeak, idxD, aiAt75Frac));
+        lastSbp = sbp;
+        lastDbp = dbp;
         sbpHist.addLast(sbp); if (sbpHist.size() > AVG_BEATS) sbpHist.pollFirst();
         dbpHist.addLast(dbp); if (dbpHist.size() > AVG_BEATS) dbpHist.pollFirst();
         double sbpAvg = robustAverage(sbpHist);
         double dbpAvg = robustAverage(dbpHist);
-        /* リスナ通知 (平均付き) */
-        if (listener != null) listener.onBpUpdated(sbp, dbp, sbpAvg, dbpAvg);
-        // ── 最新推定値を保存 ──
-        lastSbp    = sbp;
-        lastDbp    = dbp;
         lastSbpAvg = sbpAvg;
         lastDbpAvg = dbpAvg;
+        /* リスナ通知 (平均付き) */
+        if (listener != null) listener.onBpUpdated(sbp, dbp, sbpAvg, dbpAvg);
+    }
+
+    // BaseLogicの参照を保持
+    private BaseLogic logicRef;
+    public void setLogicRef(BaseLogic logic) {
+        this.logicRef = logic;
+        Log.d("RealtimeBP", "setLogicRef called: " + logic);
+    }
+
+    /**
+     * CorrectedGreenValue系列（window配列）からAIraw, AI75Frac, relTTPを算出
+     * 拍区間は直近の谷→次の谷、Sピークはその区間内の最大値、Dピークは区間末端値
+     */
+    public void updateAIfromLogicWindow(int windowSize, double ibiMs) {
+        Log.d("RealtimeBP", "updateAIfromLogicWindow called");
+        if (logicRef == null) return;
+        // 1. まず谷を検出し記録
+        int valleyIdx = logicRef.detectValleyIndexAndRecord(windowSize);
+        Log.d("RealtimeBP", "valleyIdx=" + valleyIdx + ", lastValleyEvent=" + logicRef.lastValleyEvent);
+
+        // 2. 直前に山が記録されていれば、山→谷区間で特徴量を計算
+        if (logicRef.lastPeakEvent != null && logicRef.lastValleyEvent != null) {
+            // 谷→山 or 山→谷のどちらが新しいかで区間を決定
+            BaseLogic.PeakValleyEvent prev, next;
+            boolean isValleyToPeak = logicRef.lastValleyEvent.timestamp < logicRef.lastPeakEvent.timestamp;
+            if (isValleyToPeak) {
+                prev = logicRef.lastValleyEvent;
+                next = logicRef.lastPeakEvent;
+            } else {
+                prev = logicRef.lastPeakEvent;
+                next = logicRef.lastValleyEvent;
+            }
+            long dt = next.timestamp - prev.timestamp;
+            double dv = next.value - prev.value;
+            double relTTP = (double) (next.timestamp - prev.timestamp) / ibiMs;
+            double aiRawFrac = isValleyToPeak ? (next.value - prev.value) / Math.max(next.value, 1e-9)
+                                              : (prev.value - next.value) / Math.max(prev.value, 1e-9);
+            double aiRawPct = aiRawFrac * 100.0;
+            double hr = 60000.0 / ibiMs;
+            double aiAt75Pct = aiRawPct + AI_HR_SLOPE_PCT_PER_BPM * (hr - 75);
+            double aiAt75Frac = aiAt75Pct / 100.0;
+            aiAt75Frac = clamp(aiAt75Frac, -0.5, 1.0);
+            lastAiRaw = aiRawFrac;
+            lastAiRawPct = aiRawPct;
+            lastAiAt75 = aiAt75Frac;
+            lastAiAt75Pct = aiAt75Pct;
+            lastRelTTP = relTTP;
+            Log.d("RealtimeBP", String.format(
+                "区間: %s, prevIdx=%d, nextIdx=%d, dt=%dms, dv=%.2f, relTTP=%.3f, AIraw=%.3f",
+                isValleyToPeak ? "谷→山" : "山→谷", prev.index, next.index, dt, dv, relTTP, aiRawFrac
+            ));
+        }
+        // 3. 次に山を検出し記録（次回の区間計算用）
+        int peakIdx = logicRef.detectPeakIndexAndRecord(windowSize);
+        Log.d("RealtimeBP", "peakIdx=" + peakIdx + ", lastPeakEvent=" + logicRef.lastPeakEvent);
     }
 
 
@@ -335,6 +367,8 @@ public class RealtimeBP {
     public double getLastAiAt75() { return lastAiAt75; }
     public double getLastAiRawPct()  { return lastAiRawPct; }
     public double getLastAiAt75Pct() { return lastAiAt75Pct; }
+    // relTTPのgetter
+    public double getLastRelTTP() { return lastRelTTP; }
 
     /**
      * 値を[min, max]でクリップ
