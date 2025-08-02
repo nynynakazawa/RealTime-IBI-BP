@@ -18,7 +18,7 @@ import java.util.Locale;
  * 2. 形態学的特徴: 最大振幅 (S), 拍末振幅 (D), time-to-peak (TTP), 拍幅 (PW)
  * 3. hemodynamic 特徴: オーグメンテーション指数 (AI = (S - D) / S), 心拍数 (HR)
  * 4. ISO感度依存の誤差を補正した改良線形回帰モデルで SBP / DBP を推定
- * 
+ *
  * ─ 改良点 ─
  * - ISO正規化: 参照ISO (600) を基準とした相対ISO値
  * - 振幅補正: sNorm = sAmp * isoNorm
@@ -27,27 +27,26 @@ import java.util.Locale;
  */
 public class RealtimeBP {
 
-    /** 1 拍あたり最大サンプル数 (想定フレームレート 30–90 fps 対応) */
-    private static final int MAX_BEAT_SAMPLES = 90;
-
-    /** 1 拍分の PPG 振幅を保持するバッファ */
-    private final Deque<Double> beatBuf = new ArrayDeque<>(MAX_BEAT_SAMPLES);
-
-    /** 最後の拍動開始時刻 (ms) */
-    private long lastBeatStart = System.currentTimeMillis();
-
     /** 平均用ウィンドウ (10 拍) */
     private static final int AVG_BEATS = 10;
 
     /** 直近 N 拍の推定 SBP / DBP を保持 */
     private final Deque<Double> sbpHist = new ArrayDeque<>(AVG_BEATS);
     private final Deque<Double> dbpHist = new ArrayDeque<>(AVG_BEATS);
-    
+
     /** 現在のISO値（動的に更新） */
-    private int currentISO = 600; // デフォルト値
+    private int currentISO = 600;
+    private boolean isDetectionEnabled = true;
+    
+    // 直前の有効な値を保持（ISO < 500の時に使用）
+    private double lastValidHr = 0.0;
 
     /** フレームレート [fps]（デフォルト30、setterで更新可） */
     private int frameRate = 30;
+
+    // ===== 独立した連続検出システム =====
+    private volatile long lastUpdateTime = 0;
+
     /** フレームレートを更新するメソッド */
     public void setFrameRate(int fps) {
         this.frameRate = fps;
@@ -59,55 +58,51 @@ public class RealtimeBP {
         void onBpUpdated(double sbp, double dbp,
                          double sbpAvg, double dbpAvg);
     }
+
     private BPListener listener;
 
     /** リスナ登録メソッド */
     public void setListener(BPListener l) {
         this.listener = l;
     }
-    
+
     /** ISO値を更新するメソッド */
     public void updateISO(int iso) {
         this.currentISO = iso;
     }
-
 
     private double lastSbp, lastDbp, lastSbpAvg, lastDbpAvg;
     private double lastAiRaw, lastAiAt75;
     private double lastAiRawPct, lastAiAt75Pct;
     // relTTP用フィールドを追加
     private double lastRelTTP;
+    private double lastValleyToPeakRelTTP; // 谷→山のrelTTP
+    private double lastPeakToValleyRelTTP; // 山→谷のrelTTP
 
     /** AI の HR 補正傾き [%/bpm] */
     private static final double AI_HR_SLOPE_PCT_PER_BPM = -0.39;
-    // --- 回帰係数（調整後） ---
-    private static final double C0 = 80,  C1 = 30,  C2 = 0.2,
-        C3 = 2,  C4 = 0.01, C5 = -10;
-    private static final double D0 = 60,  D1 = 15,  D2 = 0.1,
-        D3 = 1,  D4 = 0.005, D5 = 0;
+    // --- 回帰係数（暫定調整） ---
+    // SBP: C0 + C1*AI75 + C2*HR + C4*sNorm + C5*isoDev + C6*V2P_relTTP + C7*P2V_relTTP
+    private static final double C0 = 80, C1 = 0.5, C2 = 0.1,
+            C4 = 0.001, C5 = -5, C6 = 0.1, C7 = -0.1; // ベースラインは維持、他を調整
+    // DBP: D0 + D1*AI75 + D2*HR + D4*sNorm + D5*isoDev + D6*V2P_relTTP + D7*P2V_relTTP
+    private static final double D0 = 60, D1 = 0.3, D2 = 0.05,
+            D4 = 0.0005, D5 = -2, D6 = 0.05, D7 = -0.05; // ベースラインは維持、他を調整
+
     /**
-     * Logic1 から毎フレーム呼び出される更新メソッド
+     * BaseLogicからのコールバック用メソッド
      * @param correctedGreenValue 正規化済み PPG 振幅 (0–100%)
-     * @param smoothedIbiMs       平滑化済み IBI (ms)
+     * @param smoothedIbiMs 平滑化済み IBI (ms)
      */
     public void update(double correctedGreenValue, double smoothedIbiMs) {
-        Log.d("RealtimeBP", "update called: value=" + correctedGreenValue + ", IBI=" + smoothedIbiMs);
-        // バッファにサンプルを追加
-        beatBuf.addLast(correctedGreenValue);
-        // 古いサンプルは捨てる
-        if (beatBuf.size() > MAX_BEAT_SAMPLES) {
-            beatBuf.pollFirst();
+        // ISOチェック
+        if (currentISO < 500) {
+            Log.d("RealtimeBP-ISO", "Blood pressure estimation skipped: ISO=" + currentISO);
+            return;
         }
 
-        long now = System.currentTimeMillis();
-
-        // IBI (ms) が経過したら 1 拍分とみなして処理
-        if (now - lastBeatStart >= smoothedIbiMs && beatBuf.size() > 5) {
-            estimateAndNotify(smoothedIbiMs);
-            // バッファクリア & 拍動開始時刻を更新
-            beatBuf.clear();
-            lastBeatStart = now;
-        }
+        // 血圧推定を実行
+        estimateAndNotify(smoothedIbiMs);
     }
 
     /**
@@ -115,111 +110,147 @@ public class RealtimeBP {
      * 線形回帰モデルで SBP / DBP を推定し，リスナへ通知
      */
     private void estimateAndNotify(double ibiMs) {
-        Log.d("RealtimeBP", "estimateAndNotify called");
-        // --- 形態学的特徴抽出 ---
-        int n = beatBuf.size();
-        double[] beatArr = new double[n];
-        int j = 0;
-        for (double v : beatBuf) beatArr[j++] = v;
-        // ここでAIraw等の算出
-        if (logicRef != null) {
-            updateAIfromLogicWindow(60, ibiMs);
+        // ISOチェック
+        if (currentISO < 500) {
+            Log.d("RealtimeBP-ISO", "Blood pressure estimation skipped: ISO=" + currentISO);
+            return;
         }
-        // --- 回帰式 ---
-        double hr   = 60000.0 / ibiMs;  // 心拍数 [bpm]
+
+        Log.d("RealtimeBP-Estimate", "=== estimateAndNotify START ===");
+        Log.d("RealtimeBP-Estimate", "Input: ibiMs=" + ibiMs);
+
+        // BaseLogicから最新の平均値を取得
+        double valleyToPeakRelTTP = (logicRef != null) ? logicRef.averageValleyToPeakRelTTP : 0.0;
+        double peakToValleyRelTTP = (logicRef != null) ? logicRef.averagePeakToValleyRelTTP : 0.0;
+        double averageAI = (logicRef != null) ? logicRef.averageAI : 0.0;
+        
+        // ローカル変数に保存（ログ出力用）
+        lastValleyToPeakRelTTP = valleyToPeakRelTTP;
+        lastPeakToValleyRelTTP = peakToValleyRelTTP;
+        lastAiAt75 = averageAI;
+        
+        Log.d("RealtimeBP-Estimate", String.format(
+                "BaseLogic values: V2P_relTTP=%.3f, P2V_relTTP=%.3f, AI=%.3f%%",
+                valleyToPeakRelTTP, peakToValleyRelTTP, averageAI));
+        
+        // --- 回帰式計算 ---
+        // 最新のsmoothedBpmを使用
+        double hr = 0.0;
+        if (logicRef != null && !logicRef.smoothedIbi.isEmpty()) {
+            double lastSmoothedIbi = logicRef.getLastSmoothedIbi();
+            if (lastSmoothedIbi > 0) {
+                hr = 60000.0 / lastSmoothedIbi; // 最新のsmoothedBpm
+            } else {
+                hr = 60000.0 / ibiMs; // フォールバック
+            }
+        } else {
+            hr = 60000.0 / ibiMs; // フォールバック
+        }
+        
+        // 有効なHR値を保存（ISO < 500の時に使用）
+        if (hr > 0) {
+            lastValidHr = hr;
+        }
+        
         double isoNorm = currentISO / 600.0;
-        double sNorm = 0.0; // sValをupdateAIfromLogicWindowで保存する場合はここで取得
         double isoDev = isoNorm - 1.0;
-        // --- 回帰式に使う値をログ出力 ---
+
+        // Sピーク値の取得（独立検出システムの平均値を使用）
         double sPeak = 0.0;
-        if (logicRef != null && logicRef.lastPeakEvent != null) {
-            sPeak = logicRef.lastPeakEvent.value;
+        if (logicRef != null) {
+            // 谷→山の振幅をSピーク値として使用
+            sPeak = logicRef.averageValleyToPeakAmplitude;
         }
-        sNorm = sPeak * isoNorm;
+        double sNorm = sPeak * isoNorm;
 
-        double sbp = C0 + C1*lastAiAt75 + C2*hr + C3*lastRelTTP + C4*sNorm + C5*isoDev;
-        double dbp = D0 + D1*lastAiAt75 + D2*hr + D3*lastRelTTP + D4*sNorm + D5*isoDev;
+        // 回帰式による血圧推定（谷→山と山→谷のrelTTPを区別して使用、lastRelTTPは除外）
+        double sbp = C0 + C1 * lastAiAt75 + C2 * hr + C4 * sNorm + C5 * isoDev
+                + C6 * lastValleyToPeakRelTTP + C7 * lastPeakToValleyRelTTP;
+        double dbp = D0 + D1 * lastAiAt75 + D2 * hr + D4 * sNorm + D5 * isoDev
+                + D6 * lastValleyToPeakRelTTP + D7 * lastPeakToValleyRelTTP;
 
-        Log.d("RealtimeBP", String.format(
-            "回帰式入力: Ai75=%.2f, RelTTP=%.2f, hr=%.2f, sNorm=%.2f, isoDev=%.2f, sbp=%.2f, dbp=%.2f",
-            lastAiAt75, lastRelTTP, hr, sNorm, isoDev, sbp, dbp
-        ));
+        Log.d("RealtimeBP-Estimate", String.format(
+                "RawBP: SBP=%.2f, DBP=%.2f AI75=%.2f, VtoP_relTTP=%.2f, PtoV_relTTP=%.2f, HR=%.2f, sNorm=%.2f, isoDev=%.2f",
+                sbp, dbp, lastAiAt75, lastValleyToPeakRelTTP, lastPeakToValleyRelTTP, hr, sNorm, isoDev));
 
-        // clamp sbp, dbp
+        // 範囲制限
         sbp = clamp(sbp, 60, 200);
         dbp = clamp(dbp, 40, 150);
-        // --- 保存 ---
+
+        // --- 保存と平均計算 ---
         lastSbp = sbp;
         lastDbp = dbp;
-        sbpHist.addLast(sbp); if (sbpHist.size() > AVG_BEATS) sbpHist.pollFirst();
-        dbpHist.addLast(dbp); if (dbpHist.size() > AVG_BEATS) dbpHist.pollFirst();
+        sbpHist.addLast(sbp);
+        if (sbpHist.size() > AVG_BEATS)
+            sbpHist.pollFirst();
+        dbpHist.addLast(dbp);
+        if (dbpHist.size() > AVG_BEATS)
+            dbpHist.pollFirst();
+
         double sbpAvg = robustAverage(sbpHist);
         double dbpAvg = robustAverage(dbpHist);
         lastSbpAvg = sbpAvg;
         lastDbpAvg = dbpAvg;
-        /* リスナ通知 (平均付き) */
-        if (listener != null) listener.onBpUpdated(sbp, dbp, sbpAvg, dbpAvg);
+
+        Log.d("RealtimeBP-Estimate", String.format(
+                "Averaged BP: SBP_avg=%.1f, DBP_avg=%.1f (history size: %d)",
+                sbpAvg, dbpAvg, sbpHist.size()));
+
+        // リスナ通知
+        if (listener != null) {
+            listener.onBpUpdated(sbp, dbp, sbpAvg, dbpAvg);
+            Log.d("RealtimeBP-Estimate", "BP values notified to listener");
+        }
+
+        Log.d("RealtimeBP-Estimate", "=== estimateAndNotify END ===");
     }
 
     // BaseLogicの参照を保持
     private BaseLogic logicRef;
+
     public void setLogicRef(BaseLogic logic) {
         this.logicRef = logic;
         Log.d("RealtimeBP", "setLogicRef called: " + logic);
+
+        // 連続検出のコールバックを設定
+        if (logic != null) {
+            logic.setBPFrameCallback(this::update);
+        }
     }
 
     /**
-     * CorrectedGreenValue系列（window配列）からAIraw, AI75Frac, relTTPを算出
-     * 拍区間は直近の谷→次の谷、Sピークはその区間内の最大値、Dピークは区間末端値
+     * 血圧推定値をリセット
      */
-    public void updateAIfromLogicWindow(int windowSize, double ibiMs) {
-        Log.d("RealtimeBP", "updateAIfromLogicWindow called");
-        if (logicRef == null) return;
-        // 1. まず谷を検出し記録
-        int valleyIdx = logicRef.detectValleyIndexAndRecord(windowSize);
-        Log.d("RealtimeBP", "valleyIdx=" + valleyIdx + ", lastValleyEvent=" + logicRef.lastValleyEvent);
-
-        // 2. 直前に山が記録されていれば、山→谷区間で特徴量を計算
-        if (logicRef.lastPeakEvent != null && logicRef.lastValleyEvent != null) {
-            // 谷→山 or 山→谷のどちらが新しいかで区間を決定
-            BaseLogic.PeakValleyEvent prev, next;
-            boolean isValleyToPeak = logicRef.lastValleyEvent.timestamp < logicRef.lastPeakEvent.timestamp;
-            if (isValleyToPeak) {
-                prev = logicRef.lastValleyEvent;
-                next = logicRef.lastPeakEvent;
-            } else {
-                prev = logicRef.lastPeakEvent;
-                next = logicRef.lastValleyEvent;
-            }
-            long dt = next.timestamp - prev.timestamp;
-            double dv = next.value - prev.value;
-            double relTTP = (double) (next.timestamp - prev.timestamp) / ibiMs;
-            double aiRawFrac = isValleyToPeak ? (next.value - prev.value) / Math.max(next.value, 1e-9)
-                                              : (prev.value - next.value) / Math.max(prev.value, 1e-9);
-            double aiRawPct = aiRawFrac * 100.0;
-            double hr = 60000.0 / ibiMs;
-            double aiAt75Pct = aiRawPct + AI_HR_SLOPE_PCT_PER_BPM * (hr - 75);
-            double aiAt75Frac = aiAt75Pct / 100.0;
-            aiAt75Frac = clamp(aiAt75Frac, -0.5, 1.0);
-            lastAiRaw = aiRawFrac;
-            lastAiRawPct = aiRawPct;
-            lastAiAt75 = aiAt75Frac;
-            lastAiAt75Pct = aiAt75Pct;
-            lastRelTTP = relTTP;
-            Log.d("RealtimeBP", String.format(
-                "区間: %s, prevIdx=%d, nextIdx=%d, dt=%dms, dv=%.2f, relTTP=%.3f, AIraw=%.3f",
-                isValleyToPeak ? "谷→山" : "山→谷", prev.index, next.index, dt, dv, relTTP, aiRawFrac
-            ));
-        }
-        // 3. 次に山を検出し記録（次回の区間計算用）
-        int peakIdx = logicRef.detectPeakIndexAndRecord(windowSize);
-        Log.d("RealtimeBP", "peakIdx=" + peakIdx + ", lastPeakEvent=" + logicRef.lastPeakEvent);
+    public void reset() {
+        // 血圧履歴をクリア
+        sbpHist.clear();
+        dbpHist.clear();
+        
+        // 血圧値をリセット
+        lastSbp = 0.0;
+        lastDbp = 0.0;
+        lastSbpAvg = 0.0;
+        lastDbpAvg = 0.0;
+        
+        // その他の値をリセット
+        lastAiRaw = 0.0;
+        lastAiAt75 = 0.0;
+        lastAiRawPct = 0.0;
+        lastAiAt75Pct = 0.0;
+        lastRelTTP = 0.0;
+        lastValleyToPeakRelTTP = 0.0;
+        lastPeakToValleyRelTTP = 0.0;
+        
+        // タイムスタンプをリセット
+        lastUpdateTime = 0;
+        
+        Log.d("RealtimeBP", "Blood pressure values reset to 0.00");
     }
-
 
     private double robustAverage(Deque<Double> hist) {
         List<Double> list = new ArrayList<>(hist);
-        if (list.isEmpty()) return 0.0;
+        if (list.isEmpty())
+            return 0.0;
 
         // 1) 中央値を求める
         Collections.sort(list);
@@ -247,128 +278,21 @@ public class RealtimeBP {
                 .orElse(median);
     }
 
-    /**
-     * Savitzky-Golayフィルタ（5点3次、係数固定）
-     * 入力配列dataに滑らか化を適用し、同じ長さの新配列を返す
-     */
-    public static double[] savitzkyGolay5_3(double[] data) {
-        int n = data.length;
-        double[] result = new double[n];
-        // 端はそのままコピー（3次5点は両端2点はフィルタ不可）
-        if (n < 5) return data.clone();
-        result[0] = data[0];
-        result[1] = data[1];
-        result[n-2] = data[n-2];
-        result[n-1] = data[n-1];
-        // 係数: [-3, 12, 17, 12, -3] / 35
-        for (int i = 2; i < n - 2; i++) {
-            result[i] = (
-                -3 * data[i-2] +
-                12 * data[i-1] +
-                17 * data[i] +
-                12 * data[i+1] +
-                -3 * data[i+2]
-            ) / 35.0;
-        }
-        return result;
+    public double getLastSbp() {
+        return lastSbp;
     }
 
-    /**
-     * 1次微分（単純差分）を計算
-     * @param data 入力配列
-     * @return 微分配列（長さはdata.length）
-     */
-    public static double[] diff1(double[] data) {
-        int n = data.length;
-        double[] diff = new double[n];
-        diff[0] = 0;
-        for (int i = 1; i < n; i++) {
-            diff[i] = data[i] - data[i-1];
-        }
-        return diff;
+    public double getLastDbp() {
+        return lastDbp;
     }
 
-    /**
-     * 2次微分（単純差分の差分）を計算
-     * @param data 入力配列
-     * @return 2次微分配列（長さはdata.length）
-     */
-    public static double[] diff2(double[] data) {
-        int n = data.length;
-        double[] diff2 = new double[n];
-        diff2[0] = 0;
-        diff2[1] = 0;
-        for (int i = 2; i < n; i++) {
-            diff2[i] = data[i] - 2 * data[i-1] + data[i-2];
-        }
-        return diff2;
+    public double getLastSbpAvg() {
+        return lastSbpAvg;
     }
 
-    /**
-     * foot検出: 1次微分が0から正になる点（上昇開始点）のインデックスを返す
-     * @param data PPG波形配列
-     * @return foot index（見つからなければ0）
-     */
-    public static int detectFoot(double[] data) {
-        int n = data.length;
-        for (int i = 1; i < n; i++) {
-            double diffPrev = data[i] - data[i-1];
-            if (diffPrev > 0) {
-                // 直前が0以下→正になった最初の点
-                if (i == 1 || data[i-1] - data[i-2] <= 0) {
-                    return i-1;
-                }
-            }
-        }
-        return 0; // 見つからなければ先頭
+    public double getLastDbpAvg() {
+        return lastDbpAvg;
     }
-
-    /**
-     * Sピーク（最大値）とDピーク（dicrotic notch後の最大値）を検出
-     * @param data PPG波形配列（1拍分）
-     * @return int[]{Sピークindex, Dピークindex}
-     */
-    public static int[] detectSPeakAndDPeak(double[] data) {
-        int n = data.length;
-        // Sピーク（最大値）
-        int idxS = 0;
-        double maxS = Double.NEGATIVE_INFINITY;
-        for (int i = 0; i < n; i++) {
-            if (data[i] > maxS) {
-                maxS = data[i];
-                idxS = i;
-            }
-        }
-        // Dicrotic notch検出（Sピーク後の最初の局所最小）
-        int idxNotch = idxS;
-        for (int i = idxS + 1; i < n - 1; i++) {
-            if (data[i] < data[i-1] && data[i] < data[i+1]) {
-                idxNotch = i;
-                break;
-            }
-        }
-        // Dピーク（notch後の最大値）
-        int idxD = idxNotch;
-        double maxD = data[idxNotch];
-        for (int i = idxNotch + 1; i < n; i++) {
-            if (data[i] > maxD) {
-                maxD = data[i];
-                idxD = i;
-            }
-        }
-        return new int[]{idxS, idxD};
-    }
-
-    public double getLastSbp()    { return lastSbp; }
-    public double getLastDbp()    { return lastDbp; }
-    public double getLastSbpAvg() { return lastSbpAvg; }
-    public double getLastDbpAvg() { return lastDbpAvg; }
-    public double getLastAiRaw() { return lastAiRaw; }
-    public double getLastAiAt75() { return lastAiAt75; }
-    public double getLastAiRawPct()  { return lastAiRawPct; }
-    public double getLastAiAt75Pct() { return lastAiAt75Pct; }
-    // relTTPのgetter
-    public double getLastRelTTP() { return lastRelTTP; }
 
     /**
      * 値を[min, max]でクリップ

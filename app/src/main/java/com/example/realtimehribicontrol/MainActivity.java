@@ -83,6 +83,19 @@ public class MainActivity extends AppCompatActivity
                 tvFocusDistance.setText(String.format(Locale.getDefault(), "Focus: %.2f", focusDistance));
                 tvAperture.setText(String.format(Locale.getDefault(), "Aperture: %.1f", aperture));
                 tvSensorSensitivity.setText(String.format(Locale.getDefault(), "Sensor: %.0f", sensorSensitivity));
+                
+                // ISO値をGreenValueAnalyzerに渡してCSV記録を制御
+                analyzer.updateISO(iso);
+                
+                // Logic1とLogic2にもISO値を渡す
+                LogicProcessor logic1 = analyzer.getLogicProcessor("Logic1");
+                LogicProcessor logic2 = analyzer.getLogicProcessor("Logic2");
+                if (logic1 instanceof BaseLogic) {
+                    ((BaseLogic) logic1).updateISO(iso);
+                }
+                if (logic2 instanceof BaseLogic) {
+                    ((BaseLogic) logic2).updateISO(iso);
+                }
             });
         });
         
@@ -159,7 +172,14 @@ public class MainActivity extends AppCompatActivity
 
         startButton.setOnClickListener(v -> startRecording());
 
-        resetButton.setOnClickListener(v -> analyzer.reset());
+        resetButton.setOnClickListener(v -> {
+            analyzer.reset();
+            // 血圧表示もクリア
+            tvSBPRealtime.setText("SBP : 0.0");
+            tvDBPRealtime.setText("DBP : 0.0");
+            tvSBPAvg.setText("SBP(Average) : 0.0");
+            tvDBPAvg.setText("DBP(Average) : 0.0");
+        });
         /*bpMeasureButton.setOnClickListener(v ->
                 bpLauncher.launch(new Intent(this, PressureAnalyze.class))
         );*/

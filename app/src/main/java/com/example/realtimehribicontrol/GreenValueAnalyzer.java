@@ -67,10 +67,17 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private boolean camOpen;
     private double  IBI;
     private boolean isRecordingActive = false;
+
+    // ISO管理
+    private int currentISO = 600; // デフォルト値
+    private boolean isDetectionEnabled = true; // 検出有効フラグ
     
-    // カメラ設定値のキャッシュ
+    // 直前の有効な値を保持（ISO < 500の時に使用）
+    private double lastValidBpm = 0.0;
+    private double lastValidSd = 0.0;
+
+    // カメラ設定情報
     private float currentFNumber = 0.0f;
-    private int currentISO = 0;
     private long currentExposureTime = 0;
     private int currentWhiteBalanceMode = 0;
     private float currentFocusDistance = 0.0f;
@@ -393,37 +400,60 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
             if (lp != null) {
                 LogicResult r = lp.processGreenValueData(g);
-                lp.calculateSmoothedValueRealTime(r.getIbi(), r.getBpmSd());
+                
+                // ISOが500未満の場合でもUI更新とチャート表示は行う
+                if (r != null) {
+                    lp.calculateSmoothedValueRealTime(r.getIbi(), r.getBpmSd());
 
-                // ★ isRecordingActive フラグが true の場合のみデータを記録
-                if (isRecordingActive) {
-                    recValue.add(r.getCorrectedGreenValue());
-                    recIbi.add(r.getIbi());
-                    recSd.add(r.getBpmSd());
-                    recValTs.add(System.currentTimeMillis());
-                    recIbiTs.add(System.currentTimeMillis());
+                    // 有効な値を保存（ISO < 500の時に使用）
+                    if (r.getHeartRate() > 0) {
+                        lastValidBpm = r.getHeartRate();
+                    }
+                    if (r.getBpmSd() > 0) {
+                        lastValidSd = r.getBpmSd();
+                    }
 
-                    lp.calculateSmoothedValueRealTime(
-                            r.getIbi(), r.getBpmSd());
+                    // ★ isRecordingActive フラグが true の場合のみデータを記録
+                    if (isRecordingActive && isDetectionValid()) {
+                        recValue.add(r.getCorrectedGreenValue());
+                        recIbi.add(r.getIbi());
+                        recSd.add(r.getBpmSd());
+                        recValTs.add(System.currentTimeMillis());
+                        recIbiTs.add(System.currentTimeMillis());
 
-                    double smI = lp.getLastSmoothedIbi();
-                    double smB = (60_000) / smI;
+                        lp.calculateSmoothedValueRealTime(
+                                r.getIbi(), r.getBpmSd());
 
-                    recSmIbi.add(smI);
-                    recSmBpm.add(smB);
+                        double smI = lp.getLastSmoothedIbi();
+                        double smB = (60_000) / smI;
+
+                        recSmIbi.add(smI);
+                        recSmBpm.add(smB);
+                    } else if (isRecordingActive && !isDetectionValid()) {
+                        Log.d("GreenValueAnalyzer-ISO", "CSV recording skipped: ISO=" + currentISO);
+                    }
+                    // ★ IBIの更新とUI更新は記録状態に関わらず行う (リアルタイム表示のため)
+                    IBI = r.getIbi();
+                    double currentSmI = lp.getLastSmoothedIbi(); // 記録していなくても平滑化IBIは計算される可能性があるため取得
+                    double currentSmB = (currentSmI > 0) ? (60_000 / currentSmI) : 0;
+
+                    updateUi(r.getCorrectedGreenValue(),
+                            r.getIbi(), r.getHeartRate(),
+                            r.getBpmSd(),
+                            // ★ UI表示用の平滑化値は、記録中はその時の最新、記録中でなければ直近の計算値を使う
+                            isRecordingActive ? recSmIbi.isEmpty() ? 0 : recSmIbi.get(recSmIbi.size()-1) : currentSmI,
+                            isRecordingActive ? recSmBpm.isEmpty() ? 0 : recSmBpm.get(recSmBpm.size()-1) : currentSmB
+                    );
+                } else {
+                    // ISOが500未満の場合、UI更新のみ行う（検出は停止）
+                    Log.d("GreenValueAnalyzer-ISO", "Detection skipped, UI update only: ISO=" + currentISO);
+                    
+                    // 前回の値を保持してUI更新
+                    double currentSmI = lp.getLastSmoothedIbi();
+                    double currentSmB = (currentSmI > 0) ? (60_000 / currentSmI) : 0;
+                    
+                    updateUi(g, IBI, lastValidBpm, lastValidSd, currentSmI, currentSmB);
                 }
-                // ★ IBIの更新とUI更新は記録状態に関わらず行う (リアルタイム表示のため)
-                IBI = r.getIbi();
-                double currentSmI = lp.getLastSmoothedIbi(); // 記録していなくても平滑化IBIは計算される可能性があるため取得
-                double currentSmB = (currentSmI > 0) ? (60_000 / currentSmI) : 0;
-
-                updateUi(r.getCorrectedGreenValue(),
-                        r.getIbi(), r.getHeartRate(),
-                        r.getBpmSd(),
-                        // ★ UI表示用の平滑化値は、記録中はその時の最新、記録中でなければ直近の計算値を使う
-                        isRecordingActive ? recSmIbi.isEmpty() ? 0 : recSmIbi.get(recSmIbi.size()-1) : currentSmI,
-                        isRecordingActive ? recSmBpm.isEmpty() ? 0 : recSmBpm.get(recSmBpm.size()-1) : currentSmB
-                );
             }
         }
         proxy.close();
@@ -505,6 +535,11 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         for (LogicProcessor lp : logicMap.values()) {
             if (lp instanceof Logic1)    ((Logic1)lp).reset();
             else if (lp instanceof Logic2)((Logic2)lp).reset();
+        }
+
+        // RealtimeBPの血圧値をリセット
+        if (bpEstimator != null) {
+            bpEstimator.reset();
         }
 
         // 記録データリストをクリア
@@ -646,5 +681,29 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     public LogicProcessor getLogicProcessor(String key) {
         return logicMap.get(key);
+    }
+
+    /**
+     * ISO値を更新し、検出の有効/無効を制御
+     */
+    public void updateISO(int iso) {
+        this.currentISO = iso;
+        boolean shouldEnable = iso >= 500;
+        
+        if (isDetectionEnabled != shouldEnable) {
+            isDetectionEnabled = shouldEnable;
+            if (shouldEnable) {
+                Log.d("GreenValueAnalyzer-ISO", "Detection enabled: ISO=" + iso);
+            } else {
+                Log.d("GreenValueAnalyzer-ISO", "Detection disabled: ISO=" + iso);
+            }
+        }
+    }
+
+    /**
+     * 検出が有効かチェック
+     */
+    private boolean isDetectionValid() {
+        return isDetectionEnabled && currentISO >= 500;
     }
 }

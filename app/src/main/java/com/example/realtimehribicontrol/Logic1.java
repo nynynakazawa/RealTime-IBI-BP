@@ -1,5 +1,7 @@
 package com.example.realtimehribicontrol;
 
+import android.util.Log;
+
 public class Logic1 extends BaseLogic {
     @Override
     public LogicResult processGreenValueData(double avgG) {
@@ -44,49 +46,30 @@ public class Logic1 extends BaseLogic {
             }
             twiceSmoothedValue /= Math.min(smoothingWindowSize2, smoothedCorrectedGreenValues.size());
             correctedGreenValue = twiceSmoothedValue;
-            window[windowIndex] = correctedGreenValue * 3;
+            window[windowIndex] = correctedGreenValue;
             windowIndex = (windowIndex + 1) % WINDOW_SIZE;
         }
         updateValueText(correctedGreenValue);
         updateChart(correctedGreenValue);
-        double currentVal = window[(windowIndex + WINDOW_SIZE - 1) % WINDOW_SIZE];
-        double previous1  = window[(windowIndex + WINDOW_SIZE - 2) % WINDOW_SIZE];
-        double previous2  = window[(windowIndex + WINDOW_SIZE - 3) % WINDOW_SIZE];
-        double previous3  = window[(windowIndex + WINDOW_SIZE - 4) % WINDOW_SIZE];
-        double previous4  = window[(windowIndex + WINDOW_SIZE - 5) % WINDOW_SIZE];
-        if (framesSinceLastPeak >= REFRACTORY_FRAMES
-                && previous1 > previous2
-                && previous2 > previous3
-                && previous3 > previous4
-                && previous1 > currentVal) {
-            framesSinceLastPeak = 0;
-            long currentTime = System.currentTimeMillis();
-            if (lastPeakTime != 0) {
-                double interval = (currentTime - lastPeakTime) / 1000.0;
-                if (interval > 0.25 && interval < 1.2) {
-                    double bpm = 60.0 / interval;
-                    if (bpmHistory.size() >= BPM_HISTORY_SIZE) {
-                        bpmHistory.remove(0);
-                    }
-                    bpmHistory.add(bpm);
-                    double meanBpm = getMean(bpmHistory);
-                    double bpmSD   = getStdDev(bpmHistory);
-                    if (bpm >= meanBpm - meanBpm * 0.1
-                            && bpm <= meanBpm + meanBpm * 0.1) {
-                        bpmValue = bpm;
-                        IBI      = 60.0 / bpmValue * 1000.0;
-                    }
-                    lastPeakTime = currentTime;
-                    updateCount++;
-                    if (bpCallback != null) {
-                        bpCallback.onFrame(correctedGreenValue, IBI);
-                    }
-                    return new LogicResult(correctedGreenValue, IBI, bpmValue, bpmSD);
-                }
-            }
-            lastPeakTime = System.currentTimeMillis();
+
+        // ISO値を更新（実際のISO値は外部から設定される想定）
+        // updateISO(actualISO); // 実際のISO値が取得できる場合はここで更新
+
+        // ISOチェック
+        if (!isDetectionValid()) {
+            Log.d("Logic1", "Detection disabled due to ISO < 500, using last valid values");
+            return new LogicResult(correctedGreenValue, IBI, lastValidBpm, lastValidSd);
         }
-        framesSinceLastPeak++;
+
+        // 心拍数検出（既存の処理を保持）
+        LogicResult heartRateResult = detectHeartRateAndUpdate();
+        if (heartRateResult != null) {
+            return heartRateResult;
+        }
+
+        // BaseLogicの非同期検出メソッドを使用
+        detectPeakAndValleyAsync(IBI);
+
         return new LogicResult(correctedGreenValue, IBI, bpmValue, getStdDev(bpmHistory));
     }
 }
