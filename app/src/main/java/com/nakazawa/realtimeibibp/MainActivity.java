@@ -74,6 +74,7 @@ public class MainActivity extends AppCompatActivity
         initRealtimeBP();
         initSinBP(); // SinBP初期化を追加
         analyzer.setBpEstimator(bpEstimator);
+        analyzer.setSinBP(sinBP); // SinBPもAnalyzerに渡す
         
         // Camera X API 色温度関連情報のコールバックを設定
         analyzer.setCameraInfoCallback((fNumber, iso, exposureTime, colorTemperature, whiteBalanceMode, focusDistance, aperture, sensorSensitivity) -> {

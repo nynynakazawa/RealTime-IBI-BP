@@ -94,10 +94,16 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     // 外部から注入されるBP推定器
     private RealtimeBP bpEstimator;
+    private SinBP sinBP;  // SinBP推定器
 
     // MainActivity側の同じReatimeBPをセット
     public void setBpEstimator(RealtimeBP estimator) {
         this.bpEstimator = estimator;
+    }
+    
+    // SinBPをセット
+    public void setSinBP(SinBP estimator) {
+        this.sinBP = estimator;
     }
     
     // Camera X API 色温度関連情報のコールバック
@@ -586,8 +592,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
 
         try (FileWriter writer = new FileWriter(csvFile)) {
-            // ヘッダー行
-            writer.append("IBI, bpmSD, Smoothed IBI, Smoothed BPM, SBP, DBP, SBP_Avg, DBP_Avg, Timestamp\n");
+            // ヘッダー行（SinBP値を追加）
+            writer.append("IBI, bpmSD, Smoothed IBI, Smoothed BPM, SBP, DBP, SBP_Avg, DBP_Avg, SinSBP, SinDBP, SinSBP_Avg, SinDBP_Avg, Timestamp\n");
 
             // 記録データを CSV に書き出し
             double prevIbi = Double.NaN;
@@ -612,6 +618,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                         .append(String.format(Locale.getDefault(), "%.2f", bpEstimator.getLastDbp())).append(", ")
                         .append(String.format(Locale.getDefault(), "%.2f", bpEstimator.getLastSbpAvg())).append(", ")
                         .append(String.format(Locale.getDefault(), "%.2f", bpEstimator.getLastDbpAvg())).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", sinBP != null ? sinBP.getLastSinSBP() : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", sinBP != null ? sinBP.getLastSinDBP() : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", sinBP != null ? sinBP.getLastSinSBPAvg() : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", sinBP != null ? sinBP.getLastSinDBPAvg() : 0.0)).append(", ")
                         .append(ts)
                         .append("\n");
             }
