@@ -1,4 +1,4 @@
-package com.example.realtimehribicontrol;
+package com.nakazawa.realtimeibibp;
 
 import android.util.Log;
 

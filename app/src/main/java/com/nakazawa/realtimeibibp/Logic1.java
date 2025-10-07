@@ -1,11 +1,11 @@
-package com.example.realtimehribicontrol;
+package com.nakazawa.realtimeibibp;
 
 import android.util.Log;
 
-public class Logic2 extends BaseLogic {
+public class Logic1 extends BaseLogic {
     @Override
     public LogicResult processGreenValueData(double avgG) {
-        // Logic2特有の処理（例: smoothingWindowSize1=4, range正規化, windowへの格納値など）
+        // Logic1特有の処理（例: smoothingWindowSize1=6, correctedGreenValue*3 など）
         synchronized (greenValues) {
             greenValues.add(avgG);
         }
@@ -24,7 +24,7 @@ public class Logic2 extends BaseLogic {
         recentCorrectedGreenValues.add(correctedGreenValue);
         if (recentCorrectedGreenValues.size() >= CORRECTED_GREEN_VALUE_WINDOW_SIZE) {
             double smoothedCorrectedGreenValue = 0.0;
-            int smoothingWindowSize1 = 4;
+            int smoothingWindowSize1 = 6;
             for (int i = 0; i < smoothingWindowSize1; i++) {
                 int index = recentCorrectedGreenValues.size() - 1 - i;
                 if (index >= 0) {
@@ -45,37 +45,24 @@ public class Logic2 extends BaseLogic {
                 }
             }
             twiceSmoothedValue /= Math.min(smoothingWindowSize2, smoothedCorrectedGreenValues.size());
-            // range正規化
-            int longWindowSize = 40;
-            int startIdx = Math.max(0, smoothedCorrectedGreenValues.size() - longWindowSize);
-            double localMin = Double.POSITIVE_INFINITY;
-            double localMax = Double.NEGATIVE_INFINITY;
-            for (int i = startIdx; i < smoothedCorrectedGreenValues.size(); i++) {
-                double v = smoothedCorrectedGreenValues.get(i);
-                if (v < localMin) localMin = v;
-                if (v > localMax) localMax = v;
-            }
-            double range = localMax - localMin;
-            if (range < 1.0) {
-                range = 1.0;
-            }
-            correctedGreenValue = ((twiceSmoothedValue - localMin) / range) * 100.0;
-            correctedGreenValue = Math.max(0, Math.min(100, correctedGreenValue));
+            correctedGreenValue = twiceSmoothedValue;
             window[windowIndex] = correctedGreenValue;
             windowIndex = (windowIndex + 1) % WINDOW_SIZE;
         }
-        if (bpCallback != null && isDetectionValid()) {
-            bpCallback.onFrame(correctedGreenValue, IBI);
-        }
         updateValueText(correctedGreenValue);
         updateChart(correctedGreenValue);
+        
+        // SinBPコールバック呼び出し
+        if (sinBPCallback != null && isDetectionValid()) {
+            sinBPCallback.onFrame(correctedGreenValue, System.currentTimeMillis());
+        }
 
         // ISO値を更新（実際のISO値は外部から設定される想定）
         // updateISO(actualISO); // 実際のISO値が取得できる場合はここで更新
 
         // ISOチェック
         if (!isDetectionValid()) {
-            Log.d("Logic2", "Detection disabled due to ISO < 500, using last valid values");
+            Log.d("Logic1", "Detection disabled due to ISO < 500, using last valid values");
             return new LogicResult(correctedGreenValue, IBI, lastValidBpm, lastValidSd);
         }
 

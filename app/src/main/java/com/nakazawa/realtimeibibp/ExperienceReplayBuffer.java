@@ -1,4 +1,4 @@
-package com.example.realtimehribicontrol;
+package com.nakazawa.realtimeibibp;
 
 import java.util.ArrayList;
 import java.util.List;

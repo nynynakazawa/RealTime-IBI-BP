@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace 'com.example.realtimehribicontrol'
+    namespace 'com.nakazawa.realtimeibibp'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.example.realtimehribicontrol"
+        applicationId "com.nakazawa.realtimeibibp"
         minSdk 34
         targetSdk 34
         versionCode 1

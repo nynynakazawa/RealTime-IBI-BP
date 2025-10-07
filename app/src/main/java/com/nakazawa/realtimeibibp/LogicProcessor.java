@@ -1,4 +1,4 @@
-package com.example.realtimehribicontrol;
+package com.nakazawa.realtimeibibp;
 
 public interface LogicProcessor {
     LogicResult processGreenValueData(double avgG);

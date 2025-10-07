@@ -1,4 +1,4 @@
-package com.example.realtimehribicontrol;
+package com.nakazawa.realtimeibibp;
 
 import org.deeplearning4j.nn.api.OptimizationAlgorithm;
 import org.deeplearning4j.nn.conf.MultiLayerConfiguration;

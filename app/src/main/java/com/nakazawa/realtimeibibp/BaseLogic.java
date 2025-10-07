@@ -1,4 +1,4 @@
-package com.example.realtimehribicontrol;
+package com.nakazawa.realtimeibibp;
 
 import android.util.Log;
 import java.util.ArrayList;
@@ -47,6 +47,13 @@ public abstract class BaseLogic implements LogicProcessor {
     }
     protected BPFrameCallback bpCallback;
     public void setBPFrameCallback(BPFrameCallback cb){ this.bpCallback = cb; }
+    
+    // ----- SinBP用コールバック -----
+    public interface SinBPCallback {
+        void onFrame(double correctedGreenValue, long timestampMs);
+    }
+    protected SinBPCallback sinBPCallback;
+    public void setSinBPCallback(SinBPCallback cb){ this.sinBPCallback = cb; }
 
     // 共通: リアルタイム平滑化補間
     @Override
@@ -72,6 +79,7 @@ public abstract class BaseLogic implements LogicProcessor {
             lastIbiValue = newIbi;
         }
     }
+
 
     // 共通: 平均・標準偏差
     protected double getMean(ArrayList<Double> values) {
@@ -126,6 +134,75 @@ public abstract class BaseLogic implements LogicProcessor {
         }
     }
 
+
+
+    /**
+     * 心拍数検出メソッド（既存の処理を保持）
+     */
+    protected LogicResult detectHeartRateAndUpdate() {
+        // ISOチェック
+        if (!isDetectionValid()) {
+            Log.d("BaseLogic-ISO", "Heart rate detection skipped: ISO=" + currentISO);
+            return null;
+        }
+
+        double currentVal = window[(windowIndex + WINDOW_SIZE - 1) % WINDOW_SIZE];
+        double previous1  = window[(windowIndex + WINDOW_SIZE - 2) % WINDOW_SIZE];
+        double previous2  = window[(windowIndex + WINDOW_SIZE - 3) % WINDOW_SIZE];
+        double previous3  = window[(windowIndex + WINDOW_SIZE - 4) % WINDOW_SIZE];
+        double previous4  = window[(windowIndex + WINDOW_SIZE - 5) % WINDOW_SIZE];
+
+        if (framesSinceLastPeak >= REFRACTORY_FRAMES
+                && previous1 > previous2
+                && previous2 > previous3
+                && previous3 > previous4
+                && previous1 > currentVal) {
+            framesSinceLastPeak = 0;
+            long currentTime = System.currentTimeMillis();
+            if (lastPeakTime != 0) {
+                double interval = (currentTime - lastPeakTime) / 1000.0;
+                if (interval > 0.25 && interval < 1.2) {
+                    double bpm = 60.0 / interval;
+                    if (bpmHistory.size() >= BPM_HISTORY_SIZE) {
+                        bpmHistory.remove(0);
+                    }
+                    bpmHistory.add(bpm);
+                    double meanBpm = getMean(bpmHistory);
+                    double bpmSD   = getStdDev(bpmHistory);
+                    if (bpm >= meanBpm - meanBpm * 0.1
+                            && bpm <= meanBpm + meanBpm * 0.1) {
+                        bpmValue = bpm;
+                        IBI      = 60.0 / bpmValue * 1000.0;
+                    }
+                    lastPeakTime = currentTime;
+                    updateCount++;
+                    if (bpCallback != null) {
+                        bpCallback.onFrame(currentVal, IBI);
+                    }
+                    // 心拍数とSDを更新
+                    if (bpmValue > 0) {
+                        smoothedBpm = bpmValue;
+                        smoothedBpmSd.add(bpmSD);
+                        if (smoothedBpmSd.size() > 5) {
+                            smoothedBpmSd.remove(0);
+                        }
+
+                        // 有効な値を保存（ISO < 500の時に使用）
+                        lastValidBpm = bpmValue;
+                        lastValidSd = bpmSD;
+
+                        Log.d("BaseLogic-HR", String.format("✓ HR updated: BPM=%.1f, SD=%.1f, IBI=%.1fms", bpmValue, bpmSD, IBI));
+                    }
+                    return new LogicResult(currentVal, IBI, bpmValue, bpmSD);
+                }
+            }
+            lastPeakTime = System.currentTimeMillis();
+        }
+        framesSinceLastPeak++;
+        return null; // 心拍数が検出されなかった場合
+    }
+
+
     @Override
     public double getLastSmoothedIbi() {
         if (smoothedIbi.isEmpty()) {
@@ -133,13 +210,7 @@ public abstract class BaseLogic implements LogicProcessor {
         }
         return smoothedIbi.get(smoothedIbi.size() - 1);
     }
-    
-    /**
-     * 最新の平滑化された心拍数を取得
-     */
-    public double getLastSmoothedBpm() {
-        return smoothedBpm;
-    }
+
 
     public void reset() {
         greenValues.clear();
@@ -661,73 +732,6 @@ public abstract class BaseLogic implements LogicProcessor {
         
         Log.d("BaseLogic-Async", "=== updateAverageValuesAsync END ===");
     }
-
-    /**
-     * 心拍数検出メソッド（既存の処理を保持）
-     */
-    protected LogicResult detectHeartRateAndUpdate() {
-        // ISOチェック
-        if (!isDetectionValid()) {
-            Log.d("BaseLogic-ISO", "Heart rate detection skipped: ISO=" + currentISO);
-            return null;
-        }
-
-        double currentVal = window[(windowIndex + WINDOW_SIZE - 1) % WINDOW_SIZE];
-        double previous1  = window[(windowIndex + WINDOW_SIZE - 2) % WINDOW_SIZE];
-        double previous2  = window[(windowIndex + WINDOW_SIZE - 3) % WINDOW_SIZE];
-        double previous3  = window[(windowIndex + WINDOW_SIZE - 4) % WINDOW_SIZE];
-        double previous4  = window[(windowIndex + WINDOW_SIZE - 5) % WINDOW_SIZE];
-        
-        if (framesSinceLastPeak >= REFRACTORY_FRAMES
-                && previous1 > previous2
-                && previous2 > previous3
-                && previous3 > previous4
-                && previous1 > currentVal) {
-            framesSinceLastPeak = 0;
-            long currentTime = System.currentTimeMillis();
-            if (lastPeakTime != 0) {
-                double interval = (currentTime - lastPeakTime) / 1000.0;
-                if (interval > 0.25 && interval < 1.2) {
-                    double bpm = 60.0 / interval;
-                    if (bpmHistory.size() >= BPM_HISTORY_SIZE) {
-                        bpmHistory.remove(0);
-                    }
-                    bpmHistory.add(bpm);
-                    double meanBpm = getMean(bpmHistory);
-                    double bpmSD   = getStdDev(bpmHistory);
-                    if (bpm >= meanBpm - meanBpm * 0.1
-                            && bpm <= meanBpm + meanBpm * 0.1) {
-                        bpmValue = bpm;
-                        IBI      = 60.0 / bpmValue * 1000.0;
-                    }
-                    lastPeakTime = currentTime;
-                    updateCount++;
-                    if (bpCallback != null) {
-                        bpCallback.onFrame(currentVal, IBI);
-                    }
-                    // 心拍数とSDを更新
-                    if (bpmValue > 0) {
-                        smoothedBpm = bpmValue;
-                        smoothedBpmSd.add(bpmSD);
-                        if (smoothedBpmSd.size() > 5) {
-                            smoothedBpmSd.remove(0);
-                        }
-                        
-                        // 有効な値を保存（ISO < 500の時に使用）
-                        lastValidBpm = bpmValue;
-                        lastValidSd = bpmSD;
-                        
-                        Log.d("BaseLogic-HR", String.format("✓ HR updated: BPM=%.1f, SD=%.1f, IBI=%.1fms", bpmValue, bpmSD, IBI));
-                    }
-                    return new LogicResult(currentVal, IBI, bpmValue, bpmSD);
-                }
-            }
-            lastPeakTime = System.currentTimeMillis();
-        }
-        framesSinceLastPeak++;
-        return null; // 心拍数が検出されなかった場合
-    }
-
 
 
     // 各Logicで異なる部分は抽象メソッドで定義

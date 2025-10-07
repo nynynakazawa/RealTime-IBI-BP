@@ -1,5 +1,5 @@
 // ─────────────────── MainActivity.java ───────────────────
-package com.example.realtimehribicontrol;
+package com.nakazawa.realtimeibibp;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -36,6 +36,7 @@ public class MainActivity extends AppCompatActivity
     private Button startButton, resetButton, modeBtn/*, bpMeasureButton*/;
     private EditText editTextName; private Spinner spinnerLogic;
     private TextView /*tvBPMax, tvBPMin,*/tvSBPRealtime,tvDBPRealtime, tvSBPAvg, tvDBPAvg;
+    private TextView tvSinSBP, tvSinDBP, tvSinSBPAvg, tvSinDBPAvg; // SinBP用
     private TextView tvFNumber, tvISO, tvExposureTime, tvColorTemperature, tvWhiteBalance, tvFocusDistance, tvAperture, tvSensorSensitivity;
 
     // ===== 解析と状態 =====
@@ -47,6 +48,7 @@ public class MainActivity extends AppCompatActivity
     private MidiHaptic midiHapticPlayer;
 
     private RealtimeBP bpEstimator;
+    private SinBP sinBP; // SinBP推定器
 
     // ===== 強化学習関連 =====
     private IBIControlEnv environment;
@@ -70,6 +72,7 @@ public class MainActivity extends AppCompatActivity
         initUi();
         initAnalyzer();
         initRealtimeBP();
+        initSinBP(); // SinBP初期化を追加
         analyzer.setBpEstimator(bpEstimator);
         
         // Camera X API 色温度関連情報のコールバックを設定
@@ -95,6 +98,11 @@ public class MainActivity extends AppCompatActivity
                 }
                 if (logic2 instanceof BaseLogic) {
                     ((BaseLogic) logic2).updateISO(iso);
+                }
+                
+                // SinBPにもISO値を渡す
+                if (sinBP != null) {
+                    sinBP.updateISO(iso);
                 }
             });
         });
@@ -248,6 +256,34 @@ public class MainActivity extends AppCompatActivity
             ((Logic1) lp).setBPFrameCallback(bpEstimator::update);
             // ここで必ずsetLogicRefを呼ぶ！
             bpEstimator.setLogicRef((Logic1) lp);
+        }
+    }
+
+    private void initSinBP() {
+        // 1. インスタンス作成＆View のバインド
+        sinBP = new SinBP();
+        tvSinSBP = findViewById(R.id.tvSinSBP);
+        tvSinDBP = findViewById(R.id.tvSinDBP);
+        tvSinSBPAvg = findViewById(R.id.tvSinSBPAvg);
+        tvSinDBPAvg = findViewById(R.id.tvSinDBPAvg);
+
+        // 2. UI 更新リスナ登録
+        sinBP.setListener((sinSbp, sinDbp, sinSbpAvg, sinDbpAvg) -> runOnUiThread(() -> {
+            tvSinSBP.setText(String.format(Locale.getDefault(),
+                    "SinSBP : %.1f", sinSbp));
+            tvSinDBP.setText(String.format(Locale.getDefault(),
+                    "SinDBP : %.1f", sinDbp));
+            tvSinSBPAvg.setText(String.format(Locale.getDefault(),
+                    "SinSBP(Avg) : %.1f", sinSbpAvg));
+            tvSinDBPAvg.setText(String.format(Locale.getDefault(),
+                    "SinDBP(Avg) : %.1f", sinDbpAvg));
+        }));
+
+        // 3. Logic1への参照を設定とコールバック設定
+        LogicProcessor lp = analyzer.getLogicProcessor("Logic1");
+        if (lp instanceof Logic1) {
+            sinBP.setLogicRef((Logic1) lp);
+            ((Logic1) lp).setSinBPCallback(sinBP::update);
         }
     }
 

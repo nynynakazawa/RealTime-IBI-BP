@@ -1,4 +1,4 @@
-package com.example.realtimehribicontrol.trainer;
+package com.nakazawa.realtimeibibp.trainer;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;

@@ -1,5 +1,5 @@
 // ─────────────────── GreenValueAnalyzer.java ───────────────────
-package com.example.realtimehribicontrol;
+package com.nakazawa.realtimeibibp;
 
 import android.content.Context;
 import android.graphics.ImageFormat;
