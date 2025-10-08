@@ -463,14 +463,25 @@ public class SinBP {
         currentIBIms = T;
         
         // ピーク検出時に理想曲線の位相を再同期
-        // PHASE_SHIFT = -π/4 により、理想曲線のピークは phase = π/4 / (3π/2) = 1/6 の位置
-        // （ピーク→谷の区間で cos(angle + PHASE_SHIFT) = 1 となるのは angle = -PHASE_SHIFT = π/4 のとき）
-        // angle = phase * (3/2) * π = π/4 → phase = 1/6
-        // したがって、lastPeakTime は t = T/6 に対応
-        // 理想曲線の開始時刻（t=0）= lastPeakTime - T/6
-        double peakPhase = PHASE_SHIFT / ((3.0/2.0) * Math.PI);  // 負の値なので実際は前方
-        double peakTimeOffset = -peakPhase * T;  // 正の値（ピークはt=0より後）
-        idealCurveStartTime = lastPeakTime - (long)peakTimeOffset;
+        // シンプルに：lastPeakTime を理想曲線のピーク位置に合わせる
+        // 理想曲線のピーク位置を探索して、その時刻をlastPeakTimeに対応させる
+        double maxValue = -1.0;
+        double peakPhaseTime = 0;
+        int searchSteps = 100;
+        for (int i = 0; i < searchSteps; i++) {
+            double t = (double) i * T / searchSteps;
+            double val = asymmetricSineBasis(t, T);
+            if (val > maxValue) {
+                maxValue = val;
+                peakPhaseTime = t;
+            }
+        }
+        // 僅かに遅れているため、位相を前進（ピーク位置を5%早める）
+        peakPhaseTime *= 1.8;
+        
+        // lastPeakTime = idealCurveStartTime + peakPhaseTime
+        // → idealCurveStartTime = lastPeakTime - peakPhaseTime
+        idealCurveStartTime = lastPeakTime - (long)peakPhaseTime;
         
         hasIdealCurve = true;
         
