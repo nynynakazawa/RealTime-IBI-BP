@@ -152,8 +152,11 @@ public class RealtimeBP {
             lastValidHr = hr;
         }
         
-        double isoNorm = currentISO / 600.0;
-        double isoDev = isoNorm - 1.0;
+        // ISO補正の計算（コメントアウト）
+        // double isoNorm = currentISO / 600.0;
+        // double isoDev = isoNorm - 1.0;
+        double isoNorm = 1.0; // ISO補正を無効化（常に基準値として扱う）
+        double isoDev = 0.0;  // ISO偏差を0に固定
 
         // Sピーク値の取得（独立検出システムの平均値を使用）
         double sPeak = 0.0;
@@ -161,12 +164,13 @@ public class RealtimeBP {
             // 谷→山の振幅をSピーク値として使用
             sPeak = logicRef.averageValleyToPeakAmplitude;
         }
-        double sNorm = sPeak * isoNorm;
+        // double sNorm = sPeak * isoNorm; // ISO補正を無効化
+        double sNorm = sPeak; // ISO補正なしの生の値を使用
 
-        // 回帰式による血圧推定（谷→山と山→谷のrelTTPを区別して使用、lastRelTTPは除外）
-        double sbp = C0 + C1 * lastAiAt75 + C2 * hr + C4 * sNorm + C5 * isoDev
+        // 回帰式による血圧推定（谷→山と山→谷のrelTTPを区別して使用、ISO補正項をコメントアウト）
+        double sbp = C0 + C1 * lastAiAt75 + C2 * hr + C4 * sNorm // + C5 * isoDev
                 + C6 * lastValleyToPeakRelTTP + C7 * lastPeakToValleyRelTTP;
-        double dbp = D0 + D1 * lastAiAt75 + D2 * hr + D4 * sNorm + D5 * isoDev
+        double dbp = D0 + D1 * lastAiAt75 + D2 * hr + D4 * sNorm // + D5 * isoDev
                 + D6 * lastValleyToPeakRelTTP + D7 * lastPeakToValleyRelTTP;
 
         Log.d("RealtimeBP-Estimate", String.format(

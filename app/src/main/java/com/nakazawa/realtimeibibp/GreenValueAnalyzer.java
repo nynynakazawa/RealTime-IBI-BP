@@ -50,9 +50,12 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     // ===== グラフデータ =====
     private final List<Entry> entries = new ArrayList<>();
+    private final List<Entry> idealCurveEntries = new ArrayList<>();  // 理想曲線用
     private final LineDataSet dataSet;
+    private LineDataSet idealCurveDataSet;  // 理想曲線用
     private final LineData data;
     private String activeLogic = "Logic1";
+    private long chartStartTime = 0;  // チャート開始時刻（理想曲線の時刻計算用）
 
     // ===== 記録 =====
     private final List<Double> recValue = new ArrayList<>(),
@@ -129,15 +132,29 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         this.tvSd = tvSd; this.tvHr = tvHr;
         tvSmIbi = tvSmI; tvSmHr = tvSmH;
 
-        chart.getLegend().setEnabled(false);
-        dataSet = new LineDataSet(entries, "");
+        chart.getLegend().setEnabled(true);  // 凡例を有効化
+        
+        // 実測波形データセット
+        dataSet = new LineDataSet(entries, "実測波形");
         dataSet.setLineWidth(2);
         dataSet.setColor(Color.parseColor("#78CCCC"));
         dataSet.setDrawValues(false);  // 値ラベルを非表示
+        dataSet.setDrawCircles(false);  // 点を非表示
+        
+        // 理想曲線データセット
+        idealCurveDataSet = new LineDataSet(idealCurveEntries, "理想曲線(非対称sin)");
+        idealCurveDataSet.setLineWidth(2);
+        idealCurveDataSet.setColor(Color.parseColor("#FF6B6B"));  // 赤色
+        idealCurveDataSet.setDrawValues(false);
+        idealCurveDataSet.setDrawCircles(false);
+        // 実線表示（破線を無効化）
 
-        data = new LineData(dataSet);
+        data = new LineData(dataSet, idealCurveDataSet);
         chart.setData(data);
         chart.getDescription().setEnabled(false);
+        chart.getLegend().setTextColor(Color.WHITE);  // 凡例の文字色を白に
+        
+        chartStartTime = System.currentTimeMillis();  // チャート開始時刻を記録
 
         XAxis x = chart.getXAxis();
         x.setPosition(XAxis.XAxisPosition.BOTTOM);
@@ -505,6 +522,23 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 }
             }
             entries.add(new Entry(entries.size(), (float) v));
+            
+            // 理想曲線の更新
+            updateIdealCurve();
+
+            // デバッグログ（同フレームの実測値と理想曲線値）
+            double idealValForLog = Double.NaN;
+            boolean hasIdeal = false;
+            if (sinBP != null && sinBP.hasIdealCurve()) {
+                long now = System.currentTimeMillis();
+                idealValForLog = sinBP.getIdealCurveValue(now);  // 現在時刻を渡す
+                hasIdeal = true;
+            }
+            try {
+                Log.d("sindebug", String.format(Locale.getDefault(),
+                        "frame=%d, actual=%.4f, ideal=%.4f, hasIdeal=%b",
+                        entries.size() - 1, v, idealValForLog, hasIdeal));
+            } catch (Exception ignore) {}
 
             // Y軸の最小/最大を自動調整し、目盛りラベルと軸線を表示
             float minY = entries.stream().map(Entry::getY).min(Float::compare).orElse(0f);
@@ -527,12 +561,63 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
             // チャート更新
             dataSet.notifyDataSetChanged();
+            idealCurveDataSet.notifyDataSetChanged();
             data.notifyDataChanged();
             chart.notifyDataSetChanged();
             chart.setVisibleXRangeMaximum(200);
             chart.moveViewToX(data.getEntryCount());
             chart.invalidate();
         });
+    }
+    
+    /**
+     * 理想曲線を更新
+     */
+    private void updateIdealCurve() {
+        if (sinBP == null || !sinBP.hasIdealCurve()) {
+            // 理想曲線データがない場合はクリア
+            idealCurveEntries.clear();
+            return;
+        }
+        
+        // 理想曲線のIBI（周期）を取得
+        double ibi = sinBP.getCurrentIBI();
+        if (ibi <= 0) {
+            idealCurveEntries.clear();
+            return;
+        }
+        
+        // 実測波形と同じ数のポイントで理想曲線を生成
+        int numPoints = entries.size();
+        if (numPoints == 0) {
+            idealCurveEntries.clear();
+            return;
+        }
+        
+        // 古いエントリーを削除（実測波形と同期）
+        if (idealCurveEntries.size() > 100) {
+            idealCurveEntries.remove(0);
+            // X座標を再調整
+            for (int i = 0; i < idealCurveEntries.size(); i++) {
+                idealCurveEntries.get(i).setX(i);
+            }
+        }
+        
+        // 現在時刻を取得（実測波形と同期）
+        long currentTime = System.currentTimeMillis();
+        double elapsedTime = currentTime - chartStartTime;  // ms
+        
+        // 30fps想定で時刻を計算
+        double frameInterval = 1000.0 / 30.0;  // ms per frame
+        
+        // 最新のフレームに対応する理想曲線の値を追加
+        long now = System.currentTimeMillis();
+        
+        // 理想曲線の値を取得（振幅とmeanは自動的に反映される）
+        double idealValue = sinBP.getIdealCurveValue(now);
+        
+        // 新しいエントリーを追加（実測波形と同じX座標）
+        idealCurveEntries.add(new Entry(idealCurveEntries.size(), (float) idealValue));
     }
 
     // ===== リセット ／ 記録制御 =====

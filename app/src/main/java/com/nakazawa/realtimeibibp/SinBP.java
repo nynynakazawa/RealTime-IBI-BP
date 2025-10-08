@@ -9,14 +9,21 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * サイン波ベースのリアルタイム血圧推定器（SBP/DBP）
+ * 非対称サイン波モデル残差に基づくリアルタイム血圧推定器（SBP/DBP）
  * 
  * アルゴリズムの要点：
- * 1. PPG波形をサイン波で近似
- * 2. 振幅A、周期IBI、位相φを抽出
- * 3. 歪み指標Eで波形の複雑さを評価
- * 4. BaseLogicからAI・relTTPを取得して血管特性を反映
- * 5. 3段階のBP推定：ベース→血管特性補正→歪み補正
+ * 1. PPG波形を非対称サイン波モデルで近似（収縮期1/3:拡張期2/3の時間比）
+ * 2. 振幅A、周期IBI（実測peak-to-peak）を抽出
+ * 3. 歪み指標Eで理想非対称サイン波形からの外れを評価
+ * 4. BaseLogicからrelTTP（谷→山・山→谷）を取得して血管特性を反映
+ * 5. 3段階のBP推定：ベース（A・HR）→血管特性補正（relTTP・Stiffness_sin）→歪み補正（E）
+ * 
+ * 非対称サイン波モデル（理論的背景）：
+ * - t=0でピーク、谷までが2/3T（拡張期）、谷から次のピークまでが1/3T（収縮期）
+ * - 三角関数の合成により非対称性を実現
+ * - ピーク位置をt=0, T（IBI）に整列
+ * - 実測IBIと毎拍同期し、PPG/動脈波の生理学的非対称性を反映
+ * - 周波数分解に依存せず、低FPS環境（30fps）やノイズに対して頑健
  */
 public class SinBP {
     private static final String TAG = "SinBP";
@@ -76,17 +83,24 @@ public class SinBP {
     private static final double BETA1 = 3.0;    // 0.3 → 3.0 (10倍)
     private static final double BETA2 = 0.15;
     
-    // 血管特性補正係数
-    private static final double ALPHA3 = 0.3;   // AI係数（0.8 → 0.3に縮小）
-    private static final double ALPHA4 = 5.0;   // relTTP係数（0.2 → 5.0に拡大）
-    private static final double ALPHA5 = 0.01;  // stiffness係数（0.1 → 0.01に大幅縮小）
-    private static final double BETA3 = 0.2;    // AI係数（0.4 → 0.2に縮小）
-    private static final double BETA4 = 3.0;    // relTTP係数（0.1 → 3.0に拡大）
-    private static final double BETA5 = 0.005;  // stiffness係数（0.05 → 0.005に大幅縮小）
+    // 血管特性補正係数（AIを除去、Stiffness_sinを強化、両方のrelTTPを使用）
+    private static final double ALPHA3 = 5.0;   // 谷→山relTTP係数
+    private static final double ALPHA4 = 3.0;    // 山→谷relTTP係数
+    private static final double ALPHA5 = 0.1;     // Stiffness_sin係数（0.01 → 0.1に大幅強化）
+    private static final double BETA3 = 3.0;     // 谷→山relTTP係数
+    private static final double BETA4 = 2.0;     // 山→谷relTTP係数
+    private static final double BETA5 = 0.05;    // Stiffness_sin係数（0.005 → 0.05に大幅強化）
     
-    // 歪み補正係数（Eが小さくなるので拡大）
-    private static final double C1 = 0.1;       // 0.01 → 0.1
-    private static final double D1 = 0.05;      // 0.005 → 0.05
+    // 第3段：歪み補正係数（Eによる最終補正）
+    private static final double ALPHA6 = 0.1;    // SBP歪み補正係数（0.01 → 0.1）
+    private static final double BETA6 = 0.05;   // DBP歪み補正係数（0.005 → 0.05）
+    
+    // 理想曲線データ（UI表示用）
+    private double currentMean = 0;
+    private double currentAmplitude = 0;
+    private double currentIBIms = 0;
+    private long idealCurveStartTime = 0;  // 理想曲線の開始時刻（固定、位相の基準）
+    private boolean hasIdealCurve = false;
     
     // リスナー
     public interface SinBPListener {
@@ -101,6 +115,48 @@ public class SinBP {
     public void setListener(SinBPListener l) {
         this.listener = l;
     }
+    
+    /**
+     * 理想曲線データが利用可能かチェック
+     */
+    public boolean hasIdealCurve() {
+        return hasIdealCurve;
+    }
+    
+    /**
+     * 指定時刻での理想曲線の値を取得
+     * @param currentTime 現在時刻（ms）
+     * @return 理想曲線の値
+     */
+    public double getIdealCurveValue(long currentTime) {
+        if (!hasIdealCurve || currentIBIms <= 0 || idealCurveStartTime == 0) {
+            return currentMean;
+        }
+        
+        // 理想曲線開始時刻からの経過時間を計算（連続的な位相）
+        double elapsedSinceStart = currentTime - idealCurveStartTime;
+        
+        // 周期内に正規化（負の値の場合は0にクリップ）
+        if (elapsedSinceStart < 0) {
+            elapsedSinceStart = 0;
+        }
+        double tNorm = elapsedSinceStart % currentIBIms;
+        
+        // 非対称サイン波基底を使用
+        double sNorm = asymmetricSineBasis(tNorm, currentIBIms);
+        
+        // 理想波形: mean + A * (s_norm を中心からの偏差として1.5倍に拡大)
+        // s_norm は [0,1] の範囲なので、中心0.5からの偏差を1.5倍にする
+        double deviation = (sNorm - 0.5) * 1.5;
+        return currentMean + currentAmplitude * (0.5 + deviation);
+    }
+    
+    /**
+     * 現在の理想曲線パラメータを取得
+     */
+    public double getCurrentMean() { return currentMean; }
+    public double getCurrentAmplitude() { return currentAmplitude; }
+    public double getCurrentIBI() { return currentIBIms; }
     
     /**
      * ISO値を更新
@@ -330,7 +386,42 @@ public class SinBP {
     }
     
     /**
+     * 非対称サイン波基底関数（収縮期1/3:拡張期2/3）
+     * 三角関数の合成により、t=0でピーク、谷までが2/3T、谷から次のピークまでが1/3Tとなる波形を生成
+     * @param t 時刻（ms）、0からT（IBI）の範囲
+     * @param T 周期（IBI、ms）
+     * @return 正規化された波形値 [0,1]（t=0で最大値1）
+     */
+    // 位相シフト定数（クラスレベルで定義）
+    private static final double PHASE_SHIFT = -Math.PI / 4.0;
+    
+    private double asymmetricSineBasis(double t, double T) {
+        // 周期内に正規化（0〜1）
+        double phase = (t % T) / T;
+        
+        // 非対称波形の生成
+        // t=0でピーク、phase=2/3で谷、phase=1で次のピーク（周期T内で1サイクル完結）
+        
+        double value;
+        if (phase <= 2.0/3.0) {
+            // ピーク→谷: 2/3の時間
+            // phase: 0→2/3 を 0→π にマッピング
+            double angle = phase * (3.0/2.0) * Math.PI;  // 0→π
+            value = Math.cos(angle + PHASE_SHIFT);  // cos(0)=1 → cos(π)=-1（左シフト）
+        } else {
+            // 谷→ピーク: 1/3の時間
+            // phase: 2/3→1 を π→2π にマッピング
+            double angle = Math.PI + (phase - 2.0/3.0) * 3.0 * Math.PI;  // π→2π
+            value = Math.cos(angle + PHASE_SHIFT);  // cos(π)=-1 → cos(2π)=1（左シフト）
+        }
+        
+        // [0,1]に正規化（-1〜1 → 0〜1）
+        return (value + 1.0) / 2.0;
+    }
+    
+    /**
      * 歪み指標の計算
+     * 非対称サイン波モデル（収縮期1/3:拡張期2/3）からの残差を計算
      */
     private void calculateDistortion(List<Double> beatSamples, double A, double phi, double ibi) {
         if (A < 1e-6) {
@@ -345,21 +436,47 @@ public class SinBP {
         }
         mean /= beatSamples.size();
         
-        // サイン波再構成との残差を計算（平均値を考慮）
+        // 非対称サイン波形再構成との残差を計算
         double sumSquaredError = 0;
         int N = beatSamples.size();
+        double T = ibi;  // 周期（ms）
         
         for (int i = 0; i < N; i++) {
-            double t = (double) i / N;  // 0〜1に正規化
-            double angle = 2 * Math.PI * t + phi;
-            double sineValue = mean + A * Math.sin(angle);  // 平均値 + サイン波
-            double error = beatSamples.get(i) - sineValue;
+            // 時刻をms単位で計算（t=0がピーク）
+            double t = (double) i * T / N;
+            
+            // 非対称サイン波基底を使用
+            double sNorm = asymmetricSineBasis(t, T);
+            
+            // 理想波形の再構成: mean + A * s_norm
+            double idealValue = mean + A * sNorm;
+            
+            double error = beatSamples.get(i) - idealValue;
             sumSquaredError += error * error;
         }
         
-        currentE = Math.sqrt(sumSquaredError / N);  // RMS誤差（正規化）
+        currentE = Math.sqrt(sumSquaredError / N);  // RMS誤差
         
-        Log.d(TAG + "-Distortion", String.format("E=%.4f (mean=%.2f)", currentE, mean));
+        // 理想曲線パラメータを保存（UI表示用）
+        currentMean = mean;
+        currentAmplitude = A;
+        currentIBIms = T;
+        
+        // ピーク検出時に理想曲線の位相を再同期
+        // PHASE_SHIFT = -π/4 により、理想曲線のピークは phase = π/4 / (3π/2) = 1/6 の位置
+        // （ピーク→谷の区間で cos(angle + PHASE_SHIFT) = 1 となるのは angle = -PHASE_SHIFT = π/4 のとき）
+        // angle = phase * (3/2) * π = π/4 → phase = 1/6
+        // したがって、lastPeakTime は t = T/6 に対応
+        // 理想曲線の開始時刻（t=0）= lastPeakTime - T/6
+        double peakPhase = PHASE_SHIFT / ((3.0/2.0) * Math.PI);  // 負の値なので実際は前方
+        double peakTimeOffset = -peakPhase * T;  // 正の値（ピークはt=0より後）
+        idealCurveStartTime = lastPeakTime - (long)peakTimeOffset;
+        
+        hasIdealCurve = true;
+        
+        Log.d(TAG + "-Distortion", String.format(
+                "E=%.4f (mean=%.2f, Asymmetric sine model: systole 1/3, diastole 2/3)", 
+                currentE, mean));
     }
     
     /**
@@ -397,24 +514,24 @@ public class SinBP {
     private void estimateBP(double A, double ibi, double E) {
         double hr = 60000.0 / ibi;
         
-        // BaseLogicから血管特性を取得
-        double ai = (logicRef != null) ? logicRef.averageAI : 0.0;
-        double relTTP = (logicRef != null) ? logicRef.averageValleyToPeakRelTTP : 0.0;
+        // BaseLogicから血管特性を取得（AIは除去、Stiffness_sinを優先）
+        double valleyToPeakRelTTP = (logicRef != null) ? logicRef.averageValleyToPeakRelTTP : 0.0;
+        double peakToValleyRelTTP = (logicRef != null) ? logicRef.averagePeakToValleyRelTTP : 0.0;
         
-        // 血管硬さ指標（歪み × 振幅の平方根）
+        // 血管硬さ指標（歪み × 振幅の平方根）- SinBPの独自指標
         double stiffness = E * Math.sqrt(A);
         
         // ベースBP計算
         double sbpBase = ALPHA0 + ALPHA1 * A + ALPHA2 * hr;
         double dbpBase = BETA0 + BETA1 * A + BETA2 * hr;
         
-        // 血管特性補正
-        double sbpVascular = sbpBase + ALPHA3 * ai + ALPHA4 * relTTP + ALPHA5 * stiffness;
-        double dbpVascular = dbpBase + BETA3 * ai + BETA4 * relTTP + BETA5 * stiffness;
+        // 血管特性補正（AIを除去、Stiffness_sinを強化、両方のrelTTPを使用）
+        double sbpVascular = sbpBase + ALPHA3 * valleyToPeakRelTTP + ALPHA4 * peakToValleyRelTTP + ALPHA5 * stiffness;
+        double dbpVascular = dbpBase + BETA3 * valleyToPeakRelTTP + BETA4 * peakToValleyRelTTP + BETA5 * stiffness;
         
-        // 歪み補正
-        double deltaSBP = C1 * E;
-        double deltaDBP = D1 * E;
+        // 歪み補正（第3段）
+        double deltaSBP = ALPHA6 * E;
+        double deltaDBP = BETA6 * E;
         double sbpRefined = sbpVascular + deltaSBP;
         double dbpRefined = dbpVascular + deltaDBP;
         
@@ -433,8 +550,8 @@ public class SinBP {
         }
         
         Log.d(TAG + "-Estimate", String.format(
-                "BP: SBP=%.1f, DBP=%.1f (AI=%.2f, relTTP=%.3f, stiffness=%.3f)",
-                sbpRefined, dbpRefined, ai, relTTP, stiffness));
+                "BP: SBP=%.1f, DBP=%.1f (V2P_relTTP=%.3f, P2V_relTTP=%.3f, stiffness=%.3f)",
+                sbpRefined, dbpRefined, valleyToPeakRelTTP, peakToValleyRelTTP, stiffness));
         
         // 履歴更新と平均計算
         updateHistory(sbpRefined, dbpRefined);
