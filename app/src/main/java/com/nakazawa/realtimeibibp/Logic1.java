@@ -45,7 +45,23 @@ public class Logic1 extends BaseLogic {
                 }
             }
             twiceSmoothedValue /= Math.min(smoothingWindowSize2, smoothedCorrectedGreenValues.size());
-            correctedGreenValue = twiceSmoothedValue;
+            
+            // range正規化（Logic2と同様、ただし範囲は0-20）
+            int longWindowSize = 40;
+            int startIdx = Math.max(0, smoothedCorrectedGreenValues.size() - longWindowSize);
+            double localMin = Double.POSITIVE_INFINITY;
+            double localMax = Double.NEGATIVE_INFINITY;
+            for (int i = startIdx; i < smoothedCorrectedGreenValues.size(); i++) {
+                double v = smoothedCorrectedGreenValues.get(i);
+                if (v < localMin) localMin = v;
+                if (v > localMax) localMax = v;
+            }
+            double range = localMax - localMin;
+            if (range < 1.0) {
+                range = 1.0;
+            }
+            correctedGreenValue = ((twiceSmoothedValue - localMin) / range) * 20.0;
+            correctedGreenValue = Math.max(0, Math.min(20, correctedGreenValue));
             window[windowIndex] = correctedGreenValue;
             windowIndex = (windowIndex + 1) % WINDOW_SIZE;
         }

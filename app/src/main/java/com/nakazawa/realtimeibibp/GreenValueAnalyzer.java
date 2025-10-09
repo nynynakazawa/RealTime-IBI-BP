@@ -102,11 +102,23 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     // MainActivity側の同じReatimeBPをセット
     public void setBpEstimator(RealtimeBP estimator) {
         this.bpEstimator = estimator;
+        // Logic1とLogic2への参照を設定
+        if (estimator != null) {
+            Logic1 l1 = (Logic1) logicMap.computeIfAbsent("Logic1", k -> new Logic1());
+            Logic2 l2 = (Logic2) logicMap.computeIfAbsent("Logic2", k -> new Logic2());
+            estimator.setLogicRef(l1);  // デフォルトでLogic1を設定
+        }
     }
     
     // SinBPをセット
     public void setSinBP(SinBP estimator) {
         this.sinBP = estimator;
+        // Logic1とLogic2への参照を設定
+        if (estimator != null) {
+            Logic1 l1 = (Logic1) logicMap.computeIfAbsent("Logic1", k -> new Logic1());
+            Logic2 l2 = (Logic2) logicMap.computeIfAbsent("Logic2", k -> new Logic2());
+            estimator.setLogicRef(l1);  // デフォルトでLogic1を設定
+        }
     }
     
     // Camera X API 色温度関連情報のコールバック
@@ -176,12 +188,23 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     // ===== ロジック選択 =====
     public void setActiveLogic(String n) {
         this.activeLogic = n;                // ★修正
-        logicMap.computeIfAbsent(n, k -> {
+        LogicProcessor logicProcessor = logicMap.computeIfAbsent(n, k -> {
             switch (k) {
                 default:       return new Logic1();
                 case "Logic2": return new Logic2();
             }
         });
+        
+        // アクティブなロジックに応じてRealtimeBPとSinBPの参照を更新
+        if (logicProcessor instanceof BaseLogic) {
+            BaseLogic logic = (BaseLogic) logicProcessor;
+            if (bpEstimator != null) {
+                bpEstimator.setLogicRef(logic);
+            }
+            if (sinBP != null) {
+                sinBP.setLogicRef(logic);
+            }
+        }
     }
 
     public double getLatestIbi() { return IBI; }
@@ -190,9 +213,22 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     // ===== カメラ起動 =====
     public void startCamera() {
+        // Logic1のコールバック設定
         Logic1 l1 = (Logic1) logicMap.computeIfAbsent("Logic1", k -> new Logic1());
         if (bpEstimator != null) {
             l1.setBPFrameCallback(bpEstimator::update);
+        }
+        if (sinBP != null) {
+            l1.setSinBPCallback(sinBP::update);
+        }
+        
+        // Logic2のコールバック設定
+        Logic2 l2 = (Logic2) logicMap.computeIfAbsent("Logic2", k -> new Logic2());
+        if (bpEstimator != null) {
+            l2.setBPFrameCallback(bpEstimator::update);
+        }
+        if (sinBP != null) {
+            l2.setSinBPCallback(sinBP::update);
         }
 
         if (camOpen) return;

@@ -69,6 +69,11 @@ public class Logic2 extends BaseLogic {
         }
         updateValueText(correctedGreenValue);
         updateChart(correctedGreenValue);
+        
+        // SinBPコールバック呼び出し
+        if (sinBPCallback != null && isDetectionValid()) {
+            sinBPCallback.onFrame(correctedGreenValue, System.currentTimeMillis());
+        }
 
         // ISO値を更新（実際のISO値は外部から設定される想定）
         // updateISO(actualISO); // 実際のISO値が取得できる場合はここで更新

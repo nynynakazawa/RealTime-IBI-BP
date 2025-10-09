@@ -145,10 +145,17 @@ public class SinBP {
         // 非対称サイン波基底を使用
         double sNorm = asymmetricSineBasis(tNorm, currentIBIms);
         
-        // 理想波形: mean + A * (s_norm を中心からの偏差として1.5倍に拡大)
-        // s_norm は [0,1] の範囲なので、中心0.5からの偏差を1.5倍にする
-        double deviation = (sNorm - 0.5) * 1.5;
-        return currentMean + currentAmplitude * (0.5 + deviation);
+        // 理想波形: mean + A * (s_norm を中心からの偏差として調整)
+        // 谷部分の乖離を修正するため、非対称な振幅調整を適用
+        double adjustedSNorm;
+        if (sNorm >= 0.5) {
+            // ピーク側（sNorm >= 0.5）: 1.2倍で控えめに
+            adjustedSNorm = 0.5 + (sNorm - 0.5) * 1.0;
+        } else {
+            // 谷側（sNorm < 0.5）: 2.0倍でより深く
+            adjustedSNorm = 0.5 + (sNorm - 0.5) * 3.0;
+        }
+        return currentMean + currentAmplitude * adjustedSNorm;
     }
     
     /**
