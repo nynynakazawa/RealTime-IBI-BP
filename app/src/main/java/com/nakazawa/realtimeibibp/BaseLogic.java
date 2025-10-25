@@ -187,7 +187,7 @@ public abstract class BaseLogic implements LogicProcessor {
                             smoothedBpmSd.remove(0);
                         }
 
-                        // 有効な値を保存（ISO < 500の時に使用）
+                        // 有効な値を保存（ISO < 300の時に使用）
                         lastValidBpm = bpmValue;
                         lastValidSd = bpmSD;
 
@@ -269,7 +269,7 @@ public abstract class BaseLogic implements LogicProcessor {
     protected int currentISO = 600; // デフォルト値
     protected boolean isDetectionEnabled = true; // 検出有効フラグ
     
-    // 直前の有効な値を保持（ISO < 500の時に使用）
+    // 直前の有効な値を保持（ISO < 300の時に使用）
     protected double lastValidBpm = 0.0;
     protected double lastValidSd = 0.0;
     
@@ -281,7 +281,7 @@ public abstract class BaseLogic implements LogicProcessor {
      */
     public void updateISO(int iso) {
         this.currentISO = iso;
-        boolean shouldEnable = iso >= 500;
+        boolean shouldEnable = iso >= 300;
         
         if (isDetectionEnabled != shouldEnable) {
             isDetectionEnabled = shouldEnable;
@@ -297,7 +297,7 @@ public abstract class BaseLogic implements LogicProcessor {
      * 検出が有効かチェック
      */
     protected boolean isDetectionValid() {
-        return isDetectionEnabled && currentISO >= 500;
+        return isDetectionEnabled && currentISO >= 300;
     }
 
     /**

@@ -176,7 +176,7 @@ public class SinBP {
      * 検出が有効かチェック
      */
     private boolean isDetectionValid() {
-        return currentISO >= 500;
+        return currentISO >= 300;
     }
     
     /**

@@ -24,7 +24,7 @@ public class SinBP {
     
     /** 検出が有効かチェック */
     private boolean isDetectionValid() {
-        return currentISO >= 500;
+        return currentISO >= 300;
     }
     
     public void update(double correctedGreenValue, long timestampMs) {

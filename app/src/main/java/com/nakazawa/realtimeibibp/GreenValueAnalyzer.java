@@ -65,6 +65,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             recSmBpm = new ArrayList<>();
     private final List<Long>   recValTs = new ArrayList<>(),
             recIbiTs = new ArrayList<>();
+    
+    // ===== Sin波記録用 =====
+    private final List<Double> recSinWave = new ArrayList<>();  // 理想曲線の値
+    private final List<Double> recSinAmplitude = new ArrayList<>();  // 振幅
+    private final List<Double> recSinMean = new ArrayList<>();  // 平均値
+    private final List<Double> recSinIBI = new ArrayList<>();  // IBI
+    private final List<Long> recSinTs = new ArrayList<>();  // タイムスタンプ
 
     // ===== 状態 =====
     private boolean camOpen;
@@ -75,7 +82,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private int currentISO = 600; // デフォルト値
     private boolean isDetectionEnabled = true; // 検出有効フラグ
     
-    // 直前の有効な値を保持（ISO < 500の時に使用）
+    // 直前の有効な値を保持（ISO < 300の時に使用）
     private double lastValidBpm = 0.0;
     private double lastValidSd = 0.0;
 
@@ -460,11 +467,11 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             if (lp != null) {
                 LogicResult r = lp.processGreenValueData(g);
                 
-                // ISOが500未満の場合でもUI更新とチャート表示は行う
+                // ISOが300未満の場合でもUI更新とチャート表示は行う
                 if (r != null) {
                     lp.calculateSmoothedValueRealTime(r.getIbi(), r.getBpmSd());
 
-                    // 有効な値を保存（ISO < 500の時に使用）
+                    // 有効な値を保存（ISO < 300の時に使用）
                     if (r.getHeartRate() > 0) {
                         lastValidBpm = r.getHeartRate();
                     }
@@ -488,6 +495,24 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
                         recSmIbi.add(smI);
                         recSmBpm.add(smB);
+                        
+                        // Sin波データの記録
+                        long currentTime = System.currentTimeMillis();
+                        if (sinBP != null && sinBP.hasIdealCurve()) {
+                            double sinWaveValue = sinBP.getIdealCurveValue(currentTime);
+                            recSinWave.add(sinWaveValue);
+                            recSinAmplitude.add(sinBP.getCurrentAmplitude());
+                            recSinMean.add(sinBP.getCurrentMean());
+                            recSinIBI.add(sinBP.getCurrentIBI());
+                            recSinTs.add(currentTime);
+                        } else {
+                            // SinBPが利用できない場合は0を記録
+                            recSinWave.add(0.0);
+                            recSinAmplitude.add(0.0);
+                            recSinMean.add(0.0);
+                            recSinIBI.add(0.0);
+                            recSinTs.add(currentTime);
+                        }
                     } else if (isRecordingActive && !isDetectionValid()) {
                         Log.d("GreenValueAnalyzer-ISO", "CSV recording skipped: ISO=" + currentISO);
                     }
@@ -504,7 +529,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                             isRecordingActive ? recSmBpm.isEmpty() ? 0 : recSmBpm.get(recSmBpm.size()-1) : currentSmB
                     );
                 } else {
-                    // ISOが500未満の場合、UI更新のみ行う（検出は停止）
+                    // ISOが300未満の場合、UI更新のみ行う（検出は停止）
                     Log.d("GreenValueAnalyzer-ISO", "Detection skipped, UI update only: ISO=" + currentISO);
                     
                     // 前回の値を保持してUI更新
@@ -766,9 +791,46 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             );
             return;
         }
-        saveCsv(name + "_Green",
-                Arrays.asList("Green", "Timestamp"),
-                recValue, recValTs);
+        
+        // Sin波データも含めたCSVを保存
+        saveGreenValuesWithSinWaveToCsv(name);
+    }
+    
+    private void saveGreenValuesWithSinWaveToCsv(String name) {
+        SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
+        File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        File csvFile = new File(downloadFolder, name + "_Green_with_SinWave.csv");
+
+        try (FileWriter writer = new FileWriter(csvFile)) {
+            // ヘッダー行
+            writer.append("Green, SinWave, SinAmplitude, SinMean, SinIBI, Timestamp\n");
+
+            // 記録データを CSV に書き出し
+            for (int i = 0; i < recValue.size(); i++) {
+                String ts = sdf.format(new Date(recValTs.get(i)));
+                writer
+                        .append(String.format(Locale.getDefault(), "%.2f", recValue.get(i))).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", 
+                                i < recSinWave.size() ? recSinWave.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", 
+                                i < recSinAmplitude.size() ? recSinAmplitude.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", 
+                                i < recSinMean.size() ? recSinMean.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", 
+                                i < recSinIBI.size() ? recSinIBI.get(i) : 0.0)).append(", ")
+                        .append(ts)
+                        .append("\n");
+            }
+
+            ui.post(() ->
+                    Toast.makeText(ctx, "画像信号データ（Sin波含む）保存完了", Toast.LENGTH_SHORT).show()
+            );
+        } catch (IOException e) {
+            e.printStackTrace();
+            ui.post(() ->
+                    Toast.makeText(ctx, "画像信号データ（Sin波含む）保存失敗", Toast.LENGTH_SHORT).show()
+            );
+        }
     }
 
     private void saveCsv(
@@ -819,7 +881,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
      */
     public void updateISO(int iso) {
         this.currentISO = iso;
-        boolean shouldEnable = iso >= 500;
+        boolean shouldEnable = iso >= 300;
         
         if (isDetectionEnabled != shouldEnable) {
             isDetectionEnabled = shouldEnable;
@@ -835,6 +897,6 @@ public class GreenValueAnalyzer implements LifecycleObserver {
      * 検出が有効かチェック
      */
     private boolean isDetectionValid() {
-        return isDetectionEnabled && currentISO >= 500;
+        return isDetectionEnabled && currentISO >= 300;
     }
 }

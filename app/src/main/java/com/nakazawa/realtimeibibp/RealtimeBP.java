@@ -38,7 +38,7 @@ public class RealtimeBP {
     private int currentISO = 600;
     private boolean isDetectionEnabled = true;
     
-    // 直前の有効な値を保持（ISO < 500の時に使用）
+    // 直前の有効な値を保持（ISO < 300の時に使用）
     private double lastValidHr = 0.0;
 
     /** フレームレート [fps]（デフォルト30、setterで更新可） */
@@ -96,7 +96,7 @@ public class RealtimeBP {
      */
     public void update(double correctedGreenValue, double smoothedIbiMs) {
         // ISOチェック
-        if (currentISO < 500) {
+        if (currentISO < 300) {
             Log.d("RealtimeBP-ISO", "Blood pressure estimation skipped: ISO=" + currentISO);
             return;
         }
@@ -111,7 +111,7 @@ public class RealtimeBP {
      */
     private void estimateAndNotify(double ibiMs) {
         // ISOチェック
-        if (currentISO < 500) {
+        if (currentISO < 300) {
             Log.d("RealtimeBP-ISO", "Blood pressure estimation skipped: ISO=" + currentISO);
             return;
         }
@@ -147,7 +147,7 @@ public class RealtimeBP {
             hr = 60000.0 / ibiMs; // フォールバック
         }
         
-        // 有効なHR値を保存（ISO < 500の時に使用）
+        // 有効なHR値を保存（ISO < 300の時に使用）
         if (hr > 0) {
             lastValidHr = hr;
         }

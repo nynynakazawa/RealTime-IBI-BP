@@ -80,7 +80,7 @@ public class Logic2 extends BaseLogic {
 
         // ISOチェック
         if (!isDetectionValid()) {
-            Log.d("Logic2", "Detection disabled due to ISO < 500, using last valid values");
+            Log.d("Logic2", "Detection disabled due to ISO < 300, using last valid values");
             return new LogicResult(correctedGreenValue, IBI, lastValidBpm, lastValidSd);
         }
 
