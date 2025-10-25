@@ -102,6 +102,14 @@ public class SinBP {
     private long idealCurveStartTime = 0;  // 理想曲線の開始時刻（固定、位相の基準）
     private boolean hasIdealCurve = false;
     
+    // 位相フィルタリング用
+    private final Deque<Double> phaseHistory = new ArrayDeque<>(3);
+    private double lastPhaseShift = 0.0;
+    private static final double MAX_PHASE_CHANGE = Math.PI / 4; // 最大位相変化量
+    
+    // 処理時間遅延補正用
+    private static final long PROCESSING_DELAY_MS = 100; // 処理時間による遅延（ミリ秒）
+    
     // リスナー
     public interface SinBPListener {
         void onSinBPUpdated(double sinSbp, double sinDbp,
@@ -124,7 +132,7 @@ public class SinBP {
     }
     
     /**
-     * 指定時刻での理想曲線の値を取得
+     * 指定時刻での理想曲線の値を取得（遅延補正適用）
      * @param currentTime 現在時刻（ms）
      * @return 理想曲線の値
      */
@@ -133,8 +141,9 @@ public class SinBP {
             return currentMean;
         }
         
-        // 理想曲線開始時刻からの経過時間を計算（連続的な位相）
-        double elapsedSinceStart = currentTime - idealCurveStartTime;
+        // 処理時間遅延を補正した時刻で理想曲線を計算
+        long compensatedTime = currentTime + PROCESSING_DELAY_MS;
+        double elapsedSinceStart = compensatedTime - idealCurveStartTime;
         
         // 周期内に正規化（負の値の場合は0にクリップ）
         if (elapsedSinceStart < 0) {
@@ -469,7 +478,7 @@ public class SinBP {
         currentAmplitude = A;
         currentIBIms = T;
         
-        // ピーク検出時に理想曲線の位相を再同期
+        // ピーク検出時に理想曲線の位相を再同期（位相フィルタリング適用）
         // シンプルに：lastPeakTime を理想曲線のピーク位置に合わせる
         // 理想曲線のピーク位置を探索して、その時刻をlastPeakTimeに対応させる
         double maxValue = -1.0;
@@ -483,12 +492,26 @@ public class SinBP {
                 peakPhaseTime = t;
             }
         }
-        // 僅かに遅れているため、位相を前進（ピーク位置を5%早める）
-        peakPhaseTime *= 1.8;
+        // 位相調整（実測値と理想曲線の位相整合のみ）
+        // 実測値のピーク位置に基づいて理想曲線の開始時刻を直接調整
+        double phaseOffset = calculatePhaseOffset(peakPhaseTime, T);
+        peakPhaseTime = phaseOffset;
         
-        // lastPeakTime = idealCurveStartTime + peakPhaseTime
-        // → idealCurveStartTime = lastPeakTime - peakPhaseTime
-        idealCurveStartTime = lastPeakTime - (long)peakPhaseTime;
+        Log.d(TAG + "-PhaseAdjust", String.format(
+                "Phase adjustment: original=%.1f, offset=%.1f, T=%.1f",
+                peakPhaseTime / 3, phaseOffset, T));
+        
+        // 位相フィルタリング + 重み付け調整を適用
+        double filteredPhaseTime = applyPhaseFiltering(peakPhaseTime);
+        
+        // 処理時間遅延を補正して理想曲線の開始時刻を計算
+        // lastPeakTime = idealCurveStartTime + filteredPhaseTime + PROCESSING_DELAY_MS
+        // → idealCurveStartTime = lastPeakTime - filteredPhaseTime - PROCESSING_DELAY_MS
+        idealCurveStartTime = lastPeakTime - (long)filteredPhaseTime - PROCESSING_DELAY_MS;
+        
+        Log.d(TAG + "-DelayComp", String.format(
+                "Delay compensation: lastPeakTime=%d, filteredPhase=%.1f, delay=%d, startTime=%d",
+                lastPeakTime, filteredPhaseTime, PROCESSING_DELAY_MS, idealCurveStartTime));
         
         hasIdealCurve = true;
         
@@ -663,6 +686,68 @@ public class SinBP {
     }
     
     /**
+     * 位相オフセットを計算（実測値のピーク位置に基づく）
+     */
+    private double calculatePhaseOffset(double peakPhaseTime, double T) {
+        // 実測値のピーク位置を理想曲線のピーク位置（t=0）に合わせる
+        // 理想曲線のピークはt=0で発生するため、実測値のピーク位置を0にシフト
+        double phaseOffset = -peakPhaseTime;
+        
+        // 周期内に正規化
+        while (phaseOffset < 0) {
+            phaseOffset += T;
+        }
+        while (phaseOffset >= T) {
+            phaseOffset -= T;
+        }
+        
+        Log.d(TAG + "-PhaseOffset", String.format(
+                "Phase offset calculation: peakTime=%.1f, offset=%.1f, T=%.1f",
+                peakPhaseTime, phaseOffset, T));
+        
+        return phaseOffset;
+    }
+    
+    /**
+     * 位相フィルタリング + 重み付け調整を適用
+     */
+    private double applyPhaseFiltering(double rawPhaseTime) {
+        // 1. 位相差を計算
+        double phaseDifference = rawPhaseTime - lastPhaseShift;
+        
+        // 2. 急激な変化を制限
+        if (Math.abs(phaseDifference) > MAX_PHASE_CHANGE) {
+            double sign = Math.signum(phaseDifference);
+            phaseDifference = sign * MAX_PHASE_CHANGE;
+        }
+        
+        // 3. 重み付け調整（70%の重み）
+        double adjustedPhaseTime = lastPhaseShift + phaseDifference * 0.7;
+        
+        // 4. 位相履歴に追加
+        phaseHistory.addLast(adjustedPhaseTime);
+        if (phaseHistory.size() > 3) {
+            phaseHistory.pollFirst();
+        }
+        
+        // 5. 移動平均フィルタ
+        double sum = 0.0;
+        for (double phase : phaseHistory) {
+            sum += phase;
+        }
+        double filteredPhaseTime = sum / phaseHistory.size();
+        
+        // 6. 更新
+        lastPhaseShift = filteredPhaseTime;
+        
+        Log.d(TAG + "-PhaseFilter", String.format(
+                "Phase filtering: raw=%.1f, adjusted=%.1f, filtered=%.1f",
+                rawPhaseTime, adjustedPhaseTime, filteredPhaseTime));
+        
+        return filteredPhaseTime;
+    }
+    
+    /**
      * 値を[min, max]でクリップ
      */
     private static double clamp(double v, double lo, double hi) {
@@ -690,6 +775,10 @@ public class SinBP {
         sinSbpHist.clear();
         sinDbpHist.clear();
         
+        // 位相フィルタリング用のリセット
+        phaseHistory.clear();
+        lastPhaseShift = 0.0;
+        
         lastPeakValue = 0;
         lastPeakTime = 0;
         currentA = 0;
@@ -702,7 +791,7 @@ public class SinBP {
         lastSinDBPAvg = 0;
         lastValidIBI = 0;
         
-        Log.d(TAG, "SinBP reset");
+        Log.d(TAG, "SinBP reset with phase filtering");
     }
     
     // Getter methods
