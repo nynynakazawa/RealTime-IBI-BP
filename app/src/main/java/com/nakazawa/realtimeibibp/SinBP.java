@@ -49,6 +49,16 @@ public class SinBP {
     private long lastPeakTime = 0;
     private double lastValidIBI = 0;  // 異常値検出用
     
+    // 1拍遅延処理用：前の拍のデータを保持
+    private long previousPeakTime = 0;
+    private double previousPeakValue = 0;
+    private List<Double> previousBeatSamples = null;
+    private Long[] previousBeatTimes = null;
+    
+    // 動的な収縮期/拡張期比率（1拍遅延で計算）
+    private double currentSystoleRatio = 1.0/3.0;  // 初期値は1/3（デフォルト）
+    private double currentDiastoleRatio = 2.0/3.0; // 初期値は2/3（デフォルト）
+    
     // 拍ごとの結果
     private double currentA = 0;      // 振幅
     private double currentIBI = 0;    // IBI (ms)
@@ -99,7 +109,8 @@ public class SinBP {
     private double currentMean = 0;
     private double currentAmplitude = 0;
     private double currentIBIms = 0;
-    private long idealCurveStartTime = 0;  // 理想曲線の開始時刻（固定、位相の基準）
+    private long idealCurveStartTime = 0;  // 理想曲線の開始時刻（前の拍のピーク時刻）
+    private long idealCurveEndTime = 0;    // 理想曲線の終了時刻（前の拍の終了時刻 = 現在のピーク時刻）
     private boolean hasIdealCurve = false;
     
     // 位相フィルタリング用
@@ -132,20 +143,24 @@ public class SinBP {
     }
     
     /**
-     * 指定時刻での理想曲線の値を取得（遅延補正適用）
-     * @param currentTime 現在時刻（ms）
-     * @return 理想曲線の値
+     * 指定時刻での理想曲線の値を取得（1拍遅延対応：前の拍の範囲内でのみ値を返す）
+     * @param targetTime 対象時刻（ms）
+     * @return 理想曲線の値（範囲外の場合はNaN）
      */
-    public double getIdealCurveValue(long currentTime) {
-        if (!hasIdealCurve || currentIBIms <= 0 || idealCurveStartTime == 0) {
-            return currentMean;
+    public double getIdealCurveValue(long targetTime) {
+        if (!hasIdealCurve || currentIBIms <= 0 || idealCurveStartTime == 0 || idealCurveEndTime == 0) {
+            return Double.NaN;
         }
         
-        // 処理時間遅延を補正した時刻で理想曲線を計算
-        long compensatedTime = currentTime + PROCESSING_DELAY_MS;
-        double elapsedSinceStart = compensatedTime - idealCurveStartTime;
+        // 1拍遅延対応：理想曲線は前の拍の範囲内でのみ有効
+        if (targetTime < idealCurveStartTime || targetTime > idealCurveEndTime) {
+            return Double.NaN;
+        }
         
-        // 周期内に正規化（負の値の場合は0にクリップ）
+        // 前の拍のピーク時刻からの経過時間を計算
+        double elapsedSinceStart = targetTime - idealCurveStartTime;
+        
+        // 周期内に正規化
         if (elapsedSinceStart < 0) {
             elapsedSinceStart = 0;
         }
@@ -155,16 +170,88 @@ public class SinBP {
         double sNorm = asymmetricSineBasis(tNorm, currentIBIms);
         
         // 理想波形: mean + A * (s_norm を中心からの偏差として調整)
-        // 谷部分の乖離を修正するため、非対称な振幅調整を適用
         double adjustedSNorm;
         if (sNorm >= 0.5) {
-            // ピーク側（sNorm >= 0.5）: 1.2倍で控えめに
             adjustedSNorm = 0.5 + (sNorm - 0.5) * 1.0;
         } else {
-            // 谷側（sNorm < 0.5）: 2.0倍でより深く
             adjustedSNorm = 0.5 + (sNorm - 0.5) * 3.0;
         }
+        
         return currentMean + currentAmplitude * adjustedSNorm;
+    }
+    
+    /**
+     * 理想曲線の範囲内の時刻に対応する実測波形のエントリーインデックスを計算
+     * @param chartStartTime チャート開始時刻（ms）
+     * @param frameInterval フレーム間隔（ms）
+     * @return [startIndex, endIndex] の配列、またはnull（理想曲線が利用できない場合）
+     */
+    public int[] getIdealCurveEntryIndices(long chartStartTime, double frameInterval) {
+        if (!hasIdealCurve || idealCurveStartTime == 0 || idealCurveEndTime == 0) {
+            return null;
+        }
+        
+        // 理想曲線の範囲内の時刻に対応するエントリーインデックスを計算
+        int startIndex = (int)Math.max(0, Math.floor((idealCurveStartTime - chartStartTime) / frameInterval));
+        int endIndex = (int)Math.ceil((idealCurveEndTime - chartStartTime) / frameInterval);
+        
+        return new int[]{startIndex, endIndex};
+    }
+    
+    /**
+     * 拍内の相対位置から理想曲線の値を取得（時刻に依存しない）
+     * @param relativePosition 拍内の相対位置（0.0～1.0、0.0がピーク開始、1.0が次のピーク）
+     * @return 理想曲線の値（理想曲線が利用できない場合はNaN）
+     */
+    public double getIdealCurveValueByRelativePosition(double relativePosition) {
+        if (!hasIdealCurve || currentIBIms <= 0) {
+            return Double.NaN;
+        }
+        
+        // 相対位置を周期内の時間に変換
+        double tNorm = relativePosition * currentIBIms;
+        
+        // 非対称サイン波基底を使用
+        double sNorm = asymmetricSineBasis(tNorm, currentIBIms);
+        
+        // 理想波形: mean + A * (s_norm を中心からの偏差として調整)
+        double adjustedSNorm;
+        if (sNorm >= 0.5) {
+            adjustedSNorm = 0.5 + (sNorm - 0.5) * 1.0;
+        } else {
+            adjustedSNorm = 0.5 + (sNorm - 0.5) * 3.0;
+        }
+        
+        return currentMean + currentAmplitude * adjustedSNorm;
+    }
+    
+    /**
+     * 現在処理中の拍のサンプル数を取得（理想曲線生成用）
+     * @return サンプル数、または0（理想曲線が利用できない場合）
+     */
+    public int getCurrentBeatSampleCount() {
+        if (!hasIdealCurve || idealCurveStartTime == 0 || idealCurveEndTime == 0) {
+            return 0;
+        }
+        
+        // 理想曲線の時間範囲内のサンプル数を計算（30fps想定）
+        double frameInterval = 1000.0 / 30.0;
+        long duration = idealCurveEndTime - idealCurveStartTime;
+        return (int)Math.ceil(duration / frameInterval);
+    }
+    
+    /**
+     * 理想曲線の開始時刻を取得（UI表示用）
+     */
+    public long getIdealCurveStartTime() {
+        return idealCurveStartTime;
+    }
+    
+    /**
+     * 理想曲線の終了時刻を取得（UI表示用）
+     */
+    public long getIdealCurveEndTime() {
+        return idealCurveEndTime;
     }
     
     /**
@@ -264,54 +351,91 @@ public class SinBP {
     }
     
     /**
-     * ピーク検出時の処理
+     * ピーク検出時の処理（1拍遅延方式：次のピークが来た時点で、その拍のrPPGから比率を計算してSin近似を計算）
+     * 
+     * 動作フロー：
+     * - 1拍目：記録のみ
+     * - 2拍目：1拍目のrPPGから比率を計算し、1拍目のSin近似を計算して表示 + 2拍目を記録
+     * - 3拍目：2拍目のrPPGから比率を計算し、2拍目のSin近似を計算して表示 + 3拍目を記録
+     * - ... を永遠に続ける
      */
     private void processPeak(double peakValue, long peakTime) {
+        Log.d(TAG + "-ProcessPeak", String.format(
+                "processPeak() called: peakValue=%.2f, peakTime=%d, lastPeakTime=%d, previousPeakTime=%d",
+                peakValue, peakTime, lastPeakTime, previousPeakTime));
+        
         // 初回のピークは記録のみ
         if (lastPeakTime == 0) {
             lastPeakValue = peakValue;
             lastPeakTime = peakTime;
-            Log.d(TAG, "First peak detected");
+            previousPeakTime = peakTime;
+            previousPeakValue = peakValue;
+            Log.d(TAG + "-ProcessPeak", "First peak detected - recording only");
             return;
         }
         
-        // IBI計算
-        double ibi = peakTime - lastPeakTime;
+        // 2回目以降：前の拍（previousPeakTime → lastPeakTime）のデータが完全になったので処理
+        double ibi = lastPeakTime - previousPeakTime;
+        Log.d(TAG + "-ProcessPeak", String.format(
+                "Processing beat: previousPeakTime=%d, lastPeakTime=%d, IBI=%.1f",
+                previousPeakTime, lastPeakTime, ibi));
         
-        // 1拍分のデータを取得
-        List<Double> beatSamples = extractBeatSamples(lastPeakTime, peakTime);
+        // 前の拍分のデータを取得（時刻情報も含む）
+        List<Double> beatSamples = new ArrayList<>();
+        List<Long> beatTimes = new ArrayList<>();
+        extractBeatSamplesWithTime(previousPeakTime, lastPeakTime, beatSamples, beatTimes);
         
         if (beatSamples == null || beatSamples.isEmpty()) {
-            Log.w(TAG, "Beat samples extraction failed");
+            // データを更新して次の拍に備える
+            previousPeakTime = lastPeakTime;
+            previousPeakValue = lastPeakValue;
             lastPeakValue = peakValue;
             lastPeakTime = peakTime;
             return;
         }
         
-        // サイン波フィット
+        // その拍のrPPGデータから収縮期/拡張期の比率を計算
+        double[] ratios = calculateSystoleDiastoleRatio(beatSamples, beatTimes, ibi);
+        double systoleRatio = ratios[0];
+        double diastoleRatio = ratios[1];
+        
+        // 計算した比率を保存（理想曲線表示用）
+        currentSystoleRatio = systoleRatio;
+        currentDiastoleRatio = diastoleRatio;
+        
+        // その拍のサイン波フィット（動的な比率を使用）
         fitSineWave(beatSamples, ibi);
         
         // 異常値チェック
         if (!isValidBeat(ibi, currentA)) {
-            Log.w(TAG, String.format("Invalid beat: IBI=%.1f, A=%.2f", ibi, currentA));
+            // データを更新して次の拍に備える
+            previousPeakTime = lastPeakTime;
+            previousPeakValue = lastPeakValue;
             lastPeakValue = peakValue;
             lastPeakTime = peakTime;
             return;
         }
         
-        // 歪み計算
-        calculateDistortion(beatSamples, currentA, currentPhi, ibi);
+        // その拍の歪み計算（動的な比率を使用）
+        calculateDistortion(beatSamples, currentA, currentPhi, ibi, systoleRatio, diastoleRatio);
         
-        // BP推定
+        Log.d(TAG + "-ProcessPeak", String.format(
+                "After distortion calc: hasIdealCurve=%b, startTime=%d, endTime=%d",
+                hasIdealCurve, idealCurveStartTime, idealCurveEndTime));
+        
+        // その拍のBP推定
         estimateBP(currentA, ibi, currentE);
         
-        // 更新
+        // データを更新して次の拍に備える
+        previousPeakTime = lastPeakTime;
+        previousPeakValue = lastPeakValue;
         lastPeakValue = peakValue;
         lastPeakTime = peakTime;
         lastValidIBI = ibi;
         
-        Log.d(TAG, String.format("Beat processed: IBI=%.1f, A=%.2f, phi=%.2f, E=%.4f",
-                ibi, currentA, currentPhi, currentE));
+        Log.d(TAG + "-ProcessPeak", String.format(
+                "Beat processed: IBI=%.1f, A=%.2f, E=%.4f, ratio=%.3f:%.3f, hasIdealCurve=%b",
+                ibi, currentA, currentE, systoleRatio, diastoleRatio, hasIdealCurve));
     }
     
     /**
@@ -329,6 +453,87 @@ public class SinBP {
         }
         
         return samples;
+    }
+    
+    /**
+     * 1拍分のサンプルと時刻を抽出（時刻情報も含む）
+     */
+    private void extractBeatSamplesWithTime(long startTime, long endTime, 
+                                            List<Double> samples, List<Long> times) {
+        Long[] timeArray = timeBuffer.toArray(new Long[0]);
+        Double[] valueArray = ppgBuffer.toArray(new Double[0]);
+        
+        samples.clear();
+        times.clear();
+        
+        for (int i = 0; i < timeArray.length; i++) {
+            if (timeArray[i] >= startTime && timeArray[i] <= endTime) {
+                samples.add(valueArray[i]);
+                times.add(timeArray[i]);
+            }
+        }
+    }
+    
+    /**
+     * 前の拍のrPPGデータから収縮期/拡張期の比率を計算
+     * @param beatSamples 1拍分のサンプル値
+     * @param beatTimes 1拍分の時刻（ms）
+     * @param ibi 周期（ms）
+     * @return [systoleRatio, diastoleRatio] の配列
+     */
+    private double[] calculateSystoleDiastoleRatio(List<Double> beatSamples, List<Long> beatTimes, double ibi) {
+        if (beatSamples == null || beatSamples.isEmpty() || beatTimes == null || beatTimes.size() != beatSamples.size()) {
+            // デフォルト値（1:2）
+            return new double[]{1.0/3.0, 2.0/3.0};
+        }
+        
+        int N = beatSamples.size();
+        if (N < 3) {
+            return new double[]{1.0/3.0, 2.0/3.0};
+        }
+        
+        // 谷の位置を検出（最小値）
+        int valleyIndex = 0;
+        double minValue = Double.MAX_VALUE;
+        for (int i = 0; i < N; i++) {
+            if (beatSamples.get(i) < minValue) {
+                minValue = beatSamples.get(i);
+                valleyIndex = i;
+            }
+        }
+        
+        // 谷の位置が極端に端にある場合は、より安定した方法で検出
+        // ピーク（開始点）から谷までの距離を計算
+        // ピークは t=0（開始時刻）に位置すると仮定
+        
+        // 谷の時刻を取得
+        long peakTime = beatTimes.get(0);
+        long valleyTime = beatTimes.get(valleyIndex);
+        
+        // 拡張期の時間（ピーク→谷）
+        double diastoleTime = valleyTime - peakTime;
+        
+        // 収縮期の時間（谷→次のピーク = IBI - 拡張期）
+        double systoleTime = ibi - diastoleTime;
+        
+        // 比率を計算
+        double diastoleRatio = diastoleTime / ibi;
+        double systoleRatio = systoleTime / ibi;
+        
+        // 異常値チェック（比率が0-1の範囲内で、生理学的に妥当な範囲内）
+        if (diastoleRatio < 0.1 || diastoleRatio > 0.9 || 
+            systoleRatio < 0.1 || systoleRatio > 0.9) {
+            // 異常値の場合はデフォルト値を使用
+            Log.w(TAG, String.format("Invalid ratio calculated: systole=%.3f, diastole=%.3f, using default",
+                    systoleRatio, diastoleRatio));
+            return new double[]{1.0/3.0, 2.0/3.0};
+        }
+        
+        Log.d(TAG + "-Ratio", String.format(
+                "Calculated ratio: systole=%.3f (%.1f ms), diastole=%.3f (%.1f ms), IBI=%.1f ms",
+                systoleRatio, systoleTime, diastoleRatio, diastoleTime, ibi));
+        
+        return new double[]{systoleRatio, diastoleRatio};
     }
     
     /**
@@ -402,32 +607,34 @@ public class SinBP {
     }
     
     /**
-     * 非対称サイン波基底関数（収縮期1/3:拡張期2/3）
-     * 三角関数の合成により、t=0でピーク、谷までが2/3T、谷から次のピークまでが1/3Tとなる波形を生成
+     * 非対称サイン波基底関数（動的な比率に対応）
+     * 三角関数の合成により、t=0でピーク、谷までがdiastoleRatio、谷から次のピークまでがsystoleRatioとなる波形を生成
      * @param t 時刻（ms）、0からT（IBI）の範囲
      * @param T 周期（IBI、ms）
+     * @param systoleRatio 収縮期の比率（0-1）
+     * @param diastoleRatio 拡張期の比率（0-1、通常は1-systoleRatio）
      * @return 正規化された波形値 [0,1]（t=0で最大値1）
      */
     // 位相シフト定数（クラスレベルで定義）
     private static final double PHASE_SHIFT = -Math.PI / 4.0;
     
-    private double asymmetricSineBasis(double t, double T) {
+    private double asymmetricSineBasis(double t, double T, double systoleRatio, double diastoleRatio) {
         // 周期内に正規化（0〜1）
         double phase = (t % T) / T;
         
         // 非対称波形の生成
-        // t=0でピーク、phase=2/3で谷、phase=1で次のピーク（周期T内で1サイクル完結）
+        // t=0でピーク、phase=diastoleRatioで谷、phase=1で次のピーク（周期T内で1サイクル完結）
         
         double value;
-        if (phase <= 2.0/3.0) {
-            // ピーク→谷: 2/3の時間
-            // phase: 0→2/3 を 0→π にマッピング
-            double angle = phase * (3.0/2.0) * Math.PI;  // 0→π
+        if (phase <= diastoleRatio) {
+            // ピーク→谷: diastoleRatioの時間
+            // phase: 0→diastoleRatio を 0→π にマッピング
+            double angle = phase * (1.0/diastoleRatio) * Math.PI;  // 0→π
             value = Math.cos(angle + PHASE_SHIFT);  // cos(0)=1 → cos(π)=-1（左シフト）
         } else {
-            // 谷→ピーク: 1/3の時間
-            // phase: 2/3→1 を π→2π にマッピング
-            double angle = Math.PI + (phase - 2.0/3.0) * 3.0 * Math.PI;  // π→2π
+            // 谷→ピーク: systoleRatioの時間
+            // phase: diastoleRatio→1 を π→2π にマッピング
+            double angle = Math.PI + (phase - diastoleRatio) * (1.0/systoleRatio) * Math.PI;  // π→2π
             value = Math.cos(angle + PHASE_SHIFT);  // cos(π)=-1 → cos(2π)=1（左シフト）
         }
         
@@ -436,10 +643,18 @@ public class SinBP {
     }
     
     /**
-     * 歪み指標の計算
-     * 非対称サイン波モデル（収縮期1/3:拡張期2/3）からの残差を計算
+     * 非対称サイン波基底関数（現在の比率を使用するオーバーロード）
      */
-    private void calculateDistortion(List<Double> beatSamples, double A, double phi, double ibi) {
+    private double asymmetricSineBasis(double t, double T) {
+        return asymmetricSineBasis(t, T, currentSystoleRatio, currentDiastoleRatio);
+    }
+    
+    /**
+     * 歪み指標の計算（動的な比率を使用）
+     * 非対称サイン波モデルからの残差を計算
+     */
+    private void calculateDistortion(List<Double> beatSamples, double A, double phi, double ibi,
+                                     double systoleRatio, double diastoleRatio) {
         if (A < 1e-6) {
             currentE = 0;
             return;
@@ -461,8 +676,8 @@ public class SinBP {
             // 時刻をms単位で計算（t=0がピーク）
             double t = (double) i * T / N;
             
-            // 非対称サイン波基底を使用
-            double sNorm = asymmetricSineBasis(t, T);
+            // 非対称サイン波基底を使用（動的な比率）
+            double sNorm = asymmetricSineBasis(t, T, systoleRatio, diastoleRatio);
             
             // 理想波形の再構成: mean + A * s_norm
             double idealValue = mean + A * sNorm;
@@ -479,14 +694,14 @@ public class SinBP {
         currentIBIms = T;
         
         // ピーク検出時に理想曲線の位相を再同期（位相フィルタリング適用）
-        // シンプルに：lastPeakTime を理想曲線のピーク位置に合わせる
-        // 理想曲線のピーク位置を探索して、その時刻をlastPeakTimeに対応させる
+        // シンプルに：previousPeakTime を理想曲線のピーク位置に合わせる（前の拍を処理しているため）
+        // 理想曲線のピーク位置を探索して、その時刻をpreviousPeakTimeに対応させる
         double maxValue = -1.0;
         double peakPhaseTime = 0;
         int searchSteps = 100;
         for (int i = 0; i < searchSteps; i++) {
             double t = (double) i * T / searchSteps;
-            double val = asymmetricSineBasis(t, T);
+            double val = asymmetricSineBasis(t, T, systoleRatio, diastoleRatio);
             if (val > maxValue) {
                 maxValue = val;
                 peakPhaseTime = t;
@@ -504,20 +719,23 @@ public class SinBP {
         // 位相フィルタリング + 重み付け調整を適用
         double filteredPhaseTime = applyPhaseFiltering(peakPhaseTime);
         
-        // 処理時間遅延を補正して理想曲線の開始時刻を計算
-        // lastPeakTime = idealCurveStartTime + filteredPhaseTime + PROCESSING_DELAY_MS
-        // → idealCurveStartTime = lastPeakTime - filteredPhaseTime - PROCESSING_DELAY_MS
-        idealCurveStartTime = lastPeakTime - (long)filteredPhaseTime - PROCESSING_DELAY_MS;
-        
-        Log.d(TAG + "-DelayComp", String.format(
-                "Delay compensation: lastPeakTime=%d, filteredPhase=%.1f, delay=%d, startTime=%d",
-                lastPeakTime, filteredPhaseTime, PROCESSING_DELAY_MS, idealCurveStartTime));
+        // 理想曲線の開始時刻と終了時刻を設定（前の拍の範囲）
+        // 前の拍のピーク時刻から次のピーク時刻（現在のピーク時刻）までが理想曲線の範囲
+        idealCurveStartTime = previousPeakTime;
+        idealCurveEndTime = lastPeakTime;
         
         hasIdealCurve = true;
         
         Log.d(TAG + "-Distortion", String.format(
-                "E=%.4f (mean=%.2f, Asymmetric sine model: systole 1/3, diastole 2/3)", 
-                currentE, mean));
+                "E=%.4f (mean=%.2f, Asymmetric sine model: systole %.3f, diastole %.3f)", 
+                currentE, mean, systoleRatio, diastoleRatio));
+    }
+    
+    /**
+     * 歪み指標の計算（現在の比率を使用するオーバーロード）
+     */
+    private void calculateDistortion(List<Double> beatSamples, double A, double phi, double ibi) {
+        calculateDistortion(beatSamples, A, phi, ibi, currentSystoleRatio, currentDiastoleRatio);
     }
     
     /**
@@ -781,6 +999,12 @@ public class SinBP {
         
         lastPeakValue = 0;
         lastPeakTime = 0;
+        previousPeakTime = 0;
+        previousPeakValue = 0;
+        previousBeatSamples = null;
+        previousBeatTimes = null;
+        currentSystoleRatio = 1.0/3.0;
+        currentDiastoleRatio = 2.0/3.0;
         currentA = 0;
         currentIBI = 0;
         currentPhi = 0;
@@ -791,7 +1015,7 @@ public class SinBP {
         lastSinDBPAvg = 0;
         lastValidIBI = 0;
         
-        Log.d(TAG, "SinBP reset with phase filtering");
+        Log.d(TAG, "SinBP reset with 1-beat delay and dynamic ratio");
     }
     
     // Getter methods

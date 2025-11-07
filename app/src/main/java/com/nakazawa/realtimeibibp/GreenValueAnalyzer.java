@@ -37,6 +37,7 @@ import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.Locale;
 import android.graphics.Color;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.TotalCaptureResult;
@@ -55,7 +56,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private LineDataSet idealCurveDataSet;  // 理想曲線用
     private final LineData data;
     private String activeLogic = "Logic1";
-    private long chartStartTime = 0;  // チャート開始時刻（理想曲線の時刻計算用）
+    
+    // 拍ごとのデータ範囲を追跡（rPPGとSIN近似を1対1で対応させるため）
+    private long lastIdealEndTime = 0;  // 前回の理想曲線の終了時刻（新しい拍の検出用）
+    private float lastIdealValue = Float.NaN;  // 直近の理想曲線値（NaN維持防止用）
+    private final List<Float> lastIdealWaveform = new ArrayList<>();  // 直近の理想曲線波形
+    private int lastIdealWaveformCursor = 0;
+    private boolean idealCurveNeedsRefresh = false;  // 理想曲線のデータセットを再設定する必要があるか
 
     // ===== 記録 =====
     private final List<Double> recValue = new ArrayList<>(),
@@ -166,14 +173,14 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         idealCurveDataSet.setColor(Color.parseColor("#FF6B6B"));  // 赤色
         idealCurveDataSet.setDrawValues(false);
         idealCurveDataSet.setDrawCircles(false);
+        idealCurveDataSet.setMode(LineDataSet.Mode.LINEAR);  // 線形補間モード
+        idealCurveDataSet.setDrawFilled(false);  // 塗りつぶしを無効化
         // 実線表示（破線を無効化）
 
         data = new LineData(dataSet, idealCurveDataSet);
         chart.setData(data);
         chart.getDescription().setEnabled(false);
         chart.getLegend().setTextColor(Color.WHITE);  // 凡例の文字色を白に
-        
-        chartStartTime = System.currentTimeMillis();  // チャート開始時刻を記録
 
         XAxis x = chart.getXAxis();
         x.setPosition(XAxis.XAxisPosition.BOTTOM);
@@ -578,28 +585,45 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             // グラフデータの更新
             if (entries.size() > 100) {
                 entries.remove(0);
+                // 理想曲線のエントリーも削除（チャートのスクロールに対応）
+                // ただし、理想曲線は新しい拍が検出された時に追加されるため、ここでは削除のみ
+                if (!idealCurveEntries.isEmpty()) {
+                    idealCurveEntries.remove(0);
+                }
+                // X座標を再設定
                 for (int i = 0; i < entries.size(); i++) {
                     entries.get(i).setX(i);
+                    if (i < idealCurveEntries.size()) {
+                        idealCurveEntries.get(i).setX(i);
+                    }
+                }
+                // 末尾の最新理想値を更新
+                lastIdealValue = Float.NaN;
+                for (int i = idealCurveEntries.size() - 1; i >= 0; i--) {
+                    float candidate = idealCurveEntries.get(i).getY();
+                    if (!Float.isNaN(candidate)) {
+                        lastIdealValue = candidate;
+                        break;
+                    }
                 }
             }
             entries.add(new Entry(entries.size(), (float) v));
             
-            // 理想曲線の更新
+            // idealCurveEntriesのサイズをentriesと一致させる（新しいエントリーが追加された時）
+            while (idealCurveEntries.size() < entries.size()) {
+                float initialIdealValue = Float.NaN;
+                if (!lastIdealWaveform.isEmpty()) {
+                    initialIdealValue = lastIdealWaveform.get(lastIdealWaveformCursor);
+                    lastIdealWaveformCursor = (lastIdealWaveformCursor + 1) % lastIdealWaveform.size();
+                } else if (!Float.isNaN(lastIdealValue)) {
+                    initialIdealValue = lastIdealValue;
+                }
+                idealCurveEntries.add(new Entry(idealCurveEntries.size(), initialIdealValue));
+            }
+            
+            // 理想曲線の更新（新しい拍が検出された時に追加）
             updateIdealCurve();
 
-            // デバッグログ（同フレームの実測値と理想曲線値）
-            double idealValForLog = Double.NaN;
-            boolean hasIdeal = false;
-            if (sinBP != null && sinBP.hasIdealCurve()) {
-                long now = System.currentTimeMillis();
-                idealValForLog = sinBP.getIdealCurveValue(now);  // 現在時刻を渡す
-                hasIdeal = true;
-            }
-            try {
-                Log.d("sindebug", String.format(Locale.getDefault(),
-                        "frame=%d, actual=%.4f, ideal=%.4f, hasIdeal=%b",
-                        entries.size() - 1, v, idealValForLog, hasIdeal));
-            } catch (Exception ignore) {}
 
             // Y軸の最小/最大を自動調整し、目盛りラベルと軸線を表示
             float minY = entries.stream().map(Entry::getY).min(Float::compare).orElse(0f);
@@ -622,63 +646,235 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
             // チャート更新
             dataSet.notifyDataSetChanged();
+            
+            // 理想曲線のエントリー数を確認（デバッグ用）
+            int nonNaNCount = 0;
+            int firstNonNaNIndex = -1;
+            int lastNonNaNIndex = -1;
+            for (int i = 0; i < idealCurveEntries.size(); i++) {
+                Entry entry = idealCurveEntries.get(i);
+                if (!Float.isNaN(entry.getY())) {
+                    nonNaNCount++;
+                    if (firstNonNaNIndex == -1) {
+                        firstNonNaNIndex = i;
+                    }
+                    lastNonNaNIndex = i;
+                }
+            }
+            
+            // デバッグログ（毎回出力）
+            if (nonNaNCount > 0) {
+                Log.d("IdealCurve-UI", String.format(Locale.getDefault(),
+                        "UI Update: idealCurveEntries.size()=%d, nonNaNCount=%d, range=[%d-%d], needsRefresh=%b",
+                        idealCurveEntries.size(), nonNaNCount, firstNonNaNIndex, lastNonNaNIndex, idealCurveNeedsRefresh));
+                
+                // 最初と最後の数点の値を確認
+                if (firstNonNaNIndex >= 0 && lastNonNaNIndex >= 0) {
+                    int sampleCount = Math.min(5, nonNaNCount);
+                    for (int i = 0; i < sampleCount && firstNonNaNIndex + i <= lastNonNaNIndex; i++) {
+                        Entry entry = idealCurveEntries.get(firstNonNaNIndex + i);
+                        Log.d("IdealCurve-UI", String.format(Locale.getDefault(),
+                                "  Entry[%d]: x=%.1f, y=%.2f", firstNonNaNIndex + i, entry.getX(), entry.getY()));
+                    }
+                }
+            }
+            
+            // 理想曲線のデータセット更新（Entryのy値は既にupdateIdealCurve()で更新済み）
+            // LineDataSetはコンストラクタで渡したList<Entry>を参照しているため、
+            // Entryのy値を直接更新してnotifyDataSetChanged()を呼べば更新される
+            if (idealCurveNeedsRefresh && nonNaNCount > 0) {
+                Log.d("IdealCurve-UI", String.format(Locale.getDefault(),
+                        "Ideal curve data updated: idealCurveEntries.size()=%d, nonNaNCount=%d, range=[%d-%d]",
+                        idealCurveEntries.size(), nonNaNCount, firstNonNaNIndex, lastNonNaNIndex));
+                idealCurveNeedsRefresh = false;
+            }
+            
+            // データセットの状態を確認
+            int datasetEntryCount = idealCurveDataSet.getEntryCount();
+            int datasetNonNaNCount = 0;
+            if (datasetEntryCount > 0) {
+                for (int i = 0; i < datasetEntryCount; i++) {
+                    Entry entry = idealCurveDataSet.getEntryForIndex(i);
+                    if (entry != null && !Float.isNaN(entry.getY())) {
+                        datasetNonNaNCount++;
+                    }
+                }
+            }
+            
+            if (nonNaNCount > 0) {
+                Log.d("IdealCurve-Dataset", String.format(Locale.getDefault(),
+                        "Dataset state: idealCurveEntries.size()=%d, nonNaNCount=%d, datasetEntryCount=%d, datasetNonNaNCount=%d",
+                        idealCurveEntries.size(), nonNaNCount, datasetEntryCount, datasetNonNaNCount));
+                
+                if (datasetEntryCount != idealCurveEntries.size()) {
+                    Log.w("IdealCurve-Dataset", String.format(Locale.getDefault(),
+                            "WARNING: Size mismatch! idealCurveEntries.size()=%d, datasetEntryCount=%d",
+                            idealCurveEntries.size(), datasetEntryCount));
+                }
+                
+                if (datasetNonNaNCount != nonNaNCount) {
+                    Log.w("IdealCurve-Dataset", String.format(Locale.getDefault(),
+                            "WARNING: Non-NaN count mismatch! idealCurveEntries nonNaN=%d, dataset nonNaN=%d",
+                            nonNaNCount, datasetNonNaNCount));
+                }
+            }
+            
             idealCurveDataSet.notifyDataSetChanged();
             data.notifyDataChanged();
             chart.notifyDataSetChanged();
+            
+            // 凡例が表示されていることを確認
+            if (!chart.getLegend().isEnabled()) {
+                chart.getLegend().setEnabled(true);
+            }
+            
             chart.setVisibleXRangeMaximum(200);
             chart.moveViewToX(data.getEntryCount());
             chart.invalidate();
+            
         });
     }
     
     /**
-     * 理想曲線を更新
+     * 理想曲線を更新（拍ごとにrPPGとSIN近似を1対1で対応させる）
+     * 新しい拍が検出された時だけ理想曲線を更新し、その後のフレームでは既存のデータを保持する
      */
     private void updateIdealCurve() {
-        if (sinBP == null || !sinBP.hasIdealCurve()) {
-            // 理想曲線データがない場合はクリア
-            idealCurveEntries.clear();
-            return;
-        }
-        
-        // 理想曲線のIBI（周期）を取得
-        double ibi = sinBP.getCurrentIBI();
-        if (ibi <= 0) {
-            idealCurveEntries.clear();
-            return;
-        }
-        
-        // 実測波形と同じ数のポイントで理想曲線を生成
-        int numPoints = entries.size();
-        if (numPoints == 0) {
-            idealCurveEntries.clear();
-            return;
-        }
-        
-        // 古いエントリーを削除（実測波形と同期）
-        if (idealCurveEntries.size() > 100) {
-            idealCurveEntries.remove(0);
-            // X座標を再調整
-            for (int i = 0; i < idealCurveEntries.size(); i++) {
-                idealCurveEntries.get(i).setX(i);
+        // 理想曲線のデータが削除される前に、有効なエントリー数を確認
+        int nonNaNCountBefore = 0;
+        for (Entry entry : idealCurveEntries) {
+            if (!Float.isNaN(entry.getY())) {
+                nonNaNCountBefore++;
             }
         }
         
-        // 現在時刻を取得（実測波形と同期）
-        long currentTime = System.currentTimeMillis();
-        double elapsedTime = currentTime - chartStartTime;  // ms
+        // X座標を設定（常に更新）
+        // 注意: idealCurveEntriesのサイズは、updateUi()でentriesと一緒に調整されるため、
+        // ここではサイズ調整を行わない（新しい拍が検出された時に追加する）
+        for (int i = 0; i < idealCurveEntries.size(); i++) {
+            idealCurveEntries.get(i).setX(i);
+        }
         
-        // 30fps想定で時刻を計算
-        double frameInterval = 1000.0 / 30.0;  // ms per frame
+        // 理想曲線がない場合はNaNで埋める
+        if (sinBP == null || !sinBP.hasIdealCurve()) {
+            // 新しい拍が検出されていない場合は、既存のデータを保持（上書きしない）
+            return;
+        }
         
-        // 最新のフレームに対応する理想曲線の値を追加
-        long now = System.currentTimeMillis();
+        // 理想曲線の終了時刻を取得
+        long idealEndTime = sinBP.getIdealCurveEndTime();
         
-        // 理想曲線の値を取得（振幅とmeanは自動的に反映される）
-        double idealValue = sinBP.getIdealCurveValue(now);
+        // 新しい拍が検出されたかチェック
+        boolean newBeatDetected = (idealEndTime != lastIdealEndTime && idealEndTime > 0);
         
-        // 新しいエントリーを追加（実測波形と同じX座標）
-        idealCurveEntries.add(new Entry(idealCurveEntries.size(), (float) idealValue));
+        // 理想曲線のデータが削除された後に、有効なエントリー数を確認
+        int nonNaNCountAfter = 0;
+        for (Entry entry : idealCurveEntries) {
+            if (!Float.isNaN(entry.getY())) {
+                nonNaNCountAfter++;
+            }
+        }
+        
+        Log.d("IdealCurve", String.format(Locale.getDefault(),
+                "updateIdealCurve: entries.size()=%d, idealCurveEntries.size()=%d, idealEndTime=%d, lastIdealEndTime=%d, newBeatDetected=%b, nonNaNBefore=%d, nonNaNAfter=%d",
+                entries.size(), idealCurveEntries.size(), idealEndTime, lastIdealEndTime, newBeatDetected, nonNaNCountBefore, nonNaNCountAfter));
+        
+        if (newBeatDetected) {
+            // 新しい拍が検出された場合のみ、その拍の理想曲線を生成
+            int beatSampleCount = sinBP.getCurrentBeatSampleCount();
+            
+            if (beatSampleCount > 0 && beatSampleCount <= entries.size()) {
+                lastIdealWaveform.clear();
+                lastIdealWaveformCursor = 0;
+
+                // 拍の範囲を計算（最新のエントリーから逆算）
+                int beatStartIndex = Math.max(0, entries.size() - beatSampleCount);
+                int beatEndIndex = entries.size() - 1;
+                
+                Log.d("IdealCurve", String.format(Locale.getDefault(),
+                        "New beat: beatRange=[%d-%d], sampleCount=%d, entries.size()=%d",
+                        beatStartIndex, beatEndIndex, beatSampleCount, entries.size()));
+                
+                // その拍のrPPGデータの範囲を取得
+                float minRppg = Float.MAX_VALUE;
+                float maxRppg = Float.MIN_VALUE;
+                for (int j = beatStartIndex; j <= beatEndIndex && j < entries.size(); j++) {
+                    float rppgValue = entries.get(j).getY();
+                    minRppg = Math.min(minRppg, rppgValue);
+                    maxRppg = Math.max(maxRppg, rppgValue);
+                }
+                
+                // 理想曲線の値の範囲を取得
+                double minIdeal = Double.MAX_VALUE;
+                double maxIdeal = Double.MIN_VALUE;
+                for (int j = 0; j < beatSampleCount; j++) {
+                    double relativePos = (double) j / Math.max(1, beatSampleCount - 1);
+                    double testValue = sinBP.getIdealCurveValueByRelativePosition(relativePos);
+                    if (!Double.isNaN(testValue)) {
+                        minIdeal = Math.min(minIdeal, testValue);
+                        maxIdeal = Math.max(maxIdeal, testValue);
+                    }
+                }
+                
+                // その拍の理想曲線を生成（1拍分のデータのみ）
+                // 理想曲線のエントリーが不足している場合は追加
+                while (idealCurveEntries.size() < entries.size()) {
+                    idealCurveEntries.add(new Entry(idealCurveEntries.size(), Float.NaN));
+                }
+                
+                int validCount = 0;
+                for (int i = 0; i < beatSampleCount; i++) {
+                    int entryIndex = beatStartIndex + i;
+                    if (entryIndex >= 0 && entryIndex < idealCurveEntries.size() && entryIndex < entries.size()) {
+                        double relativePos = (double) i / Math.max(1, beatSampleCount - 1);
+                        double idealValue = sinBP.getIdealCurveValueByRelativePosition(relativePos);
+                        
+                        if (!Double.isNaN(idealValue) && maxIdeal > minIdeal && maxRppg > minRppg) {
+                            // 実測波形の範囲にスケーリング
+                            idealValue = minRppg + (idealValue - minIdeal) * (maxRppg - minRppg) / (maxIdeal - minIdeal);
+                            idealCurveEntries.get(entryIndex).setY((float) idealValue);
+                            lastIdealValue = (float) idealValue;
+                            lastIdealWaveform.add((float) idealValue);
+                            validCount++;
+                            
+                            // デバッグログ（最初と最後の数点のみ）
+                            if (i < 3 || i >= beatSampleCount - 3) {
+                                Log.d("IdealCurve-Detail", String.format(Locale.getDefault(),
+                                        "entryIndex=%d, relativePos=%.3f, idealValue=%.2f, scaled=%.2f",
+                                        entryIndex, relativePos, idealValue, idealCurveEntries.get(entryIndex).getY()));
+                            }
+                        } else {
+                            // 波形持続のため、既存値があれば維持し、なければ最後の理想値を利用
+                            float currentValue = idealCurveEntries.get(entryIndex).getY();
+                            if (Float.isNaN(currentValue) && !Float.isNaN(lastIdealValue)) {
+                                idealCurveEntries.get(entryIndex).setY(lastIdealValue);
+                                lastIdealWaveform.add(lastIdealValue);
+                            } else {
+                                idealCurveEntries.get(entryIndex).setY(currentValue);
+                                if (!Float.isNaN(currentValue)) {
+                                    lastIdealWaveform.add(currentValue);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Log.d("IdealCurve", String.format(Locale.getDefault(),
+                        "Ideal curve updated: beatRange=[%d-%d], validEntries=%d/%d, rPPG=[%.2f-%.2f], ideal=[%.4f-%.4f]",
+                        beatStartIndex, beatEndIndex, validCount, beatSampleCount, minRppg, maxRppg, minIdeal, maxIdeal));
+                
+                // 理想曲線のデータセットを再設定する必要があることをマーク
+                idealCurveNeedsRefresh = true;
+            } else {
+                Log.w("IdealCurve", String.format(Locale.getDefault(),
+                        "Invalid beatSampleCount: %d, entries.size()=%d", beatSampleCount, entries.size()));
+            }
+            
+            // 理想曲線の終了時刻を更新
+            lastIdealEndTime = idealEndTime;
+        }
+        // 新しい拍が検出されていない場合は、既存の理想曲線データを保持（上書きしない）
+        // これにより、理想曲線は1拍分のデータとして表示され、チャートがスクロールする際に一緒に流れる
     }
 
     // ===== リセット ／ 記録制御 =====
@@ -700,6 +896,12 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         // UI を初期状態に更新
         updateUi(0, 0, 0, 0, 0, 0);
         isRecordingActive = false; // ★ リセット時に記録フラグもオフにする
+        
+        // 拍ごとのデータ範囲をリセット
+        lastIdealEndTime = 0;
+        lastIdealValue = Float.NaN;
+        lastIdealWaveform.clear();
+        lastIdealWaveformCursor = 0;
     }
 
     // ★ 修正: startRecording メソッド
@@ -900,3 +1102,14 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         return isDetectionEnabled && currentISO >= 300;
     }
 }
+
+
+
+
+
+
+
+
+
+
+
