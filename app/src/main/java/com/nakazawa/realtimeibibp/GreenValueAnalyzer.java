@@ -63,6 +63,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private final List<Float> lastIdealWaveform = new ArrayList<>();  // 直近の理想曲線波形
     private int lastIdealWaveformCursor = 0;
     private boolean idealCurveNeedsRefresh = false;  // 理想曲線のデータセットを再設定する必要があるか
+    
+    // Sin波の位相オフセット（遅延補正用、-1.0～1.0の範囲、正の値で前方シフト）
+    private double sinPhaseOffset = 0.14;  // デフォルトは0.12（周期の12%前方シフトで遅延補正）
 
     // ===== 記録 =====
     private final List<Double> recValue = new ArrayList<>(),
@@ -224,6 +227,26 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     public double getLatestIbi() { return IBI; }
     
     public double getCurrentIBI() { return IBI; }
+    
+    /**
+     * Sin波の位相オフセットを設定（遅延補正用）
+     * @param offset 位相オフセット（0.0～1.0の範囲、正の値で前方シフト、負の値で後方シフト）
+     *                例: 0.1 = 周期の10%前方シフト（遅延を補正）
+     */
+    public void setSinPhaseOffset(double offset) {
+        // -1.0～1.0の範囲に制限
+        this.sinPhaseOffset = Math.max(-1.0, Math.min(1.0, offset));
+        Log.d("GreenValueAnalyzer", String.format(Locale.getDefault(),
+                "Sin phase offset set to: %.4f (%.2f%% of cycle)", 
+                sinPhaseOffset, sinPhaseOffset * 100.0));
+    }
+    
+    /**
+     * Sin波の位相オフセットを取得
+     */
+    public double getSinPhaseOffset() {
+        return sinPhaseOffset;
+    }
 
     // ===== カメラ起動 =====
     public void startCamera() {
@@ -624,6 +647,23 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             // 理想曲線の更新（新しい拍が検出された時に追加）
             updateIdealCurve();
 
+            // 同時刻のrPPGとSin近似値をログ出力
+            if (!entries.isEmpty() && !idealCurveEntries.isEmpty()) {
+                int lastIndex = entries.size() - 1;
+                if (lastIndex >= 0 && lastIndex < entries.size() && lastIndex < idealCurveEntries.size()) {
+                    float rppgValue = entries.get(lastIndex).getY();
+                    float sinValue = idealCurveEntries.get(lastIndex).getY();
+                    if (!Float.isNaN(sinValue)) {
+                        Log.d("rPPG-SinComparison", String.format(Locale.getDefault(),
+                                "Index=%d: rPPG=%.2f, SinApprox=%.2f, diff=%.2f, phaseOffset=%.4f",
+                                lastIndex, rppgValue, sinValue, Math.abs(rppgValue - sinValue), sinPhaseOffset));
+                    } else {
+                        Log.d("rPPG-SinComparison", String.format(Locale.getDefault(),
+                                "Index=%d: rPPG=%.2f, SinApprox=NaN, phaseOffset=%.4f",
+                                lastIndex, rppgValue, sinPhaseOffset));
+                    }
+                }
+            }
 
             // Y軸の最小/最大を自動調整し、目盛りラベルと軸線を表示
             float minY = entries.stream().map(Entry::getY).min(Float::compare).orElse(0f);
@@ -826,8 +866,16 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 for (int i = 0; i < beatSampleCount; i++) {
                     int entryIndex = beatStartIndex + i;
                     if (entryIndex >= 0 && entryIndex < idealCurveEntries.size() && entryIndex < entries.size()) {
+                        // 位相オフセットを適用（遅延補正）
                         double relativePos = (double) i / Math.max(1, beatSampleCount - 1);
-                        double idealValue = sinBP.getIdealCurveValueByRelativePosition(relativePos);
+                        double adjustedRelativePos = relativePos + sinPhaseOffset;
+                        // 0.0～1.0の範囲に正規化（周期境界を越えた場合の処理）
+                        if (adjustedRelativePos < 0.0) {
+                            adjustedRelativePos += 1.0;
+                        } else if (adjustedRelativePos > 1.0) {
+                            adjustedRelativePos -= 1.0;
+                        }
+                        double idealValue = sinBP.getIdealCurveValueByRelativePosition(adjustedRelativePos);
                         
                         if (!Double.isNaN(idealValue) && maxIdeal > minIdeal && maxRppg > minRppg) {
                             // 実測波形の範囲にスケーリング
@@ -860,8 +908,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 }
                 
                 Log.d("IdealCurve", String.format(Locale.getDefault(),
-                        "Ideal curve updated: beatRange=[%d-%d], validEntries=%d/%d, rPPG=[%.2f-%.2f], ideal=[%.4f-%.4f]",
-                        beatStartIndex, beatEndIndex, validCount, beatSampleCount, minRppg, maxRppg, minIdeal, maxIdeal));
+                        "Ideal curve updated: beatRange=[%d-%d], validEntries=%d/%d, rPPG=[%.2f-%.2f], ideal=[%.4f-%.4f], phaseOffset=%.4f",
+                        beatStartIndex, beatEndIndex, validCount, beatSampleCount, minRppg, maxRppg, minIdeal, maxIdeal, sinPhaseOffset));
                 
                 // 理想曲線のデータセットを再設定する必要があることをマーク
                 idealCurveNeedsRefresh = true;
@@ -902,6 +950,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         lastIdealValue = Float.NaN;
         lastIdealWaveform.clear();
         lastIdealWaveformCursor = 0;
+        sinPhaseOffset = 0.14;  // 位相オフセットをデフォルト値にリセット
     }
 
     // ★ 修正: startRecording メソッド
