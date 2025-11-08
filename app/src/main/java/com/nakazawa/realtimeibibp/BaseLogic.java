@@ -54,6 +54,13 @@ public abstract class BaseLogic implements LogicProcessor {
     }
     protected SinBPCallback sinBPCallback;
     public void setSinBPCallback(SinBPCallback cb){ this.sinBPCallback = cb; }
+    
+    // ----- SinBPModel用コールバック -----
+    public interface SinBPModelCallback {
+        void onFrame(double correctedGreenValue, long timestampMs);
+    }
+    protected SinBPModelCallback sinBPModelCallback;
+    public void setSinBPModelCallback(SinBPModelCallback cb){ this.sinBPModelCallback = cb; }
 
     // 共通: リアルタイム平滑化補間
     @Override

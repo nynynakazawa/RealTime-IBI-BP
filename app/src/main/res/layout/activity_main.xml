@@ -230,7 +230,7 @@
                     android:textColor="#78CCCC"/>
             </TableRow>
 
-            <!-- SinBP表示 -->
+            <!-- SinBP(D)表示 -->
             <TableRow
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -240,7 +240,7 @@
                     android:id="@+id/tvSinSBP"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="SinSBP : --"
+                    android:text="SinSBP(D) : --"
                     android:textSize="20dp"
                     android:textColor="#FF9966"/>
 
@@ -248,7 +248,7 @@
                     android:id="@+id/tvSinDBP"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="SinDBP : --"
+                    android:text="SinDBP(D) : --"
                     android:textSize="20dp"
                     android:textColor="#FF9966"/>
             </TableRow>
@@ -262,7 +262,7 @@
                     android:id="@+id/tvSinSBPAvg"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="SinSBP(Avg) : --"
+                    android:text="SinSBP(D)(Avg) : --"
                     android:textSize="20dp"
                     android:textColor="#FF9966"/>
 
@@ -270,9 +270,54 @@
                     android:id="@+id/tvSinDBPAvg"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="SinDBP(Avg) : --"
+                    android:text="SinDBP(D)(Avg) : --"
                     android:textSize="20dp"
                     android:textColor="#FF9966"/>
+            </TableRow>
+
+            <!-- SinBP(M)表示 -->
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+
+                <TextView
+                    android:id="@+id/tvSinSBPM"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SinSBP(M) : --"
+                    android:textSize="20dp"
+                    android:textColor="#99FF99"/>
+
+                <TextView
+                    android:id="@+id/tvSinDBPM"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SinDBP(M) : --"
+                    android:textSize="20dp"
+                    android:textColor="#99FF99"/>
+            </TableRow>
+
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+
+                <TextView
+                    android:id="@+id/tvSinSBPAvgM"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SinSBP(M)(Avg) : --"
+                    android:textSize="20dp"
+                    android:textColor="#99FF99"/>
+
+                <TextView
+                    android:id="@+id/tvSinDBPAvgM"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SinDBP(M)(Avg) : --"
+                    android:textSize="20dp"
+                    android:textColor="#99FF99"/>
             </TableRow>
         </TableLayout>
 

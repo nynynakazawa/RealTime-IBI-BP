@@ -114,7 +114,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     // 外部から注入されるBP推定器
     private RealtimeBP bpEstimator;
-    private SinBP sinBP;  // SinBP推定器
+    private SinBP sinBP;  // SinBP(D)推定器
+    private SinBPModel sinBPModel;  // SinBP(M)推定器
 
     // MainActivity側の同じReatimeBPをセット
     public void setBpEstimator(RealtimeBP estimator) {
@@ -127,9 +128,20 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
     }
     
-    // SinBPをセット
+    // SinBP(D)をセット
     public void setSinBP(SinBP estimator) {
         this.sinBP = estimator;
+        // Logic1とLogic2への参照を設定
+        if (estimator != null) {
+            Logic1 l1 = (Logic1) logicMap.computeIfAbsent("Logic1", k -> new Logic1());
+            Logic2 l2 = (Logic2) logicMap.computeIfAbsent("Logic2", k -> new Logic2());
+            estimator.setLogicRef(l1);  // デフォルトでLogic1を設定
+        }
+    }
+    
+    // SinBP(M)をセット
+    public void setSinBPModel(SinBPModel estimator) {
+        this.sinBPModel = estimator;
         // Logic1とLogic2への参照を設定
         if (estimator != null) {
             Logic1 l1 = (Logic1) logicMap.computeIfAbsent("Logic1", k -> new Logic1());
@@ -258,6 +270,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         if (sinBP != null) {
             l1.setSinBPCallback(sinBP::update);
         }
+        if (sinBPModel != null) {
+            l1.setSinBPModelCallback(sinBPModel::update);
+        }
         
         // Logic2のコールバック設定
         Logic2 l2 = (Logic2) logicMap.computeIfAbsent("Logic2", k -> new Logic2());
@@ -266,6 +281,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
         if (sinBP != null) {
             l2.setSinBPCallback(sinBP::update);
+        }
+        if (sinBPModel != null) {
+            l2.setSinBPModelCallback(sinBPModel::update);
         }
 
         if (camOpen) return;

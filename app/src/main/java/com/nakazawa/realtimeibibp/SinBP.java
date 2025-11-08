@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 
 /**
  * 非対称サイン波モデル残差に基づくリアルタイム血圧推定器（SBP/DBP）
+ * 【SinBP(D) - Distortion based】
  * 
  * アルゴリズムの要点：
  * 1. PPG波形を非対称サイン波モデルで近似（収縮期1/3:拡張期2/3の時間比）
@@ -85,12 +86,13 @@ public class SinBP {
     private int frameRate = 30;
     
     // 固定係数（ベースBP推定）
+    // 注意: 振幅AはLogic1で正規化された値（0-10範囲）を使用
     // 振幅Aが1-10程度なので、係数を大きくする
     private static final double ALPHA0 = 80.0;
-    private static final double ALPHA1 = 5.0;   // 0.5 → 5.0 (10倍)
+    private static final double ALPHA1 = 5.0;   // 0.5 → 5.0 (10倍) - 正規化後0-10範囲
     private static final double ALPHA2 = 0.3;
     private static final double BETA0 = 60.0;
-    private static final double BETA1 = 3.0;    // 0.3 → 3.0 (10倍)
+    private static final double BETA1 = 3.0;    // 0.3 → 3.0 (10倍) - 正規化後0-10範囲
     private static final double BETA2 = 0.15;
     
     // 血管特性補正係数（AIを除去、Stiffness_sinを強化、両方のrelTTPを使用）
@@ -538,6 +540,7 @@ public class SinBP {
     
     /**
      * サイン波フィッティング
+     * 注意: beatSamplesはLogic1で正規化された値（0-10範囲）を使用
      */
     private void fitSineWave(List<Double> beatSamples, double ibi) {
         // 64点にリサンプリング
@@ -558,6 +561,7 @@ public class SinBP {
         b = b * 2.0 / N;
         
         // 振幅計算
+        // 注意: beatSamplesは正規化後の値（0-10範囲）なので、振幅Aも正規化後の範囲内
         currentA = Math.sqrt(a * a + b * b);
         
         // ゼロ除算チェック
@@ -652,6 +656,7 @@ public class SinBP {
     /**
      * 歪み指標の計算（動的な比率を使用）
      * 非対称サイン波モデルからの残差を計算
+     * 注意: beatSamplesはLogic1で正規化された値（0-10範囲）を使用
      */
     private void calculateDistortion(List<Double> beatSamples, double A, double phi, double ibi,
                                      double systoleRatio, double diastoleRatio) {
@@ -661,6 +666,7 @@ public class SinBP {
         }
         
         // サンプルの平均値を計算（DCオフセット）
+        // 注意: beatSamplesは正規化後の値（0-10範囲）なので、meanも0-10範囲
         double mean = 0;
         for (double sample : beatSamples) {
             mean += sample;
@@ -769,9 +775,21 @@ public class SinBP {
     
     /**
      * BP推定
+     * 注意: 振幅AはLogic1で正規化された値（0-10範囲）を使用
      */
     private void estimateBP(double A, double ibi, double E) {
-        double hr = 60000.0 / ibi;
+        // smoothedIBIからHRを計算（RealtimeBPと同様の方法）
+        double hr = 0.0;
+        if (logicRef != null && !logicRef.smoothedIbi.isEmpty()) {
+            double lastSmoothedIbi = logicRef.getLastSmoothedIbi();
+            if (lastSmoothedIbi > 0) {
+                hr = 60000.0 / lastSmoothedIbi; // smoothedIBIから計算
+            } else {
+                hr = 60000.0 / ibi; // フォールバック
+            }
+        } else {
+            hr = 60000.0 / ibi; // フォールバック
+        }
         
         // BaseLogicから血管特性を取得（AIは除去、Stiffness_sinを優先）
         double valleyToPeakRelTTP = (logicRef != null) ? logicRef.averageValleyToPeakRelTTP : 0.0;
