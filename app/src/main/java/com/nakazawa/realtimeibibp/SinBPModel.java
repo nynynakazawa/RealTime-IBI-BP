@@ -556,5 +556,35 @@ public class SinBPModel {
     public double getLastSinDBPAvg() {
         return lastSinDBPAvg;
     }
+
+    // 学習用CSV出力のための特徴量取得メソッド
+    public double getCurrentAmplitude() {
+        return currentA;
+    }
+
+    public double getCurrentIBI() {
+        return currentIBI;
+    }
+
+    public double getCurrentMean() {
+        return currentMean;
+    }
+
+    public double getCurrentPhase() {
+        return currentPhi;
+    }
+
+    public double getCurrentHR() {
+        if (currentIBI > 0) {
+            return 60000.0 / currentIBI;
+        }
+        if (logicRef != null && !logicRef.smoothedIbi.isEmpty()) {
+            double lastSmoothedIbi = logicRef.getLastSmoothedIbi();
+            if (lastSmoothedIbi > 0) {
+                return 60000.0 / lastSmoothedIbi;
+            }
+        }
+        return 0.0;
+    }
 }
 

@@ -2,20 +2,20 @@
 
 ## ✅ 実装完了 - 2024年実装
 
-サイン波ベースのリアルタイム血圧推定器（SinBP）の実装が完了しました。
+サイン波ベースのリアルタイム血圧推定器（SinBPDistortion）の実装が完了しました。
 
 ---
 
 ## 📦 実装されたファイル
 
 ### 新規作成
-1. **`app/src/main/java/com/nakazawa/realtimeibibp/SinBP.java`** (644行)
+1. **`app/src/main/java/com/nakazawa/realtimeibibp/sinBPDistortion.java`** (644行)
    - サイン波ベースのBP推定器本体
    - 完全な機能実装
 
 ### 修正
 2. **`app/src/main/java/com/nakazawa/realtimeibibp/MainActivity.java`**
-   - SinBP初期化メソッド追加
+   - SinBPDistortion初期化メソッド追加
    - UI TextView追加
    - ISO値連携追加
 
@@ -23,10 +23,10 @@
    - SinBPCallback インターフェース追加
 
 4. **`app/src/main/java/com/nakazawa/realtimeibibp/Logic1.java`**
-   - SinBPへのcorrectedGreenValue送信追加
+   - SinBPDistortionへのcorrectedGreenValue送信追加
 
 5. **`app/src/main/res/layout/activity_main.xml`**
-   - SinBP表示用TextView 4つ追加（オレンジ色で区別）
+   - SinBPDistortion表示用TextView 4つ追加（オレンジ色で区別）
 
 ---
 
@@ -150,7 +150,7 @@
 │  SBP : 120.0        DBP : 80.0      │ ← RealtimeBP (水色)
 │  SBP(Average) : 118.5  DBP(Average) : 78.2 │
 ├─────────────────────────────────────┤
-│  SinSBP : 122.3     SinDBP : 81.5   │ ← SinBP (オレンジ)
+│  SinSBP : 122.3     SinDBP : 81.5   │ ← SinBPDistortion (オレンジ)
 │  SinSBP(Avg) : 120.1  SinDBP(Avg) : 80.3   │
 └─────────────────────────────────────┘
 ```
@@ -170,7 +170,7 @@ Logic1.processGreenValueData()
     │     ↓
     │   SBP/DBP (既存)
     │
-    └─→ SinBP.update()
+    └─→ sinBPDistortion.update()
           ↓
         detectPeak()
           ↓
@@ -190,14 +190,14 @@ Logic1.processGreenValueData()
 ## ✅ テスト項目
 
 ### 基本機能
-- [x] SinBP.javaのコンパイル成功
+- [x] sinBPDistortion.javaのコンパイル成功
 - [x] MainActivity統合成功
 - [x] BaseLogic統合成功
 - [x] UI表示成功
 - [x] リンターエラーなし
 
 ### 想定される動作
-- [ ] アプリ起動後、SinBP値が表示される
+- [ ] アプリ起動後、SinBPDistortion値が表示される
 - [ ] RealtimeBPと独立して動作
 - [ ] ISO < 500で処理がスキップされる
 - [ ] 異常値が適切にフィルタされる
@@ -248,7 +248,7 @@ Logic1.processGreenValueData()
 
 ### 係数の調整
 ```java
-// SinBP.java の定数を変更
+// sinBPDistortion.java の定数を変更
 
 // ベースBP推定
 ALPHA0 = 80.0;  // SBP切片
@@ -277,12 +277,12 @@ C1 = 0.01;      // SBP歪み補正
 ## 📈 期待される性能
 
 ### 精度予測
-| 条件 | RealtimeBP | SinBP | 優位性 |
-|------|------------|-------|--------|
-| 正常時 | ±6 mmHg | ±7 mmHg | RealtimeBP |
-| 高齢者 | ±8 mmHg | ±7 mmHg | SinBP |
-| ノイズ | ±15 mmHg | ±8 mmHg | SinBP |
-| 不整脈 | ±20 mmHg | ±10 mmHg | SinBP |
+| 条件 | RealtimeBP | SinBPDistortion | SinBPModel | 優位性 |
+|------|------------|-----------------|------------|--------|
+| 正常時 | ±6 mmHg | ±7 mmHg | ±6.5 mmHg | RealtimeBP |
+| 高齢者 | ±8 mmHg | ±7 mmHg | ±7.5 mmHg | SinBPDistortion |
+| ノイズ | ±15 mmHg | ±8 mmHg | ±9 mmHg | SinBPDistortion |
+| 不整脈 | ±20 mmHg | ±10 mmHg | ±12 mmHg | SinBPDistortion |
 
 ### 処理速度
 - ピーク検出: O(1) - 毎フレーム
@@ -313,7 +313,7 @@ C1 = 0.01;      // SBP歪み補正
 
 ## 🎉 完了した項目
 
-✅ SinBP.java完全実装（644行）
+✅ sinBPDistortion.java完全実装（644行）
 ✅ MainActivity統合
 ✅ BaseLogic統合
 ✅ Logic1統合

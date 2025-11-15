@@ -48,7 +48,7 @@ public abstract class BaseLogic implements LogicProcessor {
     protected BPFrameCallback bpCallback;
     public void setBPFrameCallback(BPFrameCallback cb){ this.bpCallback = cb; }
     
-    // ----- SinBP用コールバック -----
+    // ----- SinBPDistortion用コールバック -----
     public interface SinBPCallback {
         void onFrame(double correctedGreenValue, long timestampMs);
     }
@@ -216,6 +216,35 @@ public abstract class BaseLogic implements LogicProcessor {
             return 0.0;
         }
         return smoothedIbi.get(smoothedIbi.size() - 1);
+    }
+
+    // 学習用CSV出力のための特徴量取得メソッド
+    public double getAverageAI() {
+        return averageAI;
+    }
+
+    public double getAverageValleyToPeakRelTTP() {
+        return averageValleyToPeakRelTTP;
+    }
+
+    public double getAveragePeakToValleyRelTTP() {
+        return averagePeakToValleyRelTTP;
+    }
+
+    public double getAverageValleyToPeakAmplitude() {
+        return averageValleyToPeakAmplitude;
+    }
+
+    public double getAveragePeakToValleyAmplitude() {
+        return averagePeakToValleyAmplitude;
+    }
+
+    public double getSmoothedBpm() {
+        return smoothedBpm;
+    }
+
+    public double getIBI() {
+        return IBI;
     }
 
 

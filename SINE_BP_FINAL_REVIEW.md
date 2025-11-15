@@ -47,7 +47,7 @@ public void updateISO(int iso) {
         realtimeBP.updateISO(iso);
     }
     if (sinBP != null) {
-        sinBP.updateISO(iso);  // 追加
+        sinBPDistortion.updateISO(iso);  // 追加
     }
 }
 ```
@@ -391,7 +391,7 @@ private double[] resampleBeat(double[] beatSamples, int targetSize) {
 
 ## 📋 **修正版実装チェックリスト**
 
-### Phase 1: SinBP.java基本実装
+### Phase 1: sinBPDistortion.java基本実装
 - [ ] クラス定義とフィールド
 - [ ] **ISO管理の追加**
 - [ ] **BaseLogicへの参照（logicRef）**

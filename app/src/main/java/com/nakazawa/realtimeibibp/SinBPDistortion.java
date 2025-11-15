@@ -26,8 +26,8 @@ import java.util.stream.Collectors;
  * - 実測IBIと毎拍同期し、PPG/動脈波の生理学的非対称性を反映
  * - 周波数分解に依存せず、低FPS環境（30fps）やノイズに対して頑健
  */
-public class SinBP {
-    private static final String TAG = "SinBP";
+public class SinBPDistortion {
+    private static final String TAG = "SinBPDistortion";
     
     // バッファサイズ（30fps × 3秒 = 90サンプル）
     private static final int BUFFER_SIZE = 90;
@@ -124,16 +124,16 @@ public class SinBP {
     private static final long PROCESSING_DELAY_MS = 100; // 処理時間による遅延（ミリ秒）
     
     // リスナー
-    public interface SinBPListener {
+    public interface SinBPDistortionListener {
         void onSinBPUpdated(double sinSbp, double sinDbp,
                            double sinSbpAvg, double sinDbpAvg);
     }
-    private SinBPListener listener;
+    private SinBPDistortionListener listener;
     
     /**
      * リスナーを設定
      */
-    public void setListener(SinBPListener l) {
+    public void setListener(SinBPDistortionListener l) {
         this.listener = l;
     }
     
@@ -260,8 +260,6 @@ public class SinBP {
      * 現在の理想曲線パラメータを取得
      */
     public double getCurrentMean() { return currentMean; }
-    public double getCurrentAmplitude() { return currentAmplitude; }
-    public double getCurrentIBI() { return currentIBIms; }
     
     /**
      * ISO値を更新
@@ -795,7 +793,7 @@ public class SinBP {
         double valleyToPeakRelTTP = (logicRef != null) ? logicRef.averageValleyToPeakRelTTP : 0.0;
         double peakToValleyRelTTP = (logicRef != null) ? logicRef.averagePeakToValleyRelTTP : 0.0;
         
-        // 血管硬さ指標（歪み × 振幅の平方根）- SinBPの独自指標
+        // 血管硬さ指標（歪み × 振幅の平方根）- SinBPDistortionの独自指標
         double stiffness = E * Math.sqrt(A);
         
         // ベースBP計算
@@ -993,13 +991,13 @@ public class SinBP {
     /**
      * コンストラクタ
      */
-    public SinBP() {
+    public SinBPDistortion() {
         // 初期値を設定（UI表示用）
         lastSinSBP = 0;
         lastSinDBP = 0;
         lastSinSBPAvg = 0;
         lastSinDBPAvg = 0;
-        Log.d(TAG, "SinBP initialized");
+        Log.d(TAG, "SinBPDistortion initialized");
     }
     
     /**
@@ -1033,7 +1031,7 @@ public class SinBP {
         lastSinDBPAvg = 0;
         lastValidIBI = 0;
         
-        Log.d(TAG, "SinBP reset with 1-beat delay and dynamic ratio");
+        Log.d(TAG, "SinBPDistortion reset with 1-beat delay and dynamic ratio");
     }
     
     // Getter methods
@@ -1051,6 +1049,45 @@ public class SinBP {
     
     public double getLastSinDBPAvg() {
         return lastSinDBPAvg;
+    }
+
+    // 学習用CSV出力のための特徴量取得メソッド
+    public double getCurrentAmplitude() {
+        return currentA;
+    }
+
+    public double getCurrentIBI() {
+        return currentIBI;
+    }
+
+    public double getCurrentDistortion() {
+        return currentE;
+    }
+
+    public double getCurrentStiffness() {
+        // Stiffness_sin = E * sqrt(A)
+        return currentE * Math.sqrt(Math.max(currentA, 0.0));
+    }
+
+    public double getCurrentHR() {
+        if (currentIBI > 0) {
+            return 60000.0 / currentIBI;
+        }
+        if (logicRef != null && !logicRef.smoothedIbi.isEmpty()) {
+            double lastSmoothedIbi = logicRef.getLastSmoothedIbi();
+            if (lastSmoothedIbi > 0) {
+                return 60000.0 / lastSmoothedIbi;
+            }
+        }
+        return 0.0;
+    }
+
+    public double getCurrentValleyToPeakRelTTP() {
+        return (logicRef != null) ? logicRef.averageValleyToPeakRelTTP : 0.0;
+    }
+
+    public double getCurrentPeakToValleyRelTTP() {
+        return (logicRef != null) ? logicRef.averagePeakToValleyRelTTP : 0.0;
     }
 }
 

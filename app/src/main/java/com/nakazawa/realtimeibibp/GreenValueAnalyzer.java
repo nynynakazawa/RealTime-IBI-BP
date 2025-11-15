@@ -83,6 +83,32 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private final List<Double> recSinIBI = new ArrayList<>();  // IBI
     private final List<Long> recSinTs = new ArrayList<>();  // タイムスタンプ
 
+    // ===== 学習用データ記録 =====
+    private final List<Long> recTrainingTs = new ArrayList<>();  // タイムスタンプ
+    // Method1 (RealtimeBP) 特徴量
+    private final List<Double> recM1_A = new ArrayList<>();
+    private final List<Double> recM1_HR = new ArrayList<>();
+    private final List<Double> recM1_V2P_relTTP = new ArrayList<>();
+    private final List<Double> recM1_P2V_relTTP = new ArrayList<>();
+    private final List<Double> recM1_SBP = new ArrayList<>();
+    private final List<Double> recM1_DBP = new ArrayList<>();
+    // Method2 (SinBP) 特徴量
+    private final List<Double> recM2_A = new ArrayList<>();
+    private final List<Double> recM2_HR = new ArrayList<>();
+    private final List<Double> recM2_V2P_relTTP = new ArrayList<>();
+    private final List<Double> recM2_P2V_relTTP = new ArrayList<>();
+    private final List<Double> recM2_Stiffness = new ArrayList<>();
+    private final List<Double> recM2_E = new ArrayList<>();
+    private final List<Double> recM2_SBP = new ArrayList<>();
+    private final List<Double> recM2_DBP = new ArrayList<>();
+    // Method3 (SinBP_M) 特徴量
+    private final List<Double> recM3_A = new ArrayList<>();
+    private final List<Double> recM3_HR = new ArrayList<>();
+    private final List<Double> recM3_Mean = new ArrayList<>();
+    private final List<Double> recM3_Phi = new ArrayList<>();
+    private final List<Double> recM3_SBP = new ArrayList<>();
+    private final List<Double> recM3_DBP = new ArrayList<>();
+
     // ===== 状態 =====
     private boolean camOpen;
     private double  IBI;
@@ -114,7 +140,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     // 外部から注入されるBP推定器
     private RealtimeBP bpEstimator;
-    private SinBP sinBP;  // SinBP(D)推定器
+    private SinBPDistortion sinBPDistortion;  // SinBP(D)推定器
     private SinBPModel sinBPModel;  // SinBP(M)推定器
 
     // MainActivity側の同じReatimeBPをセット
@@ -129,8 +155,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     }
     
     // SinBP(D)をセット
-    public void setSinBP(SinBP estimator) {
-        this.sinBP = estimator;
+    public void setSinBPDistortion(SinBPDistortion estimator) {
+        this.sinBPDistortion = estimator;
         // Logic1とLogic2への参照を設定
         if (estimator != null) {
             Logic1 l1 = (Logic1) logicMap.computeIfAbsent("Logic1", k -> new Logic1());
@@ -224,14 +250,14 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             }
         });
         
-        // アクティブなロジックに応じてRealtimeBPとSinBPの参照を更新
+        // アクティブなロジックに応じてRealtimeBPとSinBPDistortionの参照を更新
         if (logicProcessor instanceof BaseLogic) {
             BaseLogic logic = (BaseLogic) logicProcessor;
             if (bpEstimator != null) {
                 bpEstimator.setLogicRef(logic);
             }
-            if (sinBP != null) {
-                sinBP.setLogicRef(logic);
+            if (sinBPDistortion != null) {
+                sinBPDistortion.setLogicRef(logic);
             }
         }
     }
@@ -267,8 +293,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         if (bpEstimator != null) {
             l1.setBPFrameCallback(bpEstimator::update);
         }
-        if (sinBP != null) {
-            l1.setSinBPCallback(sinBP::update);
+        if (sinBPDistortion != null) {
+            l1.setSinBPCallback(sinBPDistortion::update);
         }
         if (sinBPModel != null) {
             l1.setSinBPModelCallback(sinBPModel::update);
@@ -279,8 +305,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         if (bpEstimator != null) {
             l2.setBPFrameCallback(bpEstimator::update);
         }
-        if (sinBP != null) {
-            l2.setSinBPCallback(sinBP::update);
+        if (sinBPDistortion != null) {
+            l2.setSinBPCallback(sinBPDistortion::update);
         }
         if (sinBPModel != null) {
             l2.setSinBPModelCallback(sinBPModel::update);
@@ -464,6 +490,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                             cameraSelector,
                             new Preview.Builder().build());
                     
+                    @OptIn(markerClass = androidx.camera.camera2.interop.ExperimentalCamera2Interop.class)
                     Camera2CameraControl camera2Control = Camera2CameraControl.from(camera.getCameraControl());
                     
                     // 現在のカメラ設定値を取得
@@ -533,7 +560,72 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                         recIbi.add(r.getIbi());
                         recSd.add(r.getBpmSd());
                         recValTs.add(System.currentTimeMillis());
-                        recIbiTs.add(System.currentTimeMillis());
+                        long currentTimestamp = System.currentTimeMillis();
+                        recIbiTs.add(currentTimestamp);
+                        
+                        // 学習用データの記録（IBIが更新されたタイミングで記録）
+                        // IBIが前回と異なる場合（新しい拍が検出された場合）のみ記録
+                        boolean isNewBeat = recIbi.size() == 1 || 
+                            (recIbi.size() > 1 && Double.compare(recIbi.get(recIbi.size() - 1), recIbi.get(recIbi.size() - 2)) != 0);
+                        
+                        if (isNewBeat) {
+                            recTrainingTs.add(currentTimestamp);
+                            
+                            // Method1 (RealtimeBP) 特徴量
+                            if (bpEstimator != null) {
+                                recM1_A.add(bpEstimator.getLastAmplitude());
+                                recM1_HR.add(bpEstimator.getLastValidHr());
+                                recM1_V2P_relTTP.add(bpEstimator.getLastValleyToPeakRelTTP());
+                                recM1_P2V_relTTP.add(bpEstimator.getLastPeakToValleyRelTTP());
+                                recM1_SBP.add(bpEstimator.getLastSbp());
+                                recM1_DBP.add(bpEstimator.getLastDbp());
+                            } else {
+                                recM1_A.add(0.0);
+                                recM1_HR.add(0.0);
+                                recM1_V2P_relTTP.add(0.0);
+                                recM1_P2V_relTTP.add(0.0);
+                                recM1_SBP.add(0.0);
+                                recM1_DBP.add(0.0);
+                            }
+                            
+                            // Method2 (SinBP_D) 特徴量
+                            if (sinBPDistortion != null) {
+                                recM2_A.add(sinBPDistortion.getCurrentAmplitude());
+                                recM2_HR.add(sinBPDistortion.getCurrentHR());
+                                recM2_V2P_relTTP.add(sinBPDistortion.getCurrentValleyToPeakRelTTP());
+                                recM2_P2V_relTTP.add(sinBPDistortion.getCurrentPeakToValleyRelTTP());
+                                recM2_Stiffness.add(sinBPDistortion.getCurrentStiffness());
+                                recM2_E.add(sinBPDistortion.getCurrentDistortion());
+                                recM2_SBP.add(sinBPDistortion.getLastSinSBP());
+                                recM2_DBP.add(sinBPDistortion.getLastSinDBP());
+                            } else {
+                                recM2_A.add(0.0);
+                                recM2_HR.add(0.0);
+                                recM2_V2P_relTTP.add(0.0);
+                                recM2_P2V_relTTP.add(0.0);
+                                recM2_Stiffness.add(0.0);
+                                recM2_E.add(0.0);
+                                recM2_SBP.add(0.0);
+                                recM2_DBP.add(0.0);
+                            }
+                            
+                            // Method3 (SinBP_M) 特徴量
+                            if (sinBPModel != null) {
+                                recM3_A.add(sinBPModel.getCurrentAmplitude());
+                                recM3_HR.add(sinBPModel.getCurrentHR());
+                                recM3_Mean.add(sinBPModel.getCurrentMean());
+                                recM3_Phi.add(sinBPModel.getCurrentPhase());
+                                recM3_SBP.add(sinBPModel.getLastSinSBP());
+                                recM3_DBP.add(sinBPModel.getLastSinDBP());
+                            } else {
+                                recM3_A.add(0.0);
+                                recM3_HR.add(0.0);
+                                recM3_Mean.add(0.0);
+                                recM3_Phi.add(0.0);
+                                recM3_SBP.add(0.0);
+                                recM3_DBP.add(0.0);
+                            }
+                        }
 
                         lp.calculateSmoothedValueRealTime(
                                 r.getIbi(), r.getBpmSd());
@@ -546,15 +638,15 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                         
                         // Sin波データの記録
                         long currentTime = System.currentTimeMillis();
-                        if (sinBP != null && sinBP.hasIdealCurve()) {
-                            double sinWaveValue = sinBP.getIdealCurveValue(currentTime);
+                        if (sinBPDistortion != null && sinBPDistortion.hasIdealCurve()) {
+                            double sinWaveValue = sinBPDistortion.getIdealCurveValue(currentTime);
                             recSinWave.add(sinWaveValue);
-                            recSinAmplitude.add(sinBP.getCurrentAmplitude());
-                            recSinMean.add(sinBP.getCurrentMean());
-                            recSinIBI.add(sinBP.getCurrentIBI());
+                            recSinAmplitude.add(sinBPDistortion.getCurrentAmplitude());
+                            recSinMean.add(sinBPDistortion.getCurrentMean());
+                            recSinIBI.add(sinBPDistortion.getCurrentIBI());
                             recSinTs.add(currentTime);
                         } else {
-                            // SinBPが利用できない場合は0を記録
+                            // SinBPDistortionが利用できない場合は0を記録
                             recSinWave.add(0.0);
                             recSinAmplitude.add(0.0);
                             recSinMean.add(0.0);
@@ -814,13 +906,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
         
         // 理想曲線がない場合はNaNで埋める
-        if (sinBP == null || !sinBP.hasIdealCurve()) {
+        if (sinBPDistortion == null || !sinBPDistortion.hasIdealCurve()) {
             // 新しい拍が検出されていない場合は、既存のデータを保持（上書きしない）
             return;
         }
         
         // 理想曲線の終了時刻を取得
-        long idealEndTime = sinBP.getIdealCurveEndTime();
+        long idealEndTime = sinBPDistortion.getIdealCurveEndTime();
         
         // 新しい拍が検出されたかチェック
         boolean newBeatDetected = (idealEndTime != lastIdealEndTime && idealEndTime > 0);
@@ -839,7 +931,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         
         if (newBeatDetected) {
             // 新しい拍が検出された場合のみ、その拍の理想曲線を生成
-            int beatSampleCount = sinBP.getCurrentBeatSampleCount();
+            int beatSampleCount = sinBPDistortion.getCurrentBeatSampleCount();
             
             if (beatSampleCount > 0 && beatSampleCount <= entries.size()) {
                 lastIdealWaveform.clear();
@@ -867,7 +959,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 double maxIdeal = Double.MIN_VALUE;
                 for (int j = 0; j < beatSampleCount; j++) {
                     double relativePos = (double) j / Math.max(1, beatSampleCount - 1);
-                    double testValue = sinBP.getIdealCurveValueByRelativePosition(relativePos);
+                    double testValue = sinBPDistortion.getIdealCurveValueByRelativePosition(relativePos);
                     if (!Double.isNaN(testValue)) {
                         minIdeal = Math.min(minIdeal, testValue);
                         maxIdeal = Math.max(maxIdeal, testValue);
@@ -893,7 +985,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                         } else if (adjustedRelativePos > 1.0) {
                             adjustedRelativePos -= 1.0;
                         }
-                        double idealValue = sinBP.getIdealCurveValueByRelativePosition(adjustedRelativePos);
+                        double idealValue = sinBPDistortion.getIdealCurveValueByRelativePosition(adjustedRelativePos);
                         
                         if (!Double.isNaN(idealValue) && maxIdeal > minIdeal && maxRppg > minRppg) {
                             // 実測波形の範囲にスケーリング
@@ -989,6 +1081,29 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         recSmBpm.clear();
         recValTs.clear();
         recIbiTs.clear();
+        
+        // 学習用データのクリア
+        recTrainingTs.clear();
+        recM1_A.clear();
+        recM1_HR.clear();
+        recM1_V2P_relTTP.clear();
+        recM1_P2V_relTTP.clear();
+        recM1_SBP.clear();
+        recM1_DBP.clear();
+        recM2_A.clear();
+        recM2_HR.clear();
+        recM2_V2P_relTTP.clear();
+        recM2_P2V_relTTP.clear();
+        recM2_Stiffness.clear();
+        recM2_E.clear();
+        recM2_SBP.clear();
+        recM2_DBP.clear();
+        recM3_A.clear();
+        recM3_HR.clear();
+        recM3_Mean.clear();
+        recM3_Phi.clear();
+        recM3_SBP.clear();
+        recM3_DBP.clear();
     }
 
     // ===== CSV保存 =====
@@ -1007,7 +1122,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
 
         try (FileWriter writer = new FileWriter(csvFile)) {
-            // ヘッダー行（SinBP値を追加）
+            // ヘッダー行（SinBPDistortion値を追加）
             writer.append("IBI, bpmSD, Smoothed IBI, Smoothed BPM, SBP, DBP, SBP_Avg, DBP_Avg, SinSBP, SinDBP, SinSBP_Avg, SinDBP_Avg, Timestamp\n");
 
             // 記録データを CSV に書き出し
@@ -1033,10 +1148,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                         .append(String.format(Locale.getDefault(), "%.2f", bpEstimator.getLastDbp())).append(", ")
                         .append(String.format(Locale.getDefault(), "%.2f", bpEstimator.getLastSbpAvg())).append(", ")
                         .append(String.format(Locale.getDefault(), "%.2f", bpEstimator.getLastDbpAvg())).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", sinBP != null ? sinBP.getLastSinSBP() : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", sinBP != null ? sinBP.getLastSinDBP() : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", sinBP != null ? sinBP.getLastSinSBPAvg() : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", sinBP != null ? sinBP.getLastSinDBPAvg() : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", sinBPDistortion != null ? sinBPDistortion.getLastSinSBP() : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", sinBPDistortion != null ? sinBPDistortion.getLastSinDBP() : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", sinBPDistortion != null ? sinBPDistortion.getLastSinSBPAvg() : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", sinBPDistortion != null ? sinBPDistortion.getLastSinDBPAvg() : 0.0)).append(", ")
                         .append(ts)
                         .append("\n");
             }
@@ -1135,6 +1250,75 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             return 0.0;
         }
         return recSmBpm.get(recSmBpm.size() - 1);
+    }
+
+    // ===== 学習用CSV保存 =====
+    public void saveTrainingDataToCsv(String name) {
+        SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
+        File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        File csvFile = new File(downloadFolder, name + "_Training_Data.csv");
+
+        // 学習用データが空の場合はトースト表示して終了
+        if (recTrainingTs.isEmpty()) {
+            ui.post(() ->
+                    Toast.makeText(ctx, "記録された学習用データがありません", Toast.LENGTH_SHORT).show()
+            );
+            return;
+        }
+
+        try (FileWriter writer = new FileWriter(csvFile)) {
+            // ヘッダー行
+            writer.append("timestamp, subject_id, ref_SBP, ref_DBP, ")
+                    .append("M1_A, M1_HR, M1_V2P_relTTP, M1_P2V_relTTP, M1_SBP, M1_DBP, ")
+                    .append("M2_A, M2_HR, M2_V2P_relTTP, M2_P2V_relTTP, M2_Stiffness, M2_E, M2_SBP, M2_DBP, ")
+                    .append("M3_A, M3_HR, M3_Mean, M3_Phi, M3_SBP, M3_DBP, ")
+                    .append("Timestamp_Formatted\n");
+
+            // 記録データを CSV に書き出し
+            int maxSize = recTrainingTs.size();
+            for (int i = 0; i < maxSize; i++) {
+                String ts = sdf.format(new Date(recTrainingTs.get(i)));
+                
+                writer.append(String.format(Locale.getDefault(), "%d", recTrainingTs.get(i))).append(", ")
+                        .append("subject_placeholder").append(", ")  // subject_id (後で追加)
+                        .append("").append(", ")  // ref_SBP (連続血圧計の参照値、後で追加)
+                        .append("").append(", ")  // ref_DBP (連続血圧計の参照値、後で追加)
+                        // Method1 (RealTimeBP)
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM1_A.size() ? recM1_A.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM1_HR.size() ? recM1_HR.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM1_V2P_relTTP.size() ? recM1_V2P_relTTP.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM1_P2V_relTTP.size() ? recM1_P2V_relTTP.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", i < recM1_SBP.size() ? recM1_SBP.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", i < recM1_DBP.size() ? recM1_DBP.get(i) : 0.0)).append(", ")
+                        // Method2
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_A.size() ? recM2_A.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_HR.size() ? recM2_HR.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_V2P_relTTP.size() ? recM2_V2P_relTTP.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_P2V_relTTP.size() ? recM2_P2V_relTTP.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_Stiffness.size() ? recM2_Stiffness.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_E.size() ? recM2_E.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", i < recM2_SBP.size() ? recM2_SBP.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", i < recM2_DBP.size() ? recM2_DBP.get(i) : 0.0)).append(", ")
+                        // Method3 (SinBP_M)
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM3_A.size() ? recM3_A.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM3_HR.size() ? recM3_HR.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM3_Mean.size() ? recM3_Mean.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.4f", i < recM3_Phi.size() ? recM3_Phi.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", i < recM3_SBP.size() ? recM3_SBP.get(i) : 0.0)).append(", ")
+                        .append(String.format(Locale.getDefault(), "%.2f", i < recM3_DBP.size() ? recM3_DBP.get(i) : 0.0)).append(", ")
+                        .append(ts)
+                        .append("\n");
+            }
+
+            ui.post(() ->
+                    Toast.makeText(ctx, "学習用データ 保存完了", Toast.LENGTH_SHORT).show()
+            );
+        } catch (IOException e) {
+            e.printStackTrace();
+            ui.post(() ->
+                    Toast.makeText(ctx, "学習用データ 保存失敗", Toast.LENGTH_SHORT).show()
+            );
+        }
     }
 
     // ===== カメラ操作 =====

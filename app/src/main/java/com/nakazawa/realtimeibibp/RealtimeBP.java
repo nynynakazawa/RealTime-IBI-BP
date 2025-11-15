@@ -14,16 +14,12 @@ import java.util.Locale;
  * リアルタイム血圧推定器（SBP/DBP）。
  *
  * ─ アルゴリズムの要点 ─
- * 1. 1 拍分の correctedGreenValue（正規化済み PPG 振幅）をバッファリング
- * 2. 形態学的特徴: 最大振幅 (S), 拍末振幅 (D), time-to-peak (TTP), 拍幅 (PW)
- * 3. hemodynamic 特徴: オーグメンテーション指数 (AI = (S - D) / S), 心拍数 (HR)
- * 4. ISO感度依存の誤差を補正した改良線形回帰モデルで SBP / DBP を推定
- *
- * ─ 改良点 ─
- * - ISO正規化: 参照ISO (600) を基準とした相対ISO値
- * - 振幅補正: sNorm = sAmp * isoNorm
- * - 追加説明変数: isoNorm, sNorm, relTTP
- * - 動的ISO値の取得と適用
+ * 1. BaseLogicから振幅（A）、心拍数（HR）、相対TTP（V2P_relTTP, P2V_relTTP）を取得
+ * 2. 線形回帰モデルで SBP / DBP を推定
+ * 
+ * 回帰式:
+ * SBP = C0 + C1*A + C2*HR + C3*V2P_relTTP + C4*P2V_relTTP
+ * DBP = D0 + D1*A + D2*HR + D3*V2P_relTTP + D4*P2V_relTTP
  */
 public class RealtimeBP {
 
@@ -72,22 +68,16 @@ public class RealtimeBP {
     }
 
     private double lastSbp, lastDbp, lastSbpAvg, lastDbpAvg;
-    private double lastAiRaw, lastAiAt75;
-    private double lastAiRawPct, lastAiAt75Pct;
-    // relTTP用フィールドを追加
-    private double lastRelTTP;
+    // relTTP用フィールド
     private double lastValleyToPeakRelTTP; // 谷→山のrelTTP
     private double lastPeakToValleyRelTTP; // 山→谷のrelTTP
+    private double lastAmplitude; // 振幅（A）
 
-    /** AI の HR 補正傾き [%/bpm] */
-    private static final double AI_HR_SLOPE_PCT_PER_BPM = -0.39;
     // --- 回帰係数（暫定調整） ---
-    // SBP: C0 + C1*AI75 + C2*HR + C4*sNorm + C5*isoDev + C6*V2P_relTTP + C7*P2V_relTTP
-    private static final double C0 = 80, C1 = 0.5, C2 = 0.1,
-            C4 = 0.001, C5 = -5, C6 = 0.1, C7 = -0.1; // ベースラインは維持、他を調整
-    // DBP: D0 + D1*AI75 + D2*HR + D4*sNorm + D5*isoDev + D6*V2P_relTTP + D7*P2V_relTTP
-    private static final double D0 = 60, D1 = 0.3, D2 = 0.05,
-            D4 = 0.0005, D5 = -2, D6 = 0.05, D7 = -0.05; // ベースラインは維持、他を調整
+    // SBP: C0 + C1*A + C2*HR + C3*V2P_relTTP + C4*P2V_relTTP
+    private static final double C0 = 80, C1 = 0.5, C2 = 0.1, C3 = 0.1, C4 = -0.1;
+    // DBP: D0 + D1*A + D2*HR + D3*V2P_relTTP + D4*P2V_relTTP
+    private static final double D0 = 60, D1 = 0.3, D2 = 0.05, D3 = 0.05, D4 = -0.05;
 
     /**
      * BaseLogicからのコールバック用メソッド
@@ -119,19 +109,19 @@ public class RealtimeBP {
         Log.d("RealtimeBP-Estimate", "=== estimateAndNotify START ===");
         Log.d("RealtimeBP-Estimate", "Input: ibiMs=" + ibiMs);
 
-        // BaseLogicから最新の平均値を取得
+        // BaseLogicから最新の値を取得
         double valleyToPeakRelTTP = (logicRef != null) ? logicRef.averageValleyToPeakRelTTP : 0.0;
         double peakToValleyRelTTP = (logicRef != null) ? logicRef.averagePeakToValleyRelTTP : 0.0;
-        double averageAI = (logicRef != null) ? logicRef.averageAI : 0.0;
+        double amplitude = (logicRef != null) ? logicRef.averageValleyToPeakAmplitude : 0.0;
         
-        // ローカル変数に保存（ログ出力用）
+        // ローカル変数に保存
         lastValleyToPeakRelTTP = valleyToPeakRelTTP;
         lastPeakToValleyRelTTP = peakToValleyRelTTP;
-        lastAiAt75 = averageAI;
+        lastAmplitude = amplitude;
         
         Log.d("RealtimeBP-Estimate", String.format(
-                "BaseLogic values: V2P_relTTP=%.3f, P2V_relTTP=%.3f, AI=%.3f%%",
-                valleyToPeakRelTTP, peakToValleyRelTTP, averageAI));
+                "BaseLogic values: A=%.3f, V2P_relTTP=%.3f, P2V_relTTP=%.3f",
+                amplitude, valleyToPeakRelTTP, peakToValleyRelTTP));
         
         // --- 回帰式計算 ---
         // 最新のsmoothedBpmを使用
@@ -151,31 +141,17 @@ public class RealtimeBP {
         if (hr > 0) {
             lastValidHr = hr;
         }
-        
-        // ISO補正の計算（コメントアウト）
-        // double isoNorm = currentISO / 600.0;
-        // double isoDev = isoNorm - 1.0;
-        double isoNorm = 1.0; // ISO補正を無効化（常に基準値として扱う）
-        double isoDev = 0.0;  // ISO偏差を0に固定
 
-        // Sピーク値の取得（独立検出システムの平均値を使用）
-        double sPeak = 0.0;
-        if (logicRef != null) {
-            // 谷→山の振幅をSピーク値として使用
-            sPeak = logicRef.averageValleyToPeakAmplitude;
-        }
-        // double sNorm = sPeak * isoNorm; // ISO補正を無効化
-        double sNorm = sPeak; // ISO補正なしの生の値を使用
-
-        // 回帰式による血圧推定（谷→山と山→谷のrelTTPを区別して使用、ISO補正項をコメントアウト）
-        double sbp = C0 + C1 * lastAiAt75 + C2 * hr + C4 * sNorm // + C5 * isoDev
-                + C6 * lastValleyToPeakRelTTP + C7 * lastPeakToValleyRelTTP;
-        double dbp = D0 + D1 * lastAiAt75 + D2 * hr + D4 * sNorm // + D5 * isoDev
-                + D6 * lastValleyToPeakRelTTP + D7 * lastPeakToValleyRelTTP;
+        // 回帰式による血圧推定: SBP = C0 + C1*A + C2*HR + C3*V2P_relTTP + C4*P2V_relTTP
+        double sbp = C0 + C1 * lastAmplitude + C2 * hr 
+                + C3 * lastValleyToPeakRelTTP + C4 * lastPeakToValleyRelTTP;
+        // DBP = D0 + D1*A + D2*HR + D3*V2P_relTTP + D4*P2V_relTTP
+        double dbp = D0 + D1 * lastAmplitude + D2 * hr 
+                + D3 * lastValleyToPeakRelTTP + D4 * lastPeakToValleyRelTTP;
 
         Log.d("RealtimeBP-Estimate", String.format(
-                "RawBP: SBP=%.2f, DBP=%.2f AI75=%.2f, VtoP_relTTP=%.2f, PtoV_relTTP=%.2f, HR=%.2f, sNorm=%.2f, isoDev=%.2f",
-                sbp, dbp, lastAiAt75, lastValleyToPeakRelTTP, lastPeakToValleyRelTTP, hr, sNorm, isoDev));
+                "RawBP: SBP=%.2f, DBP=%.2f A=%.3f, HR=%.2f, VtoP_relTTP=%.3f, PtoV_relTTP=%.3f",
+                sbp, dbp, lastAmplitude, hr, lastValleyToPeakRelTTP, lastPeakToValleyRelTTP));
 
         // 範囲制限
         sbp = clamp(sbp, 60, 200);
@@ -237,13 +213,9 @@ public class RealtimeBP {
         lastDbpAvg = 0.0;
         
         // その他の値をリセット
-        lastAiRaw = 0.0;
-        lastAiAt75 = 0.0;
-        lastAiRawPct = 0.0;
-        lastAiAt75Pct = 0.0;
-        lastRelTTP = 0.0;
         lastValleyToPeakRelTTP = 0.0;
         lastPeakToValleyRelTTP = 0.0;
+        lastAmplitude = 0.0;
         
         // タイムスタンプをリセット
         lastUpdateTime = 0;
@@ -296,6 +268,23 @@ public class RealtimeBP {
 
     public double getLastDbpAvg() {
         return lastDbpAvg;
+    }
+
+    // 学習用CSV出力のための特徴量取得メソッド
+    public double getLastAmplitude() {
+        return lastAmplitude;
+    }
+
+    public double getLastValidHr() {
+        return lastValidHr;
+    }
+
+    public double getLastValleyToPeakRelTTP() {
+        return lastValleyToPeakRelTTP;
+    }
+
+    public double getLastPeakToValleyRelTTP() {
+        return lastPeakToValleyRelTTP;
     }
 
     /**

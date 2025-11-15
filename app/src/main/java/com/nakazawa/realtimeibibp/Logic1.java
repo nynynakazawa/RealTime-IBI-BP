@@ -68,7 +68,7 @@ public class Logic1 extends BaseLogic {
         updateValueText(correctedGreenValue);
         updateChart(correctedGreenValue);
         
-        // SinBPコールバック呼び出し
+        // SinBPDistortionコールバック呼び出し
         if (sinBPCallback != null && isDetectionValid()) {
             sinBPCallback.onFrame(correctedGreenValue, System.currentTimeMillis());
         }

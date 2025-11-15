@@ -49,7 +49,7 @@ public class MainActivity extends AppCompatActivity
     private MidiHaptic midiHapticPlayer;
 
     private RealtimeBP bpEstimator;
-    private SinBP sinBP; // SinBP(D)推定器
+    private SinBPDistortion sinBPDistortion; // SinBP(D)推定器
     private SinBPModel sinBPModel; // SinBP(M)推定器
 
     // ===== 強化学習関連 =====
@@ -77,7 +77,7 @@ public class MainActivity extends AppCompatActivity
         initSinBP(); // SinBP(D)初期化を追加
         initSinBPModel(); // SinBP(M)初期化を追加
         analyzer.setBpEstimator(bpEstimator);
-        analyzer.setSinBP(sinBP); // SinBP(D)もAnalyzerに渡す
+        analyzer.setSinBPDistortion(sinBPDistortion); // SinBP(D)もAnalyzerに渡す
         analyzer.setSinBPModel(sinBPModel); // SinBP(M)もAnalyzerに渡す
         
         // Camera X API 色温度関連情報のコールバックを設定
@@ -105,9 +105,9 @@ public class MainActivity extends AppCompatActivity
                     ((BaseLogic) logic2).updateISO(iso);
                 }
                 
-                // SinBPにもISO値を渡す
-                if (sinBP != null) {
-                    sinBP.updateISO(iso);
+                // SinBPDistortionにもISO値を渡す
+                if (sinBPDistortion != null) {
+                    sinBPDistortion.updateISO(iso);
                 }
             });
         });
@@ -266,14 +266,14 @@ public class MainActivity extends AppCompatActivity
 
     private void initSinBP() {
         // 1. インスタンス作成＆View のバインド（SinBP(D)）
-        sinBP = new SinBP();
+        sinBPDistortion = new SinBPDistortion();
         tvSinSBP = findViewById(R.id.tvSinSBP);
         tvSinDBP = findViewById(R.id.tvSinDBP);
         tvSinSBPAvg = findViewById(R.id.tvSinSBPAvg);
         tvSinDBPAvg = findViewById(R.id.tvSinDBPAvg);
 
         // 2. UI 更新リスナ登録（SinBP(D)）
-        sinBP.setListener((sinSbp, sinDbp, sinSbpAvg, sinDbpAvg) -> runOnUiThread(() -> {
+        sinBPDistortion.setListener((sinSbp, sinDbp, sinSbpAvg, sinDbpAvg) -> runOnUiThread(() -> {
             tvSinSBP.setText(String.format(Locale.getDefault(),
                     "SinSBP(D) : %.1f", sinSbp));
             tvSinDBP.setText(String.format(Locale.getDefault(),
@@ -287,8 +287,8 @@ public class MainActivity extends AppCompatActivity
         // 3. Logic1への参照を設定とコールバック設定
         LogicProcessor lp = analyzer.getLogicProcessor("Logic1");
         if (lp instanceof Logic1) {
-            sinBP.setLogicRef((Logic1) lp);
-            ((Logic1) lp).setSinBPCallback(sinBP::update);
+            sinBPDistortion.setLogicRef((Logic1) lp);
+            ((Logic1) lp).setSinBPCallback(sinBPDistortion::update);
         }
     }
     

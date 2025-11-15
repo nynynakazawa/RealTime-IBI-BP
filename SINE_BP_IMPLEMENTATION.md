@@ -9,7 +9,7 @@ correctedGreenValueの擬似PPGからサイン波近似を用いて血圧を推�
 ### 1. 新規クラス構成
 
 ```
-SinBP.java
+sinBPDistortion.java
 ├── 拍検出・切り出し
 ├── サイン波フィッティング
 ├── ベースBP推定
@@ -86,9 +86,9 @@ double dbpRefined = dbpVascular + D1 * E;
 
 ## 実装手順
 
-### Phase 1: SinBP.javaクラスの作成
+### Phase 1: sinBPDistortion.javaクラスの作成
 
-**ファイル**: `app/src/main/java/com/nakazawa/realtimeibibp/SinBP.java`
+**ファイル**: `app/src/main/java/com/nakazawa/realtimeibibp/sinBPDistortion.java`
 
 #### 主要フィールド
 ```java
@@ -271,8 +271,8 @@ private SinBP SinBP;
 2. **初期化（コンストラクタまたはinitメソッド）**
 ```java
 SinBP = new SinBP();
-SinBP.setLogicRef(this);  // BaseLogicの参照を設定（重要！）
-SinBP.setListener((sinSbp, sinDbp, sinSbpAvg, sinDbpAvg) -> {
+sinBPDistortion.setLogicRef(this);  // BaseLogicの参照を設定（重要！）
+sinBPDistortion.setListener((sinSbp, sinDbp, sinSbpAvg, sinDbpAvg) -> {
     // MainActivityのリスナーに転送
     if (mainActivityListener != null) {
         mainActivityListener.onSinBPUpdated(sinSbp, sinDbp, sinSbpAvg, sinDbpAvg);
@@ -284,7 +284,7 @@ SinBP.setListener((sinSbp, sinDbp, sinSbpAvg, sinDbpAvg) -> {
 ```java
 // processGreenValue()内など、correctedGreenValueを計算した直後
 if (SinBP != null) {
-    SinBP.update(correctedGreenValue, System.currentTimeMillis());
+    sinBPDistortion.update(correctedGreenValue, System.currentTimeMillis());
 }
 ```
 
@@ -308,7 +308,7 @@ public void updateISO(int iso) {
         realtimeBP.updateISO(iso);
     }
     if (SinBP != null) {
-        SinBP.updateISO(iso);  // 追加
+        sinBPDistortion.updateISO(iso);  // 追加
     }
 }
 ```
@@ -420,7 +420,7 @@ public void onSinBPUpdated(double sinSbp, double sinDbp,
 ## 非同期・ノンブロッキング設計
 
 ### 1. スレッドセーフティ
-- `SinBP.update()`はBaseLogicのスレッドから呼ばれる
+- `sinBPDistortion.update()`はBaseLogicのスレッドから呼ばれる
 - リスナーコールバックは同じスレッドで実行
 - UI更新は`runOnUiThread()`で行う
 
@@ -492,7 +492,7 @@ D1 = 0.005;     // DBP歪み補正
 
 ## 実装順序
 
-1. **SinBP.javaの基本構造**
+1. **sinBPDistortion.javaの基本構造**
    - クラス定義、フィールド、コンストラクタ
    
 2. **バッファリングとピーク検出**
@@ -519,7 +519,7 @@ D1 = 0.005;     // DBP歪み補正
 ## ファイル一覧
 
 ### 新規作成
-- `app/src/main/java/com/nakazawa/realtimeibibp/SinBP.java`
+- `app/src/main/java/com/nakazawa/realtimeibibp/sinBPDistortion.java`
 
 ### 修正
 - `app/src/main/java/com/nakazawa/realtimeibibp/BaseLogic.java`
