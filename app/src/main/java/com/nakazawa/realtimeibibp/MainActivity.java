@@ -381,10 +381,15 @@ public class MainActivity extends AppCompatActivity
     private void startRecording() {
         isRecording = true;
         analyzer.startRecording();
-        Toast.makeText(this, "5分間の記録を開始しました", Toast.LENGTH_SHORT).show();
+        
+        // mode-1または初期状態（mode = -1）の場合は1分、それ以外は5分
+        int recordingMinutes = (mode == MODE_1 || mode == -1) ? 1 : 5;
+        int recordingMillis = recordingMinutes * 60 * 1000;
+        String message = recordingMinutes + "分間の記録を開始しました";
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
 
-        // 5分間のカウントダウンタイマー＋ポップアップ表示
-        new CountDownTimer(5 * 60 * 1000, 1000) {
+        // カウントダウンタイマー＋ポップアップ表示
+        new CountDownTimer(recordingMillis, 1000) {
             AlertDialog timerDialog;
 
             @Override
@@ -407,10 +412,13 @@ public class MainActivity extends AppCompatActivity
             public void onFinish() {
                 if (timerDialog != null) timerDialog.dismiss();
 
-                // 停止＆CSV保存
+                // 停止＆CSV保存（4種類のファイル + BP_Analysis用統合ファイル）
                 stopRecording();
-                saveIbiToCsv();
-                saveGreenValuesToCsv();
+                saveRawDataToCsv();
+                saveRTBPToCsv();
+                saveSinBPMToCsv();
+                saveSinBPDToCsv();
+                saveTrainingDataToCsv(); // BP_Analysis用の統合ファイル
                 Toast.makeText(MainActivity.this,
                         "記録を終了しました", Toast.LENGTH_SHORT).show();
             }
@@ -517,6 +525,32 @@ public class MainActivity extends AppCompatActivity
 
 
     // ===== CSV保存 =====
+    public void saveRawDataToCsv() {
+        String ts = new SimpleDateFormat("_HH_mm_ss",
+                Locale.getDefault()).format(new Date());
+        analyzer.saveRawDataToCsv(editTextName.getText().toString()
+                + mode + ts);
+    }
+    public void saveRTBPToCsv() {
+        String ts = new SimpleDateFormat("_HH_mm_ss",
+                Locale.getDefault()).format(new Date());
+        analyzer.saveRTBPToCsv(editTextName.getText().toString()
+                + mode + ts);
+    }
+    public void saveSinBPMToCsv() {
+        String ts = new SimpleDateFormat("_HH_mm_ss",
+                Locale.getDefault()).format(new Date());
+        analyzer.saveSinBPMToCsv(editTextName.getText().toString()
+                + mode + ts);
+    }
+    public void saveSinBPDToCsv() {
+        String ts = new SimpleDateFormat("_HH_mm_ss",
+                Locale.getDefault()).format(new Date());
+        analyzer.saveSinBPDToCsv(editTextName.getText().toString()
+                + mode + ts);
+    }
+    
+    // ===== 後方互換性のためのメソッド（必要に応じて使用） =====
     public void saveIbiToCsv() { saveIbiToCsv(-1); }
     public void saveIbiToCsv(int c) {
         String ts = new SimpleDateFormat("_HH_mm_ss",
@@ -529,6 +563,12 @@ public class MainActivity extends AppCompatActivity
         String ts = new SimpleDateFormat("_HH_mm_ss",
                 Locale.getDefault()).format(new Date());
         analyzer.saveGreenValuesToCsv(editTextName.getText().toString()
+                + mode + ts);
+    }
+    public void saveTrainingDataToCsv() {
+        String ts = new SimpleDateFormat("_HH_mm_ss",
+                Locale.getDefault()).format(new Date());
+        analyzer.saveTrainingDataToCsv(editTextName.getText().toString()
                 + mode + ts);
     }
 
