@@ -412,12 +412,13 @@ public class MainActivity extends AppCompatActivity
             public void onFinish() {
                 if (timerDialog != null) timerDialog.dismiss();
 
-                // 停止＆CSV保存（4種類のファイル + BP_Analysis用統合ファイル）
+                // 停止＆CSV保存（5種類のファイル + BP_Analysis用統合ファイル）
                 stopRecording();
                 saveRawDataToCsv();
                 saveRTBPToCsv();
                 saveSinBPMToCsv();
                 saveSinBPDToCsv();
+                saveWaveDataToCsv();
                 saveTrainingDataToCsv(); // BP_Analysis用の統合ファイル
                 Toast.makeText(MainActivity.this,
                         "記録を終了しました", Toast.LENGTH_SHORT).show();
@@ -528,26 +529,32 @@ public class MainActivity extends AppCompatActivity
     public void saveRawDataToCsv() {
         String ts = new SimpleDateFormat("_HH_mm_ss",
                 Locale.getDefault()).format(new Date());
-        analyzer.saveRawDataToCsv(editTextName.getText().toString()
-                + mode + ts);
+        String name = editTextName.getText().toString() + mode + ts;
+        analyzer.saveRawDataToCsv(name, mode == MODE_1 || mode == -1);
     }
     public void saveRTBPToCsv() {
         String ts = new SimpleDateFormat("_HH_mm_ss",
                 Locale.getDefault()).format(new Date());
-        analyzer.saveRTBPToCsv(editTextName.getText().toString()
-                + mode + ts);
+        String name = editTextName.getText().toString() + mode + ts;
+        analyzer.saveRTBPToCsv(name, mode == MODE_1 || mode == -1);
     }
     public void saveSinBPMToCsv() {
         String ts = new SimpleDateFormat("_HH_mm_ss",
                 Locale.getDefault()).format(new Date());
-        analyzer.saveSinBPMToCsv(editTextName.getText().toString()
-                + mode + ts);
+        String name = editTextName.getText().toString() + mode + ts;
+        analyzer.saveSinBPMToCsv(name, mode == MODE_1 || mode == -1);
     }
     public void saveSinBPDToCsv() {
         String ts = new SimpleDateFormat("_HH_mm_ss",
                 Locale.getDefault()).format(new Date());
-        analyzer.saveSinBPDToCsv(editTextName.getText().toString()
-                + mode + ts);
+        String name = editTextName.getText().toString() + mode + ts;
+        analyzer.saveSinBPDToCsv(name, mode == MODE_1 || mode == -1);
+    }
+    public void saveWaveDataToCsv() {
+        String ts = new SimpleDateFormat("_HH_mm_ss",
+                Locale.getDefault()).format(new Date());
+        String name = editTextName.getText().toString() + mode + ts;
+        analyzer.saveWaveDataToCsv(name, mode == MODE_1 || mode == -1);
     }
     
     // ===== 後方互換性のためのメソッド（必要に応じて使用） =====
@@ -568,8 +575,8 @@ public class MainActivity extends AppCompatActivity
     public void saveTrainingDataToCsv() {
         String ts = new SimpleDateFormat("_HH_mm_ss",
                 Locale.getDefault()).format(new Date());
-        analyzer.saveTrainingDataToCsv(editTextName.getText().toString()
-                + mode + ts);
+        String name = editTextName.getText().toString() + mode + ts;
+        analyzer.saveTrainingDataToCsv(name, mode == MODE_1 || mode == -1);
     }
 
     // ===== 強化学習初期化 =====

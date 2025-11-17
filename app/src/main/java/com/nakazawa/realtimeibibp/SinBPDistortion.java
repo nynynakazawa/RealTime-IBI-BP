@@ -145,62 +145,6 @@ public class SinBPDistortion {
     }
     
     /**
-     * 指定時刻での理想曲線の値を取得（1拍遅延対応：前の拍の範囲内でのみ値を返す）
-     * @param targetTime 対象時刻（ms）
-     * @return 理想曲線の値（範囲外の場合はNaN）
-     */
-    public double getIdealCurveValue(long targetTime) {
-        if (!hasIdealCurve || currentIBIms <= 0 || idealCurveStartTime == 0 || idealCurveEndTime == 0) {
-            return Double.NaN;
-        }
-        
-        // 1拍遅延対応：理想曲線は前の拍の範囲内でのみ有効
-        if (targetTime < idealCurveStartTime || targetTime > idealCurveEndTime) {
-            return Double.NaN;
-        }
-        
-        // 前の拍のピーク時刻からの経過時間を計算
-        double elapsedSinceStart = targetTime - idealCurveStartTime;
-        
-        // 周期内に正規化
-        if (elapsedSinceStart < 0) {
-            elapsedSinceStart = 0;
-        }
-        double tNorm = elapsedSinceStart % currentIBIms;
-        
-        // 非対称サイン波基底を使用
-        double sNorm = asymmetricSineBasis(tNorm, currentIBIms);
-        
-        // 理想波形: mean + A * (s_norm を中心からの偏差として調整)
-        double adjustedSNorm;
-        if (sNorm >= 0.5) {
-            adjustedSNorm = 0.5 + (sNorm - 0.5) * 1.0;
-        } else {
-            adjustedSNorm = 0.5 + (sNorm - 0.5) * 3.0;
-        }
-        
-        return currentMean + currentAmplitude * adjustedSNorm;
-    }
-    
-    /**
-     * 理想曲線の範囲内の時刻に対応する実測波形のエントリーインデックスを計算
-     * @param chartStartTime チャート開始時刻（ms）
-     * @param frameInterval フレーム間隔（ms）
-     * @return [startIndex, endIndex] の配列、またはnull（理想曲線が利用できない場合）
-     */
-    public int[] getIdealCurveEntryIndices(long chartStartTime, double frameInterval) {
-        if (!hasIdealCurve || idealCurveStartTime == 0 || idealCurveEndTime == 0) {
-            return null;
-        }
-        
-        // 理想曲線の範囲内の時刻に対応するエントリーインデックスを計算
-        int startIndex = (int)Math.max(0, Math.floor((idealCurveStartTime - chartStartTime) / frameInterval));
-        int endIndex = (int)Math.ceil((idealCurveEndTime - chartStartTime) / frameInterval);
-        
-        return new int[]{startIndex, endIndex};
-    }
-    
-    /**
      * 拍内の相対位置から理想曲線の値を取得（時刻に依存しない）
      * @param relativePosition 拍内の相対位置（0.0～1.0、0.0がピーク開始、1.0が次のピーク）
      * @return 理想曲線の値（理想曲線が利用できない場合はNaN）
@@ -213,18 +157,14 @@ public class SinBPDistortion {
         // 相対位置を周期内の時間に変換
         double tNorm = relativePosition * currentIBIms;
         
-        // 非対称サイン波基底を使用
+        // 非対称サイン波基底を使用（1拍遅延で計算された動的な比率を使用）
+        // currentSystoleRatioとcurrentDiastoleRatioは、processPeakで計算された
+        // 前の拍のデータから計算された動的な比率（1拍遅延で非対称係数を計算したもの）
         double sNorm = asymmetricSineBasis(tNorm, currentIBIms);
         
-        // 理想波形: mean + A * (s_norm を中心からの偏差として調整)
-        double adjustedSNorm;
-        if (sNorm >= 0.5) {
-            adjustedSNorm = 0.5 + (sNorm - 0.5) * 1.0;
-        } else {
-            adjustedSNorm = 0.5 + (sNorm - 0.5) * 3.0;
-        }
-        
-        return currentMean + currentAmplitude * adjustedSNorm;
+        // 理想波形: mean + A * s_norm（calculateDistortionと同じロジック）
+        // これにより、1拍遅延で非対称係数を計算した理想曲線の値が得られる
+        return currentMean + currentAmplitude * sNorm;
     }
     
     /**
@@ -733,13 +673,6 @@ public class SinBPDistortion {
         Log.d(TAG + "-Distortion", String.format(
                 "E=%.4f (mean=%.2f, Asymmetric sine model: systole %.3f, diastole %.3f)", 
                 currentE, mean, systoleRatio, diastoleRatio));
-    }
-    
-    /**
-     * 歪み指標の計算（現在の比率を使用するオーバーロード）
-     */
-    private void calculateDistortion(List<Double> beatSamples, double A, double phi, double ibi) {
-        calculateDistortion(beatSamples, A, phi, ibi, currentSystoleRatio, currentDiastoleRatio);
     }
     
     /**

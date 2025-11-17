@@ -639,8 +639,32 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                         
                         // Sin波データの記録
                         long currentTime = System.currentTimeMillis();
+                        double sinWaveValue = 0.0;
                         if (sinBPDistortion != null && sinBPDistortion.hasIdealCurve()) {
-                            double sinWaveValue = sinBPDistortion.getIdealCurveValue(currentTime);
+                            // 理想曲線パラメータを使って相対位置から値を計算
+                            long idealStartTime = sinBPDistortion.getIdealCurveStartTime();
+                            long idealEndTime = sinBPDistortion.getIdealCurveEndTime();
+                            
+                            if (idealStartTime > 0 && idealEndTime > 0 && idealEndTime > idealStartTime) {
+                                // 理想曲線の範囲内に正規化
+                                long relativeTime = currentTime;
+                                if (relativeTime < idealStartTime) {
+                                    relativeTime = idealStartTime;
+                                } else if (relativeTime > idealEndTime) {
+                                    relativeTime = idealEndTime;
+                                }
+                                
+                                // 相対位置を計算（0.0～1.0）
+                                double relativePosition = (double)(relativeTime - idealStartTime) / (idealEndTime - idealStartTime);
+                                if (relativePosition < 0.0) relativePosition = 0.0;
+                                if (relativePosition > 1.0) relativePosition = 1.0;
+                                
+                                // 相対位置から理想曲線の値を取得
+                                double valueByPosition = sinBPDistortion.getIdealCurveValueByRelativePosition(relativePosition);
+                                if (!Double.isNaN(valueByPosition)) {
+                                    sinWaveValue = valueByPosition;
+                                }
+                            }
                             recSinWave.add(sinWaveValue);
                             recSinAmplitude.add(sinBPDistortion.getCurrentAmplitude());
                             recSinMean.add(sinBPDistortion.getCurrentMean());
@@ -1084,6 +1108,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         recValTs.clear();
         recIbiTs.clear();
         
+        // Sin波データのクリア
+        recSinWave.clear();
+        recSinAmplitude.clear();
+        recSinMean.clear();
+        recSinIBI.clear();
+        recSinTs.clear();
+        
         // 学習用データのクリア
         recTrainingTs.clear();
         recM1_A.clear();
@@ -1254,8 +1285,62 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         return recSmBpm.get(recSmBpm.size() - 1);
     }
 
+    // ===== PCへの保存パス検出 =====
+    private File getPCSaveDirectory(String baseName) {
+        // USB接続時にアクセス可能なパスを検出
+        // macOSの場合、Android File Transfer経由でアクセス可能なパスを試す
+        String[] possiblePaths = {
+            "/storage/emulated/0/Android/data/com.nakazawa.realtimeibibp/files/PC_Sync",
+            "/storage/emulated/0/Download/PC_Sync",
+            "/mnt/usb",
+            "/storage/usb",
+            "/mnt/media_rw"
+        };
+        
+        for (String path : possiblePaths) {
+            File dir = new File(path);
+            if (dir.exists() && dir.canWrite()) {
+                File targetDir = new File(dir, "Analysis/Data/Smartphone/" + baseName);
+                if (targetDir.mkdirs() || targetDir.exists()) {
+                    return targetDir;
+                }
+            }
+        }
+        
+        // フォールバック: 外部ストレージのDownloadフォルダ内にPC_Syncフォルダを作成
+        File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        File pcSyncFolder = new File(downloadFolder, "PC_Sync/Analysis/Data/Smartphone/" + baseName);
+        if (pcSyncFolder.mkdirs() || pcSyncFolder.exists()) {
+            return pcSyncFolder;
+        }
+        
+        return null; // PCへの保存ができない場合
+    }
+    
+    // ===== ファイルをPCにも保存 =====
+    private void saveToPCIfConnected(String baseName, String fileName, String csvContent, boolean isMode1) {
+        if (!isMode1) return; // mode-1の時のみ
+        
+        File pcDir = getPCSaveDirectory(baseName);
+        if (pcDir != null) {
+            try {
+                File pcFile = new File(pcDir, fileName);
+                try (FileWriter writer = new FileWriter(pcFile)) {
+                    writer.write(csvContent);
+                }
+                Log.d("GreenValueAnalyzer", "PCに保存成功: " + pcFile.getAbsolutePath());
+            } catch (IOException e) {
+                Log.e("GreenValueAnalyzer", "PCへの保存失敗", e);
+            }
+        }
+    }
+
     // ===== 元データCSV保存 =====
     public void saveRawDataToCsv(String name) {
+        saveRawDataToCsv(name, false);
+    }
+    
+    public void saveRawDataToCsv(String name, boolean isMode1) {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_元データ.csv");
 
@@ -1266,43 +1351,45 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             return;
         }
 
-        try (FileWriter writer = new FileWriter(csvFile)) {
-            writer.append("経過時間_秒, Green, IBI, Smoothed_IBI, bpmSD, Smoothed_BPM\n");
+        StringBuilder csvContent = new StringBuilder();
+        csvContent.append("経過時間_秒, Green, IBI, Smoothed_IBI, bpmSD, Smoothed_BPM\n");
 
-            // IBIデータとGreenデータをマージして保存
-            // IBIデータを基準に、対応するGreen値を探す
-            for (int i = 0; i < recIbi.size(); i++) {
-                // 開始時点からの経過時間（秒）を計算
-                double elapsedSeconds = (recordingStartTime > 0) ? 
-                    (recIbiTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
-                
-                // 対応するGreen値を探す（タイムスタンプが最も近いもの）
-                double greenValue = 0.0;
-                if (!recValue.isEmpty() && !recValTs.isEmpty()) {
-                    long ibiTime = recIbiTs.get(i);
-                    long minDiff = Long.MAX_VALUE;
-                    int closestIdx = 0;
-                    for (int j = 0; j < recValTs.size(); j++) {
-                        long diff = Math.abs(recValTs.get(j) - ibiTime);
-                        if (diff < minDiff) {
-                            minDiff = diff;
-                            closestIdx = j;
-                        }
-                    }
-                    if (minDiff < 1000) { // 1秒以内
-                        greenValue = recValue.get(closestIdx);
+        // IBIデータとGreenデータをマージして保存
+        // IBIデータを基準に、対応するGreen値を探す
+        for (int i = 0; i < recIbi.size(); i++) {
+            // 開始時点からの経過時間（秒）を計算
+            double elapsedSeconds = (recordingStartTime > 0) ? 
+                (recIbiTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
+            
+            // 対応するGreen値を探す（タイムスタンプが最も近いもの）
+            double greenValue = 0.0;
+            if (!recValue.isEmpty() && !recValTs.isEmpty()) {
+                long ibiTime = recIbiTs.get(i);
+                long minDiff = Long.MAX_VALUE;
+                int closestIdx = 0;
+                for (int j = 0; j < recValTs.size(); j++) {
+                    long diff = Math.abs(recValTs.get(j) - ibiTime);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        closestIdx = j;
                     }
                 }
-                
-                writer.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", greenValue)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", recIbi.get(i))).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recSmIbi.size() ? recSmIbi.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recSd.size() ? recSd.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recSmBpm.size() ? recSmBpm.get(i) : 0.0))
-                        .append("\n");
+                if (minDiff < 1000) { // 1秒以内
+                    greenValue = recValue.get(closestIdx);
+                }
             }
+            
+            csvContent.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", greenValue)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", recIbi.get(i))).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recSmIbi.size() ? recSmIbi.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recSd.size() ? recSd.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recSmBpm.size() ? recSmBpm.get(i) : 0.0))
+                    .append("\n");
+        }
 
+        try (FileWriter writer = new FileWriter(csvFile)) {
+            writer.write(csvContent.toString());
             ui.post(() ->
                     Toast.makeText(ctx, "元データ 保存完了", Toast.LENGTH_SHORT).show()
             );
@@ -1312,10 +1399,108 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     Toast.makeText(ctx, "元データ 保存失敗", Toast.LENGTH_SHORT).show()
             );
         }
+        
+        // PCにも保存（mode-1の場合）
+        String baseName = name; // ファイル名から共通部分を抽出（拡張子とサフィックスを除く）
+        saveToPCIfConnected(baseName, name + "_元データ.csv", csvContent.toString(), isMode1);
+    }
+
+    // ===== Wave Data CSV保存 =====
+    public void saveWaveDataToCsv(String name) {
+        saveWaveDataToCsv(name, false);
+    }
+    
+    public void saveWaveDataToCsv(String name, boolean isMode1) {
+        File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        File csvFile = new File(downloadFolder, name + "_Wave_Data.csv");
+
+        if (recValue.isEmpty()) {
+            ui.post(() ->
+                    Toast.makeText(ctx, "記録されたWaveデータがありません", Toast.LENGTH_SHORT).show()
+            );
+            return;
+        }
+
+        StringBuilder csvContent = new StringBuilder();
+        csvContent.append("経過時間_秒, Green, SinWave\n");
+
+        // Green値とSinWave値を時間でマッチング
+        for (int i = 0; i < recValue.size(); i++) {
+            // 開始時点からの経過時間（秒）を計算
+            double elapsedSeconds = (recordingStartTime > 0) ? 
+                (recValTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
+            
+            double greenValue = recValue.get(i);
+            
+            // 各Green値のタイムスタンプに対応するSinWave値をその時点で計算
+            // これにより、時間によって値が常に変わるようになる
+            double sinWaveValue = 0.0;
+            long greenTime = recValTs.get(i);
+            
+            if (sinBPDistortion != null && sinBPDistortion.hasIdealCurve()) {
+                // 理想曲線パラメータを取得
+                long idealStartTime = sinBPDistortion.getIdealCurveStartTime();
+                long idealEndTime = sinBPDistortion.getIdealCurveEndTime();
+                
+                if (idealStartTime > 0 && idealEndTime > 0 && idealEndTime > idealStartTime) {
+                    // 理想曲線の範囲内に正規化
+                    long relativeTime = greenTime;
+                    if (relativeTime < idealStartTime) {
+                        relativeTime = idealStartTime;
+                    } else if (relativeTime > idealEndTime) {
+                        relativeTime = idealEndTime;
+                    }
+                    
+                    // 相対位置を計算（0.0～1.0）
+                    double relativePosition = (double)(relativeTime - idealStartTime) / (idealEndTime - idealStartTime);
+                    if (relativePosition < 0.0) relativePosition = 0.0;
+                    if (relativePosition > 1.0) relativePosition = 1.0;
+                    
+                    // 相対位置から理想曲線の値を取得
+                    double valueByPosition = sinBPDistortion.getIdealCurveValueByRelativePosition(relativePosition);
+                    if (!Double.isNaN(valueByPosition)) {
+                        sinWaveValue = valueByPosition;
+                    } else if (i < recSinWave.size() && !Double.isNaN(recSinWave.get(i))) {
+                        // getIdealCurveValueByRelativePositionがNaNを返す場合、記録時点の値を使用
+                        sinWaveValue = recSinWave.get(i);
+                    }
+                } else if (i < recSinWave.size() && !Double.isNaN(recSinWave.get(i))) {
+                    // 理想曲線の範囲が無効な場合、記録時点の値を使用
+                    sinWaveValue = recSinWave.get(i);
+                }
+            } else if (i < recSinWave.size() && !Double.isNaN(recSinWave.get(i))) {
+                // hasIdealCurveがfalseの場合、記録時点の値を使用
+                sinWaveValue = recSinWave.get(i);
+            }
+            
+            csvContent.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", greenValue)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", sinWaveValue))
+                    .append("\n");
+        }
+
+        try (FileWriter writer = new FileWriter(csvFile)) {
+            writer.write(csvContent.toString());
+            ui.post(() ->
+                    Toast.makeText(ctx, "Waveデータ 保存完了", Toast.LENGTH_SHORT).show()
+            );
+        } catch (IOException e) {
+            e.printStackTrace();
+            ui.post(() ->
+                    Toast.makeText(ctx, "Waveデータ 保存失敗", Toast.LENGTH_SHORT).show()
+            );
+        }
+        
+        // PCにも保存（mode-1の場合）
+        saveToPCIfConnected(name, name + "_Wave_Data.csv", csvContent.toString(), isMode1);
     }
 
     // ===== RTBP専用CSV保存 =====
     public void saveRTBPToCsv(String name) {
+        saveRTBPToCsv(name, false);
+    }
+    
+    public void saveRTBPToCsv(String name, boolean isMode1) {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_RTBP.csv");
 
@@ -1326,25 +1511,27 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             return;
         }
 
+        StringBuilder csvContent = new StringBuilder();
+        csvContent.append("経過時間_秒, A, HR, V2P_relTTP, P2V_relTTP, SBP, DBP\n");
+
+        int maxSize = recTrainingTs.size();
+        for (int i = 0; i < maxSize; i++) {
+            // 開始時点からの経過時間（秒）を計算
+            double elapsedSeconds = (recordingStartTime > 0) ? 
+                (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
+            
+            csvContent.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM1_A.size() ? recM1_A.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM1_HR.size() ? recM1_HR.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM1_V2P_relTTP.size() ? recM1_V2P_relTTP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM1_P2V_relTTP.size() ? recM1_P2V_relTTP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recM1_SBP.size() ? recM1_SBP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recM1_DBP.size() ? recM1_DBP.get(i) : 0.0))
+                    .append("\n");
+        }
+
         try (FileWriter writer = new FileWriter(csvFile)) {
-            writer.append("経過時間_秒, A, HR, V2P_relTTP, P2V_relTTP, SBP, DBP\n");
-
-            int maxSize = recTrainingTs.size();
-            for (int i = 0; i < maxSize; i++) {
-                // 開始時点からの経過時間（秒）を計算
-                double elapsedSeconds = (recordingStartTime > 0) ? 
-                    (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
-                
-                writer.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM1_A.size() ? recM1_A.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM1_HR.size() ? recM1_HR.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM1_V2P_relTTP.size() ? recM1_V2P_relTTP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM1_P2V_relTTP.size() ? recM1_P2V_relTTP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recM1_SBP.size() ? recM1_SBP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recM1_DBP.size() ? recM1_DBP.get(i) : 0.0))
-                        .append("\n");
-            }
-
+            writer.write(csvContent.toString());
             ui.post(() ->
                     Toast.makeText(ctx, "RTBPデータ 保存完了", Toast.LENGTH_SHORT).show()
             );
@@ -1354,10 +1541,17 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     Toast.makeText(ctx, "RTBPデータ 保存失敗", Toast.LENGTH_SHORT).show()
             );
         }
+        
+        // PCにも保存（mode-1の場合）
+        saveToPCIfConnected(name, name + "_RTBP.csv", csvContent.toString(), isMode1);
     }
 
     // ===== SinBP(M)専用CSV保存 =====
     public void saveSinBPMToCsv(String name) {
+        saveSinBPMToCsv(name, false);
+    }
+    
+    public void saveSinBPMToCsv(String name, boolean isMode1) {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_SinBP_M.csv");
 
@@ -1368,25 +1562,27 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             return;
         }
 
+        StringBuilder csvContent = new StringBuilder();
+        csvContent.append("経過時間_秒, A, HR, Mean, Phi, SBP, DBP\n");
+
+        int maxSize = recTrainingTs.size();
+        for (int i = 0; i < maxSize; i++) {
+            // 開始時点からの経過時間（秒）を計算
+            double elapsedSeconds = (recordingStartTime > 0) ? 
+                (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
+            
+            csvContent.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM3_A.size() ? recM3_A.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM3_HR.size() ? recM3_HR.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM3_Mean.size() ? recM3_Mean.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM3_Phi.size() ? recM3_Phi.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recM3_SBP.size() ? recM3_SBP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recM3_DBP.size() ? recM3_DBP.get(i) : 0.0))
+                    .append("\n");
+        }
+
         try (FileWriter writer = new FileWriter(csvFile)) {
-            writer.append("経過時間_秒, A, HR, Mean, Phi, SBP, DBP\n");
-
-            int maxSize = recTrainingTs.size();
-            for (int i = 0; i < maxSize; i++) {
-                // 開始時点からの経過時間（秒）を計算
-                double elapsedSeconds = (recordingStartTime > 0) ? 
-                    (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
-                
-                writer.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM3_A.size() ? recM3_A.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM3_HR.size() ? recM3_HR.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM3_Mean.size() ? recM3_Mean.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM3_Phi.size() ? recM3_Phi.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recM3_SBP.size() ? recM3_SBP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recM3_DBP.size() ? recM3_DBP.get(i) : 0.0))
-                        .append("\n");
-            }
-
+            writer.write(csvContent.toString());
             ui.post(() ->
                     Toast.makeText(ctx, "SinBP(M)データ 保存完了", Toast.LENGTH_SHORT).show()
             );
@@ -1396,10 +1592,17 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     Toast.makeText(ctx, "SinBP(M)データ 保存失敗", Toast.LENGTH_SHORT).show()
             );
         }
+        
+        // PCにも保存（mode-1の場合）
+        saveToPCIfConnected(name, name + "_SinBP_M.csv", csvContent.toString(), isMode1);
     }
 
     // ===== SinBP(D)専用CSV保存 =====
     public void saveSinBPDToCsv(String name) {
+        saveSinBPDToCsv(name, false);
+    }
+    
+    public void saveSinBPDToCsv(String name, boolean isMode1) {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_SinBP_D.csv");
 
@@ -1410,27 +1613,29 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             return;
         }
 
+        StringBuilder csvContent = new StringBuilder();
+        csvContent.append("経過時間_秒, A, HR, V2P_relTTP, P2V_relTTP, Stiffness, E, SBP, DBP\n");
+
+        int maxSize = recTrainingTs.size();
+        for (int i = 0; i < maxSize; i++) {
+            // 開始時点からの経過時間（秒）を計算
+            double elapsedSeconds = (recordingStartTime > 0) ? 
+                (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
+            
+            csvContent.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_A.size() ? recM2_A.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_HR.size() ? recM2_HR.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_V2P_relTTP.size() ? recM2_V2P_relTTP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_P2V_relTTP.size() ? recM2_P2V_relTTP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_Stiffness.size() ? recM2_Stiffness.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_E.size() ? recM2_E.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recM2_SBP.size() ? recM2_SBP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recM2_DBP.size() ? recM2_DBP.get(i) : 0.0))
+                    .append("\n");
+        }
+
         try (FileWriter writer = new FileWriter(csvFile)) {
-            writer.append("経過時間_秒, A, HR, V2P_relTTP, P2V_relTTP, Stiffness, E, SBP, DBP\n");
-
-            int maxSize = recTrainingTs.size();
-            for (int i = 0; i < maxSize; i++) {
-                // 開始時点からの経過時間（秒）を計算
-                double elapsedSeconds = (recordingStartTime > 0) ? 
-                    (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
-                
-                writer.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_A.size() ? recM2_A.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_HR.size() ? recM2_HR.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_V2P_relTTP.size() ? recM2_V2P_relTTP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_P2V_relTTP.size() ? recM2_P2V_relTTP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_Stiffness.size() ? recM2_Stiffness.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_E.size() ? recM2_E.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recM2_SBP.size() ? recM2_SBP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recM2_DBP.size() ? recM2_DBP.get(i) : 0.0))
-                        .append("\n");
-            }
-
+            writer.write(csvContent.toString());
             ui.post(() ->
                     Toast.makeText(ctx, "SinBP(D)データ 保存完了", Toast.LENGTH_SHORT).show()
             );
@@ -1440,10 +1645,17 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     Toast.makeText(ctx, "SinBP(D)データ 保存失敗", Toast.LENGTH_SHORT).show()
             );
         }
+        
+        // PCにも保存（mode-1の場合）
+        saveToPCIfConnected(name, name + "_SinBP_D.csv", csvContent.toString(), isMode1);
     }
 
     // ===== 学習用CSV保存（BP_Analysis用、後方互換性のため残す） =====
     public void saveTrainingDataToCsv(String name) {
+        saveTrainingDataToCsv(name, false);
+    }
+    
+    public void saveTrainingDataToCsv(String name, boolean isMode1) {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_Training_Data.csv");
 
@@ -1455,50 +1667,51 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             return;
         }
 
+        StringBuilder csvContent = new StringBuilder();
+        csvContent.append("経過時間_秒, subject_id, ref_SBP, ref_DBP, ")
+                .append("M1_A, M1_HR, M1_V2P_relTTP, M1_P2V_relTTP, M1_SBP, M1_DBP, ")
+                .append("M2_A, M2_HR, M2_V2P_relTTP, M2_P2V_relTTP, M2_Stiffness, M2_E, M2_SBP, M2_DBP, ")
+                .append("M3_A, M3_HR, M3_Mean, M3_Phi, M3_SBP, M3_DBP\n");
+
+        // 記録データを CSV に書き出し
+        int maxSize = recTrainingTs.size();
+        for (int i = 0; i < maxSize; i++) {
+            // 開始時点からの経過時間（秒）を計算
+            double elapsedSeconds = (recordingStartTime > 0) ? 
+                (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
+            
+            csvContent.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
+                    .append("subject_placeholder").append(", ")  // subject_id (後で追加)
+                    .append("").append(", ")  // ref_SBP (連続血圧計の参照値、後で追加)
+                    .append("").append(", ")  // ref_DBP (連続血圧計の参照値、後で追加)
+                    // Method1 (RealTimeBP)
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM1_A.size() ? recM1_A.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM1_HR.size() ? recM1_HR.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM1_V2P_relTTP.size() ? recM1_V2P_relTTP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM1_P2V_relTTP.size() ? recM1_P2V_relTTP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recM1_SBP.size() ? recM1_SBP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recM1_DBP.size() ? recM1_DBP.get(i) : 0.0)).append(", ")
+                    // Method2
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_A.size() ? recM2_A.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_HR.size() ? recM2_HR.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_V2P_relTTP.size() ? recM2_V2P_relTTP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_P2V_relTTP.size() ? recM2_P2V_relTTP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_Stiffness.size() ? recM2_Stiffness.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_E.size() ? recM2_E.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recM2_SBP.size() ? recM2_SBP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recM2_DBP.size() ? recM2_DBP.get(i) : 0.0)).append(", ")
+                    // Method3 (SinBP_M)
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM3_A.size() ? recM3_A.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM3_HR.size() ? recM3_HR.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM3_Mean.size() ? recM3_Mean.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recM3_Phi.size() ? recM3_Phi.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recM3_SBP.size() ? recM3_SBP.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recM3_DBP.size() ? recM3_DBP.get(i) : 0.0))
+                    .append("\n");
+        }
+
         try (FileWriter writer = new FileWriter(csvFile)) {
-            // ヘッダー行
-            writer.append("経過時間_秒, subject_id, ref_SBP, ref_DBP, ")
-                    .append("M1_A, M1_HR, M1_V2P_relTTP, M1_P2V_relTTP, M1_SBP, M1_DBP, ")
-                    .append("M2_A, M2_HR, M2_V2P_relTTP, M2_P2V_relTTP, M2_Stiffness, M2_E, M2_SBP, M2_DBP, ")
-                    .append("M3_A, M3_HR, M3_Mean, M3_Phi, M3_SBP, M3_DBP\n");
-
-            // 記録データを CSV に書き出し
-            int maxSize = recTrainingTs.size();
-            for (int i = 0; i < maxSize; i++) {
-                // 開始時点からの経過時間（秒）を計算
-                double elapsedSeconds = (recordingStartTime > 0) ? 
-                    (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
-                
-                writer.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
-                        .append("subject_placeholder").append(", ")  // subject_id (後で追加)
-                        .append("").append(", ")  // ref_SBP (連続血圧計の参照値、後で追加)
-                        .append("").append(", ")  // ref_DBP (連続血圧計の参照値、後で追加)
-                        // Method1 (RealTimeBP)
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM1_A.size() ? recM1_A.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM1_HR.size() ? recM1_HR.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM1_V2P_relTTP.size() ? recM1_V2P_relTTP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM1_P2V_relTTP.size() ? recM1_P2V_relTTP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recM1_SBP.size() ? recM1_SBP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recM1_DBP.size() ? recM1_DBP.get(i) : 0.0)).append(", ")
-                        // Method2
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_A.size() ? recM2_A.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_HR.size() ? recM2_HR.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_V2P_relTTP.size() ? recM2_V2P_relTTP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_P2V_relTTP.size() ? recM2_P2V_relTTP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_Stiffness.size() ? recM2_Stiffness.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM2_E.size() ? recM2_E.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recM2_SBP.size() ? recM2_SBP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recM2_DBP.size() ? recM2_DBP.get(i) : 0.0)).append(", ")
-                        // Method3 (SinBP_M)
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM3_A.size() ? recM3_A.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM3_HR.size() ? recM3_HR.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM3_Mean.size() ? recM3_Mean.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.4f", i < recM3_Phi.size() ? recM3_Phi.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recM3_SBP.size() ? recM3_SBP.get(i) : 0.0)).append(", ")
-                        .append(String.format(Locale.getDefault(), "%.2f", i < recM3_DBP.size() ? recM3_DBP.get(i) : 0.0))
-                        .append("\n");
-            }
-
+            writer.write(csvContent.toString());
             ui.post(() ->
                     Toast.makeText(ctx, "学習用データ 保存完了", Toast.LENGTH_SHORT).show()
             );
@@ -1508,6 +1721,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     Toast.makeText(ctx, "学習用データ 保存失敗", Toast.LENGTH_SHORT).show()
             );
         }
+        
+        // PCにも保存（mode-1の場合）
+        saveToPCIfConnected(name, name + "_Training_Data.csv", csvContent.toString(), isMode1);
     }
 
     // ===== カメラ操作 =====
