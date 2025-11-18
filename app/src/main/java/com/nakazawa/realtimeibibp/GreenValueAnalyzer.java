@@ -646,21 +646,28 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                             long idealEndTime = sinBPDistortion.getIdealCurveEndTime();
                             
                             if (idealStartTime > 0 && idealEndTime > 0 && idealEndTime > idealStartTime) {
-                                // 理想曲線の範囲内に正規化
-                                long relativeTime = currentTime;
-                                if (relativeTime < idealStartTime) {
-                                    relativeTime = idealStartTime;
-                                } else if (relativeTime > idealEndTime) {
-                                    relativeTime = idealEndTime;
+                                long duration = idealEndTime - idealStartTime;
+                                
+                                // 現在時刻を理想曲線の周期内に折り返し（繰り返し波形として扱う）
+                                long relativeTime = currentTime - idealStartTime;
+                                long wrappedTime = relativeTime % duration;
+                                if (wrappedTime < 0) {
+                                    wrappedTime += duration;
                                 }
                                 
                                 // 相対位置を計算（0.0～1.0）
-                                double relativePosition = (double)(relativeTime - idealStartTime) / (idealEndTime - idealStartTime);
-                                if (relativePosition < 0.0) relativePosition = 0.0;
-                                if (relativePosition > 1.0) relativePosition = 1.0;
+                                double relativePosition = (double) wrappedTime / duration;
+                                
+                                // チャートと同じ位相補正を適用
+                                double adjustedRelativePosition = relativePosition + sinPhaseOffset;
+                                if (adjustedRelativePosition < 0.0) {
+                                    adjustedRelativePosition += 1.0;
+                                } else if (adjustedRelativePosition > 1.0) {
+                                    adjustedRelativePosition -= 1.0;
+                                }
                                 
                                 // 相対位置から理想曲線の値を取得
-                                double valueByPosition = sinBPDistortion.getIdealCurveValueByRelativePosition(relativePosition);
+                                double valueByPosition = sinBPDistortion.getScaledIdealCurveValueByRelativePosition(adjustedRelativePosition);
                                 if (!Double.isNaN(valueByPosition)) {
                                     sinWaveValue = valueByPosition;
                                 }
@@ -989,6 +996,12 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                         minIdeal = Math.min(minIdeal, testValue);
                         maxIdeal = Math.max(maxIdeal, testValue);
                     }
+                }
+
+                boolean hasIdealRange = minIdeal != Double.MAX_VALUE && maxIdeal != Double.MIN_VALUE && maxIdeal > minIdeal;
+                boolean hasRppgRange = maxRppg > minRppg;
+                if (sinBPDistortion != null && hasIdealRange && hasRppgRange) {
+                    sinBPDistortion.updateScaledCurveRange(minRppg, maxRppg, minIdeal, maxIdeal);
                 }
                 
                 // その拍の理想曲線を生成（1拍分のデータのみ）
@@ -1432,44 +1445,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             
             double greenValue = recValue.get(i);
             
-            // 各Green値のタイムスタンプに対応するSinWave値をその時点で計算
-            // これにより、時間によって値が常に変わるようになる
+            // 記録時点で保存したSinWave値をそのまま利用（UIで表示される理想波形と一致）
             double sinWaveValue = 0.0;
-            long greenTime = recValTs.get(i);
-            
-            if (sinBPDistortion != null && sinBPDistortion.hasIdealCurve()) {
-                // 理想曲線パラメータを取得
-                long idealStartTime = sinBPDistortion.getIdealCurveStartTime();
-                long idealEndTime = sinBPDistortion.getIdealCurveEndTime();
-                
-                if (idealStartTime > 0 && idealEndTime > 0 && idealEndTime > idealStartTime) {
-                    // 理想曲線の範囲内に正規化
-                    long relativeTime = greenTime;
-                    if (relativeTime < idealStartTime) {
-                        relativeTime = idealStartTime;
-                    } else if (relativeTime > idealEndTime) {
-                        relativeTime = idealEndTime;
-                    }
-                    
-                    // 相対位置を計算（0.0～1.0）
-                    double relativePosition = (double)(relativeTime - idealStartTime) / (idealEndTime - idealStartTime);
-                    if (relativePosition < 0.0) relativePosition = 0.0;
-                    if (relativePosition > 1.0) relativePosition = 1.0;
-                    
-                    // 相対位置から理想曲線の値を取得
-                    double valueByPosition = sinBPDistortion.getIdealCurveValueByRelativePosition(relativePosition);
-                    if (!Double.isNaN(valueByPosition)) {
-                        sinWaveValue = valueByPosition;
-                    } else if (i < recSinWave.size() && !Double.isNaN(recSinWave.get(i))) {
-                        // getIdealCurveValueByRelativePositionがNaNを返す場合、記録時点の値を使用
-                        sinWaveValue = recSinWave.get(i);
-                    }
-                } else if (i < recSinWave.size() && !Double.isNaN(recSinWave.get(i))) {
-                    // 理想曲線の範囲が無効な場合、記録時点の値を使用
-                    sinWaveValue = recSinWave.get(i);
-                }
-            } else if (i < recSinWave.size() && !Double.isNaN(recSinWave.get(i))) {
-                // hasIdealCurveがfalseの場合、記録時点の値を使用
+            if (i < recSinWave.size() && !Double.isNaN(recSinWave.get(i))) {
                 sinWaveValue = recSinWave.get(i);
             }
             

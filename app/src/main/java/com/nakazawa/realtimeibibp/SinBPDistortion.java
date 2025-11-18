@@ -114,6 +114,11 @@ public class SinBPDistortion {
     private long idealCurveStartTime = 0;  // 理想曲線の開始時刻（前の拍のピーク時刻）
     private long idealCurveEndTime = 0;    // 理想曲線の終了時刻（前の拍の終了時刻 = 現在のピーク時刻）
     private boolean hasIdealCurve = false;
+    private double currentScaledMin = Double.NaN;
+    private double currentScaledMax = Double.NaN;
+    private double currentIdealMin = Double.NaN;
+    private double currentIdealMax = Double.NaN;
+    private boolean hasScaledCurve = false;
     
     // 位相フィルタリング用
     private final Deque<Double> phaseHistory = new ArrayDeque<>(3);
@@ -165,6 +170,38 @@ public class SinBPDistortion {
         // 理想波形: mean + A * s_norm（calculateDistortionと同じロジック）
         // これにより、1拍遅延で非対称係数を計算した理想曲線の値が得られる
         return currentMean + currentAmplitude * sNorm;
+    }
+
+    /**
+     * 実測波形に合わせたスケーリング情報を更新
+     */
+    public void updateScaledCurveRange(double observedMin, double observedMax,
+                                       double idealMin, double idealMax) {
+        if (Double.isNaN(observedMin) || Double.isNaN(observedMax) || observedMax <= observedMin ||
+                Double.isNaN(idealMin) || Double.isNaN(idealMax) || idealMax <= idealMin) {
+            hasScaledCurve = false;
+            return;
+        }
+        currentScaledMin = observedMin;
+        currentScaledMax = observedMax;
+        currentIdealMin = idealMin;
+        currentIdealMax = idealMax;
+        hasScaledCurve = true;
+    }
+
+    /**
+     * スケール済み理想曲線の値を取得
+     */
+    public double getScaledIdealCurveValueByRelativePosition(double relativePosition) {
+        double baseValue = getIdealCurveValueByRelativePosition(relativePosition);
+        if (Double.isNaN(baseValue)) {
+            return Double.NaN;
+        }
+        if (!hasScaledCurve) {
+            return baseValue;
+        }
+        double scale = (currentScaledMax - currentScaledMin) / (currentIdealMax - currentIdealMin);
+        return currentScaledMin + (baseValue - currentIdealMin) * scale;
     }
     
     /**

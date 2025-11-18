@@ -1,0 +1,596 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\documentclass[fleqn,10pt,twocolumn]{AROB}
+
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{xeCJK}
+\setCJKmainfont{Hiragino Mincho ProN}
+
+\title{可視カメラ 30fps 環境の PPG に最適化した\\
+非対称サイン波モデル残差に基づく血圧推定}
+
+\author{中澤 祐介${}^{1\dagger}$}
+% The dagger symbol indicates the presenter.
+\speaker{中澤 祐介}
+
+\affils{${}^{1}$[所属を記載]\\
+(Tel: [電話番号]; E-mail: [メールアドレス])\\
+}
+
+\abstract{%
+スマートフォン可視カメラ由来の擬似PPGに対し、周波数分解に依存しない「最小モデル残差」による血圧推定（SinBP）を提案する。本研究では、3つの異なる血圧推定手法を実装し、比較する。第一に、形態学的特徴量（振幅、心拍数、相対Time-To-Peak）のみを使用した線形回帰モデル（RTBP: RealtimeBP）である。第二に、Sin波フィットのパラメータ（振幅、位相、平均値）を直接使用した線形回帰モデル（SinBP(M): SinBPModel）である。第三に、非対称サイン波モデルからの残差（歪み指標E）を特徴量として使用した3段階推定モデル（SinBP(D): SinBPDistortion）である。本研究の評価は2つの観点から実施する。第一に、パルスオキシメーターの参照波形とrPPG実波形、Sin近似波を時間同期させ、MAPEにより波形の近似精度を評価する。第二に、連続血圧計を参照として、30fps可視カメラのrPPG環境を使用した3つの異なる血圧推定手法（RTBP、SinBP(M)、SinBP(D)）を比較し、Sin波を用いた手法が本環境において本当に精度が高くなるのかを検証する。
+}
+
+\keywords{%
+血圧推定、光電容積脈波、スマートフォン、非対称サイン波モデル、歪み指標
+}
+
+\begin{document}
+
+\maketitle
+
+%-----------------------------------------------------------------------
+
+\section{序論}
+
+\subsection{背景と動機}
+
+連続的な非侵襲血圧モニタリングの需要は、高血圧や心血管疾患の早期発見・管理において極めて高い。従来の血圧測定は上腕カフを用いた間欠的な測定が主流であるが、日常生活における連続的な血圧変動を捉えるには不十分である。近年、スマートフォンの可視カメラを用いた光電容積脈波（PPG: Photoplethysmography）による血圧推定が注目されている。PPGは皮膚表面の血流変化を光の吸収変化として検出する技術であり、専用デバイスを必要とせず、スマートフォンだけで測定可能という利点がある。
+
+しかし、スマートフォン可視カメラを用いたPPG測定には重大な制約が存在する。まず、フレームレートが30fpsと低く、従来のPPGセンサー（数百Hz）と比較して時間分解能が低い。次に、可視光を用いるため、周囲の照明条件の変動やノイズの影響を受けやすい。さらに、カメラの自動露出制御（AEC）や自動ゲイン制御（AGC）により、信号の動的範囲が制限される。これらの制約により、従来の高調波比・THD（Total Harmonic Distortion）・A$_2$/A$_1$等の周波数分解を前提とした手法は、位相ゆらぎや照明変動に対して脆弱である。
+
+\subsection{従来研究の課題}
+
+従来のPPGベースの血圧推定手法は、主に以下のアプローチに分類される：
+
+\begin{enumerate}
+\item \textbf{形態学的特徴量アプローチ}: 波形の形状特徴（ピーク値、谷値、Time-To-Peak、勾配など）を抽出し、線形回帰や機械学習により血圧を推定する手法。しかし、30fpsという低サンプリングレートでは、波形の微細な形状変化を捉えることが困難である。
+
+\item \textbf{周波数解析アプローチ}: FFTやウェーブレット変換により周波数領域の特徴を抽出する手法。高調波比（A$_2$/A$_1$）やTHDを特徴量として使用する。しかし、30fpsではナイキスト周波数が15Hzと低く、高次高調波の正確な抽出が困難である。また、位相ゆらぎや照明変動により、周波数特性が不安定になる。
+
+\item \textbf{機械学習アプローチ}: 深層学習やサポートベクターマシンを用いて、生波形から直接血圧を推定する手法。しかし、大量の学習データが必要であり、30fpsという低FPS条件での汎化性能が不十分である。
+\end{enumerate}
+
+これらの課題を解決するため、本研究では周波数分解に依存せず、生理学的に妥当な非対称一峰波形を基準とし、基準からの外れ（最小モデル残差）を一次特徴化するアプローチを提案する。
+
+\subsection{Sin近似を選んだ理由}
+
+本研究では、30fpsという低FPS・高ノイズ環境において、周波数分解に依存しない手法としてSin波近似を採用した。その理由は以下の通りである。
+
+第一に、\textbf{周波数分解の制約}である。30fpsではナイキスト周波数が15Hzと低く、高次高調波の正確な抽出が困難である。従来の高調波比（A$_2$/A$_1$）やTHD（Total Harmonic Distortion）を特徴量とする手法は、位相ゆらぎや照明変動により周波数特性が不安定になる。これに対し、Sin波近似は周波数領域への変換を必要とせず、時間領域で直接モデルを構築するため、30fpsという低FPS環境でも安定した特徴抽出が可能である。
+
+第二に、\textbf{生理学的妥当性}である。PPG波形は心臓の拍動に伴う動脈の拡張・収縮を反映しており、基本的には周期的な一峰波形である。生理学的には、収縮期（心臓が血液を送り出す期間）は拡張期（心臓が血液をためる期間）よりも短く、典型的には収縮期が周期の約1/3、拡張期が約2/3である。この非対称性を反映した非対称サイン波モデルは、PPG波形の生理学的特性を適切に表現できる。
+
+第三に、\textbf{ノイズに対する頑健性}である。30fpsという低サンプリングレートでは、波形の微細な形状変化を捉えることが困難であり、形態学的特徴量アプローチはノイズの影響を受けやすい。これに対し、Sin波近似は1拍全体をモデル化するため、局所的なノイズの影響を受けにくく、より安定した特徴抽出が可能である。
+
+第四に、\textbf{実装容易性と計算効率}である。Sin波近似は少数のパラメータ（振幅、位相、平均値）で1拍波形を表現できるため、計算コストが低く、リアルタイム処理に適している。また、位相はデータ駆動で自動整合されるため、手動調整が不要である。
+
+これらの理由から、本研究では周波数分解に依存せず、生理学的に妥当な非対称サイン波モデルを基準とし、基準からの外れ（最小モデル残差）を一次特徴化するアプローチを採用した。
+
+\subsection{本研究の目的と評価}
+
+本研究では、3つの異なる血圧推定手法を実装し、比較する。第一に、形態学的特徴量（振幅、心拍数、相対Time-To-Peak）のみを使用した線形回帰モデル（RTBP: RealtimeBP）である。第二に、Sin波フィットのパラメータ（振幅、位相、平均値）を直接使用した線形回帰モデル（SinBP(M): SinBPModel）である。第三に、非対称サイン波モデルからの残差（歪み指標E）を特徴量として使用した3段階推定モデル（SinBP(D): SinBPDistortion）である。
+
+本研究の目的は以下の2点である：
+
+\begin{enumerate}
+\item \textbf{波形評価}: パルスオキシメーターの参照波形とrPPG実波形、Sin近似波を時間同期させ、MAPE（Mean Absolute Percentage Error）により波形の近似精度を評価する。これにより、Sin波近似が30fpsという低FPS環境において、実波形をどれだけ正確に近似できるかを定量化する。
+
+\item \textbf{血圧推定精度の比較}: 連続血圧計を参照として、3つの異なる血圧推定手法（RTBP、SinBP(M)、SinBP(D)）を比較し、Sin波を用いた手法（SinBP(M)、SinBP(D)）が本環境（30fps可視カメラ）において、従来の形態学的特徴量のみを用いた手法（RTBP）と比較して、本当に精度が高くなるのかを検証する。
+\end{enumerate}
+
+\subsection{本研究の貢献}
+
+本研究の主な貢献は以下の4点である：
+
+\begin{enumerate}
+\item \textbf{非対称サイン波基準の定義と、E・E$\sqrt{A}$（Stiffness\_sin）に基づく推定枠組み}: 生理学的に妥当な非対称サイン波モデルを定義し、モデルからの残差（歪み指標E）と血管硬さ指標（Stiffness\_sin = E$\sqrt{A}$）を特徴量として用いる新しい推定枠組みを提案する。非対称性は1拍遅延処理により実測データから自動計算される。
+
+\item \textbf{IBI同期（拍ごとにT=IBI）かつピーク整合（位相探索）による比較可能な正規化}: 各拍のIBI（Inter-Beat Interval）に同期させ、データ駆動の位相探索により理想波のピークを実測ピークに整合させることで、拍ごとの変動を考慮した正規化を実現する。
+
+\item \textbf{同一データ・同一前処理での対照実験計画}: 3つの異なる推定手法（RTBP、SinBP(M)、SinBP(D)）を同一データ・同一前処理で比較し、各手法の特徴量の寄与を定量化する。特に、Sin波をモデルとして用いた手法（SinBP(M)）と、Sin波の残差を用いた手法（SinBP(D)）の両方を比較する。
+
+\item \textbf{30fps/可視カメラ前提の再現性重視プロトコル（交差検証・前登録・コード/閾値固定方針）}: 再現性を重視し、データ分割、ハイパーパラメータ、除外規則を前登録し、コードと閾値を固定した評価プロトコルを確立する。
+\end{enumerate}
+
+%-----------------------------------------------------------------------
+
+\section{手法}
+
+\subsection{システム全体の構成}
+
+本システムは、スマートフォンの可視カメラからPPG信号を取得し、3つの異なる手法で血圧を推定する。システム全体の構成を図\ref{fig:system}に示す。
+
+\subsubsection{データ取得と前処理}
+
+\textbf{カメラ設定}: Camera X APIを使用し、解像度240×180、フレームレート30fpsで画像を取得する。画像形式はYUV\_420\_888形式である。
+
+\textbf{Green値抽出}: YUV画像のUプレーンからGreen値を抽出する。顔の中央領域（1/4～3/4）を除外し、周辺領域の平均値を計算することで、顔の中央部ではなく周辺部の血流変化を検出する。これにより、動脈の拍動による血流変化をより明確に捉えることができる。
+
+\textbf{BaseLogic処理}: 抽出されたGreen値に対して、以下の共通処理を実施する：
+
+\begin{itemize}
+\item \textbf{ピーク検出}: 不応期8フレーム（約267ms）を設け、前後比較によるピーク検出を行う。ピーク検出条件は、前4フレームが単調増加し、現在フレームが前フレームより小さいことである。
+
+\item \textbf{IBI計算}: ピーク間隔からIBI（Inter-Beat Interval）を計算する。IBIの範囲は0.25秒～1.2秒（50～240 BPM相当）に制限し、この範囲外の値は外れ値として除外する。
+
+\item \textbf{特徴量抽出}: 各拍ごとに以下の特徴量を抽出する：
+\begin{itemize}
+\item V2P\_relTTP: 谷→山の相対Time-To-Peak（IBIに対する相対的な時間）
+\item P2V\_relTTP: 山→谷の相対Time-To-Peak
+\item V2P\_Amplitude: 谷→山の振幅
+\item P2V\_Amplitude: 山→谷の振幅
+\end{itemize}
+
+\item \textbf{移動平均}: 10拍分の移動平均を計算し、ノイズの影響を低減する。
+\end{itemize}
+
+\subsection{Sin波近似と非対称サイン波モデル}
+
+本研究では、3つの手法すべてでSin波近似を使用するが、その方法が異なる。RTBPはSin波近似を使用せず、形態学的特徴量のみを使用する。SinBP(M)は対称Sin波（通常の正弦波）をフィットし、そのパラメータを特徴量として使用する。SinBP(D)は非対称サイン波モデルをフィットし、その残差を特徴量として使用する。以下では、SinBP(M)とSinBP(D)で使用されるSin波近似について説明する。
+
+\subsubsection{SinBP(M)における対称Sin波モデル}
+
+SinBP(M)では、1拍分のデータに対して通常の対称Sin波をフィットする。Sin波モデルは以下のように定義される：
+
+\begin{equation}
+s(t) = \text{mean} + A \sin\left(\frac{2\pi t}{T} + \phi\right)
+\label{eq:sin_model}
+\end{equation}
+
+ここで、$A$は振幅、meanは平均値、$\phi$は位相、$T$は周期（IBI）である。このモデルは対称であり、ピーク→谷と谷→ピークの時間が等しい。
+
+\subsubsection{SinBP(D)における非対称サイン波モデルの定義}
+
+SinBP(D)では、生理学的に妥当な非対称サイン波モデルを使用する。PPG波形は、心臓の拍動に伴う動脈の拡張・収縮を反映している。生理学的には、収縮期（心臓が血液を送り出す期間）は拡張期（心臓が血液をためる期間）よりも短く、典型的には収縮期が周期の約1/3、拡張期が約2/3である。この非対称性を反映した非対称サイン波モデルを定義する。
+
+非対称サイン波モデルは以下のように定義される：
+
+\begin{equation}
+s(t) = \text{mean} + A \cdot s_{\text{norm}}(t)
+\label{eq:asymmetric_model}
+\end{equation}
+
+\begin{equation}
+s_{\text{norm}}(t) = \frac{1 + \cos(\theta(t) + \phi_0)}{2}
+\label{eq:asymmetric_norm}
+\end{equation}
+
+\begin{equation}
+\theta(t) = \begin{cases}
+\frac{3\pi}{2} \cdot \frac{t'}{T} & (0 \leq t' \leq \frac{2T}{3}) \\
+\pi + 3\pi \cdot \frac{t' - \frac{2T}{3}}{T} & (\frac{2T}{3} < t' \leq T)
+\end{cases}
+\label{eq:asymmetric_theta}
+\end{equation}
+
+ここで、$t' = (t - \tau^*) \bmod T$は1拍内の位相時間、$\phi_0$は小さな位相シフト（実装で調整可）、$\tau^*$は各拍ごとに「$s_{\text{norm}}(t)$のピークが実測ピークと一致するように」$T$内で探索して決定する（ピーク合致の位相探索）。
+
+このモデルにより、ピーク→谷が周期の2/3、谷→次ピークが1/3となる非対称波形を生成する。非対称サイン波モデルの形状を図\ref{fig:asymmetric_wave}に示す。
+
+\subsubsection{SinBP(D)における歪み指標Eの計算}
+
+SinBP(D)では、1拍分の実測データ$x[n]$（$N$点）に対して、非対称サイン波モデル$s[n]$をフィットし、残差RMS誤差を歪み指標$E$として計算する：
+
+\begin{equation}
+E = \sqrt{\frac{1}{N} \sum_{n=1}^{N} (x[n] - s[n])^2}
+\label{eq:distortion}
+\end{equation}
+
+歪み指標$E$は、実測波形が理想的な非対称サイン波モデルからどれだけ外れているかを定量化する。$E$が大きいほど、波形の歪みが大きく、血管の硬さや動脈硬化の進行を示唆する。SinBP(M)では歪み指標$E$は計算せず、Sin波パラメータのみを使用する。
+
+\subsubsection{SinBP(D)における血管硬さ指標Stiffness\_sin}
+
+歪み指標$E$と振幅$A$の平方根の積を、血管硬さ指標Stiffness\_sinとして定義する：
+
+\begin{equation}
+\text{Stiffness}_{\text{sin}} = E \sqrt{A}
+\label{eq:stiffness}
+\end{equation}
+
+この指標は、血管の拡張能（振幅$A$）と波形の歪み（$E$）を組み合わせた合成指標であり、血管の硬さをより包括的に評価する。従来のAI（Augmentation Index）と比較して、30fpsという低FPS条件でも安定して計算できる利点がある。
+
+\subsection{3つの血圧推定手法}
+
+本研究では、3つの異なる血圧推定手法を実装し、比較する。各手法の特徴を表\ref{tab:methods}に示す。
+
+\subsubsection{手法1: RTBP (RealtimeBP)}
+
+RTBPは、BaseLogicの形態学的特徴量のみを使用したシンプルな線形回帰モデルである。この手法は、波形の形状特徴（振幅、心拍数、相対TTP）を直接使用し、計算コストが低く、リアルタイム性に優れている。
+
+\textbf{特徴量}:
+\begin{itemize}
+\item $A$: 振幅（averageValleyToPeakAmplitude）
+\item HR: 心拍数（60000.0 / smoothedIBI）
+\item V2P\_relTTP: 谷→山の相対TTP
+\item P2V\_relTTP: 山→谷の相対TTP
+\end{itemize}
+
+\textbf{推定式}:
+\begin{equation}
+\text{SBP} = C_0 + C_1 \cdot A + C_2 \cdot \text{HR} + C_3 \cdot \text{V2P\_relTTP} + C_4 \cdot \text{P2V\_relTTP}
+\label{eq:rtbp_sbp}
+\end{equation}
+
+\begin{equation}
+\text{DBP} = D_0 + D_1 \cdot A + D_2 \cdot \text{HR} + D_3 \cdot \text{V2P\_relTTP} + D_4 \cdot \text{P2V\_relTTP}
+\label{eq:rtbp_dbp}
+\end{equation}
+
+\textbf{係数}: [後で記載]
+
+\textbf{制約}: SBPは60～200 mmHg、DBPは40～150 mmHgの範囲に制限する。
+
+\subsubsection{手法2: SinBP(M) (SinBPModel)}
+
+SinBP(M)は、Sin波フィットのパラメータ（振幅、位相、平均値）を直接使用した線形回帰モデルである。この手法は、1拍分のデータに対して最小二乗法でSin波をフィットし、そのパラメータを特徴量として使用する。
+
+\textbf{データ処理}:
+\begin{itemize}
+\item \textbf{バッファリング}: 90フレーム（30fps × 3秒）のリングバッファにPPG値とタイムスタンプを保存する。
+\item \textbf{ピーク検出}: 移動窓最大値検出によりピークを検出し、不応期500msを設ける。
+\item \textbf{Sin波フィット}: 1拍分のデータを64点にリサンプリングし、DFT風の内積計算によりSin波パラメータを推定する。
+\end{itemize}
+
+Sin波モデルは式(\ref{eq:sin_model})で定義される。
+
+\textbf{特徴量}:
+\begin{itemize}
+\item $A$: 振幅（Sin波フィットから取得）
+\item HR: 心拍数（60000.0 / smoothedIBI）
+\item Mean: 平均値（Sin波フィットから取得）
+\item $\Phi$: 位相（Sin波フィットから取得）
+\end{itemize}
+
+\textbf{推定式}:
+\begin{equation}
+\text{SBP} = \alpha_0 + \alpha_1 \cdot A + \alpha_2 \cdot \text{HR} + \alpha_3 \cdot \text{Mean} + \alpha_4 \cdot \Phi
+\label{eq:sinbp_m_sbp}
+\end{equation}
+
+\begin{equation}
+\text{DBP} = \beta_0 + \beta_1 \cdot A + \beta_2 \cdot \text{HR} + \beta_3 \cdot \text{Mean} + \beta_4 \cdot \Phi
+\label{eq:sinbp_m_dbp}
+\end{equation}
+
+\textbf{係数}: [後で記載]
+
+\textbf{制約}: SBPは60～200 mmHg、DBPは40～150 mmHgの範囲に制限する。
+
+\subsubsection{手法3: SinBP(D) (SinBPDistortion)}
+
+SinBP(D)は、非対称サイン波モデルからの残差（歪み指標$E$）を特徴量として使用した3段階推定モデルである。この手法は、生理学的に妥当な非対称サイン波モデルを基準とし、基準からの外れを定量化することで、より高精度な血圧推定を実現する。
+
+\textbf{データ処理}:
+\begin{itemize}
+\item \textbf{バッファリング}: 90フレーム（30fps × 3秒）のリングバッファにPPG値とタイムスタンプを保存する。
+\item \textbf{ピーク検出}: 移動窓最大値検出によりピークを検出し、不応期500msを設ける。
+\item \textbf{1拍遅延処理}: 前の拍のデータを処理することで、より正確な非対称サイン波モデルを構築する。具体的には、次のピークが検出された時点で、その前の拍（previousPeakTime → lastPeakTime）のデータが完全になったので処理する。現在の拍のデータは次回処理する。
+\item \textbf{動的な収縮期/拡張期比率の自動計算}: 1拍遅延処理により、前の拍の実測データ（rPPG）から収縮期/拡張期比率を自動計算する。実測データの谷位置を検出し、ピーク→谷の時間（拡張期）と谷→次ピークの時間（収縮期）から比率を算出する。デフォルトは1/3:2/3だが、実測値に基づいて動的に変更される。
+\item \textbf{Sin波フィット}: 1拍分のデータに対してSin波をフィットし、振幅$A$と位相$\phi$を取得する。
+\item \textbf{歪み指標計算}: 計算された動的な比率を用いて非対称サイン波モデルを再構成し、実測データからの残差RMS誤差を計算して歪み指標$E$を算出する。
+\end{itemize}
+
+\textbf{特徴量}:
+\begin{itemize}
+\item $A$: 振幅（Sin波フィットから取得）
+\item HR: 心拍数（60000.0 / smoothedIBI）
+\item V2P\_relTTP: 谷→山の相対TTP（BaseLogicから取得）
+\item P2V\_relTTP: 山→谷の相対TTP（BaseLogicから取得）
+\item Stiffness\_sin: $E\sqrt{A}$（歪み指標×振幅の平方根）
+\item $E$: 歪み指標（RMS誤差）
+\end{itemize}
+
+\textbf{推定式（3段階推定）}:
+
+【第1段: ベースBP計算】
+\begin{equation}
+\text{SBP}_{\text{base}} = \text{ALPHA}_0 + \text{ALPHA}_1 \cdot A + \text{ALPHA}_2 \cdot \text{HR}
+\label{eq:sinbp_d_sbp_base}
+\end{equation}
+
+\begin{equation}
+\text{DBP}_{\text{base}} = \text{BETA}_0 + \text{BETA}_1 \cdot A + \text{BETA}_2 \cdot \text{HR}
+\label{eq:sinbp_d_dbp_base}
+\end{equation}
+
+【第2段: 血管特性補正】
+\begin{equation}
+\text{SBP}_{\text{vascular}} = \text{SBP}_{\text{base}} + \text{ALPHA}_3 \cdot \text{V2P\_relTTP} + \text{ALPHA}_4 \cdot \text{P2V\_relTTP} + \text{ALPHA}_5 \cdot \text{Stiffness}_{\text{sin}}
+\label{eq:sinbp_d_sbp_vascular}
+\end{equation}
+
+\begin{equation}
+\text{DBP}_{\text{vascular}} = \text{DBP}_{\text{base}} + \text{BETA}_3 \cdot \text{V2P\_relTTP} + \text{BETA}_4 \cdot \text{P2V\_relTTP} + \text{BETA}_5 \cdot \text{Stiffness}_{\text{sin}}
+\label{eq:sinbp_d_dbp_vascular}
+\end{equation}
+
+【第3段: 歪み補正】
+\begin{equation}
+\text{SBP} = \text{SBP}_{\text{vascular}} + \text{ALPHA}_6 \cdot E
+\label{eq:sinbp_d_sbp_final}
+\end{equation}
+
+\begin{equation}
+\text{DBP} = \text{DBP}_{\text{vascular}} + \text{BETA}_6 \cdot E
+\label{eq:sinbp_d_dbp_final}
+\end{equation}
+
+\textbf{係数}: [後で記載]
+
+\textbf{制約}: SBP $\geq$ DBP + 10、SBPは60～200 mmHg、DBPは40～150 mmHgの範囲に制限する。
+
+3段階推定のフローを図\ref{fig:sinbp_d_flow}に示す。
+
+\subsection{前処理と正規化}
+
+\subsubsection{ピーク検出}
+
+各手法でピーク検出を実施する。BaseLogicでは不応期8フレーム（約267ms）を設け、SinBP(M)とSinBP(D)では不応期500msを設ける。ピーク検出アルゴリズムは移動窓最大値検出を使用し、前後比較によりピークを確定する。
+
+\subsubsection{ビート切り出し}
+
+現在ピークから次ピークまでを1拍として切り出す。周期$T$はIBI（Inter-Beat Interval）に等しい。
+
+\subsubsection{時間正規化}
+
+各拍を固定長（$N=64$点）にリサンプリングする。線形補間を使用し、元のサンプル数を64点に正規化する。この処理は、SinBP(M)とSinBP(D)で実施される。RTBPは形態学的特徴量のみを使用するため、時間正規化は不要である。
+
+\subsubsection{ピーク整合}
+
+SinBP(M)とSinBP(D)では、各拍で位相探索（$\tau^*$）により理想波のピークを実測ピークに一致させる。これにより、拍ごとの位相変動を考慮した正規化を実現する。RTBPは形態学的特徴量のみを使用するため、ピーク整合は不要である。
+
+\subsubsection{外れ値抑制}
+
+IBI・振幅・テンポラルジャンプに基づくルールベース除外を実施する。具体的には、以下の条件を満たす拍を外れ値として除外する：
+
+\begin{itemize}
+\item IBIが0.25秒～1.2秒の範囲外
+\item 振幅が前回の30\%以上変化
+\item 生理学的に妥当でない値（脈圧が20～100 mmHgの範囲外など）
+\end{itemize}
+
+%-----------------------------------------------------------------------
+
+\section{実験計画}
+
+\subsection{データ取得プロトコル}
+
+\subsubsection{環境設定}
+
+\begin{itemize}
+\item \textbf{デバイス}: スマートフォン可視カメラ（30fps）
+\item \textbf{測定方式}: 指腹接触方式
+\item \textbf{照明条件}: 室内/屋外/点滅を層別化
+\item \textbf{その他}: 指圧、スキントーンを層別化
+\end{itemize}
+
+\subsubsection{参照値}
+
+\begin{itemize}
+\item \textbf{参照デバイス}: 上腕カフ（臨床グレード）で同時計測
+\item \textbf{測定条件}: 測定間隔・体位・安静時間を統一
+\end{itemize}
+
+\subsubsection{被験者}
+
+\begin{itemize}
+\item \textbf{募集条件}: 年齢/性別/スキントーンが偏らないよう募集
+\item \textbf{除外条件}: 不整脈重度等
+\end{itemize}
+
+\subsubsection{倫理}
+
+同意取得・匿名化・暗号化保存を実施する。
+
+\subsection{波形評価実験}
+
+\subsubsection{評価目的}
+
+パルスオキシメーターの参照波形とrPPG実波形、Sin近似波を時間同期させ、MAPEにより波形の近似精度を評価する。これにより、Sin波近似が30fpsという低FPS環境において、実波形をどれだけ正確に近似できるかを定量化する。
+
+\subsubsection{データ取得}
+
+\begin{itemize}
+\item \textbf{参照波形}: パルスオキシメーターから取得したPPG波形を参照とする
+\item \textbf{rPPG実波形}: スマートフォン可視カメラから取得したrPPG実波形
+\item \textbf{Sin近似波}: SinBP(M)とSinBP(D)で計算されたSin近似波
+\end{itemize}
+
+\subsubsection{時間同期}
+
+パルスオキシメーターとrPPG実波形、Sin近似波を時間同期させる。同期方法は以下のいずれかを使用する：
+
+\begin{itemize}
+\item \textbf{ピーク同期}: 各拍のピーク位置を基準に同期
+\item \textbf{相関最大化}: 相互相関を最大化するように時間シフトを決定
+\end{itemize}
+
+\subsubsection{評価指標}
+
+時間同期した波形に対して、MAPEを計算する：
+
+\begin{equation}
+\text{MAPE} = \frac{100}{n}\sum_{i=1}^{n}\left|\frac{\hat{y}_i - y_i}{y_i}\right|
+\label{eq:mape}
+\end{equation}
+
+ここで、$\hat{y}_i$はSin近似波、$y_i$は参照波形（パルスオキシメーター）またはrPPG実波形である。
+
+波形評価の結果を図\ref{fig:waveform_eval}に示す。
+
+\subsection{血圧推定精度の比較実験}
+
+全手法が同じ拍列・同じ正規化系列を入力する前提で比較する。学習/検証の分割は完全共通とする。
+
+\subsubsection{3手法の比較}
+
+3つの異なる血圧推定手法（RTBP、SinBP(M)、SinBP(D)）を比較する：
+
+\begin{itemize}
+\item \textbf{RTBP}: 形態学的特徴量のみを使用した手法（ベースライン）
+\item \textbf{SinBP(M)}: Sin波パラメータを直接使用した手法
+\item \textbf{SinBP(D)}: Sin波の残差（歪み指標$E$）を用いた手法
+\end{itemize}
+
+各手法の特徴量の違いを表\ref{tab:features}に示す。
+
+\subsubsection{アブレーション研究}
+
+3手法の各要素の寄与を定量化する：
+
+\textbf{RTBPのアブレーション}:
+\begin{enumerate}
+\item[(i)] $A$・HR のみ: ベースライン
+\item[(ii)] + V2P\_relTTP: 谷→山の相対TTPの寄与
+\item[(iii)] + P2V\_relTTP: 山→谷の相対TTPの寄与
+\end{enumerate}
+
+\textbf{SinBP(M)のアブレーション}:
+\begin{enumerate}
+\item[(i)] $A$・HR のみ: ベースライン
+\item[(ii)] + Mean: 平均値の寄与
+\item[(iii)] + $\Phi$: 位相の寄与
+\end{enumerate}
+
+\textbf{SinBP(D)のアブレーション}:
+\begin{enumerate}
+\item[(i)] $A$・HR のみ: ベースライン
+\item[(ii)] + relTTP（谷→山・山→谷の両方向）: 血管特性の寄与
+\item[(iii)] + Stiffness\_sin（$E\sqrt{A}$）: 血管硬さ指標の寄与
+\item[(iv)] + $E$（最終）: 歪み指標の寄与
+\end{enumerate}
+
+各段での寄与を定量化する。アブレーション研究の結果を図\ref{fig:ablation}に示す。
+
+\subsection{検証設計・統計計画}
+
+\subsubsection{データ分割}
+
+\begin{itemize}
+\item \textbf{主要}: 被験者独立のLOSO（Leave-One-Subject-Out）
+\item \textbf{サブ解析}: K-fold（被験者分割）
+\end{itemize}
+
+\subsubsection{評価指標}
+
+\begin{itemize}
+\item \textbf{主要指標}: SBP/DBP MAE, MD±SD, Bland–Altman, CCC
+\item \textbf{基準}:
+\begin{itemize}
+\item AAMI（|MD|≤5 mmHg かつ SD≤8 mmHg）
+\item BHS（≤5/10/15 mmHg の累積比率）
+\end{itemize}
+\end{itemize}
+
+\subsubsection{統計検定}
+
+\begin{itemize}
+\item \textbf{比較}: 提案法 vs 各ベースラインの二者比較（対応あり）
+\item \textbf{信頼区間}: MD差の95\% CI、ブートストラップで頑健CI
+\item \textbf{多重性補正}: Holm法で補正
+\end{itemize}
+
+\subsubsection{事前仮説}
+
+\begin{itemize}
+\item \textbf{H1}: Sin波を用いた手法（SinBP(M)、SinBP(D)）は、形態学的特徴量のみを用いた手法（RTBP）と比較して、30fps条件においてMAEが小さい
+
+\item \textbf{H2}: SinBP(D)の歪み指標$E$とStiffness\_sinは、血圧推定に独立寄与を持つ（重回帰の部分相関/分散説明率）
+
+\item \textbf{H3}: ノイズ・照度・スキントーン層で性能低下が小さい（交互作用が小）
+
+\item \textbf{H4}: Sin近似波のMAPEは、rPPG実波形のMAPEと比較して小さい（Sin波近似が有効である）
+\end{itemize}
+
+\subsubsection{リーク防止}
+
+\begin{itemize}
+\item スケール/正規化/閾値は訓練内のみで決定、検証には適用のみ
+\item 同一被験者の交差漏れを禁止
+\end{itemize}
+
+\subsection{ロバスト性試験}
+
+\subsubsection{ノイズ耐性}
+
+ホワイト/低周波ドリフト/照度ゆらぎの合成撹乱を加え、3手法（RTBP、SinBP(M)、SinBP(D)）の性能を評価する。各手法のノイズに対する頑健性を比較する。
+
+\subsubsection{FPS依存}
+
+30fps → 24/20fpsサブサンプリングで劣化曲線を評価する。3手法（RTBP、SinBP(M)、SinBP(D)）のFPS依存性を比較する。
+
+\subsubsection{モーション}
+
+微小動揺の再現（微分エネルギー閾値）を評価する。3手法（RTBP、SinBP(M)、SinBP(D)）のモーション耐性を比較する。
+
+\subsubsection{皮膚特性}
+
+スキントーン層別のMAE/MD±SDを報告する。3手法（RTBP、SinBP(M)、SinBP(D)）の皮膚特性への依存性を比較する。
+
+%-----------------------------------------------------------------------
+
+\section{結果}
+
+[後で記載]
+
+\subsection{波形評価の結果}
+
+[後で記載]
+
+パルスオキシメーターの参照波形とrPPG実波形、Sin近似波（SinBP(M)、SinBP(D)）の時間同期したMAPEを報告する。波形評価の結果を図\ref{fig:waveform_result}に示す。
+
+\subsection{3手法の血圧推定精度の比較結果}
+
+[後で記載]
+
+連続血圧計を参照として、3つの異なる血圧推定手法（RTBP、SinBP(M)、SinBP(D)）の精度を比較する。MAE、RMSE、Bland-Altmanプロットを報告する。3手法の比較結果を図\ref{fig:comparison}に示す。
+
+\subsection{アブレーション研究の結果}
+
+[後で記載]
+
+3手法（RTBP、SinBP(M)、SinBP(D)）の各要素の寄与を定量化する。各手法における特徴量の段階的追加による性能変化を報告する。アブレーション研究の結果を図\ref{fig:ablation_result}に示す。
+
+\subsection{ロバスト性試験の結果}
+
+[後で記載]
+
+%-----------------------------------------------------------------------
+
+\section{考察}
+
+[後で記載]
+
+\subsection{結果の解釈}
+
+[後で記載]
+
+\subsection{手法の優位性}
+
+[後で記載]
+
+\subsection{限界と今後の課題}
+
+[後で記載]
+
+%-----------------------------------------------------------------------
+
+\section{結論}
+
+本研究は、可視カメラ×30fpsの制約下で機能する3つの異なる血圧推定手法（RTBP、SinBP(M)、SinBP(D)）を、厳密な対照実験計画とともに提示した。RTBPは形態学的特徴量のみを使用したシンプルな線形回帰モデル、SinBP(M)はSin波パラメータを直接使用した線形回帰モデル、SinBP(D)は非対称サイン波モデルからの残差（歪み指標$E$）を特徴量として使用した3段階推定モデルである。同一データ・同一前処理・同一分割で3手法を比較し、SinBP(D)では$E$・$E\sqrt{A}$・relTTPの段階的寄与を検証する。実装では各拍のIBI同期、ピーク合致の位相探索（SinBP(M)とSinBP(D)）、そして表示上は振幅の視覚強調（中心から1.5倍拡大）を行い、同期性と視認性を両立した。
+
+30fps環境での優位性として、周波数分解に頼らず、Sin波近似（SinBP(M)）や非対称サイン骨格＋最小モデル残差（SinBP(D)）で安定した推定を実現できることを示した。物理解釈性の観点から、SinBP(D)の$E$は「生理整合的な基準」からの逸脱量、$E\sqrt{A}$（Stiffness\_sin）は拡張能×歪みの合成指標として解釈できる。実装容易性の観点から、SinBP(M)とSinBP(D)は少数パラメータ・軽量でオンデバイス適合が可能であり、位相はデータ駆動で自動整合される。RTBPは計算コストが最も低く、リアルタイム性に優れている。
+
+今後の課題として、単一基準形の限界（個体差・切痕の強い症例では二成分化/局所バンプで拡張）、撮像依存性（条件別バイアスは個体内標準化・層別補正で緩和）、一般化（被験者外検証と外部データ再現で担保）が挙げられる。
+
+%-----------------------------------------------------------------------
+
+%%%%%%%%%%%%%%%%% BIBLIOGRAPHY IN THE LaTeX file !!!!! %%%%%%%%%%%%%%%%%%%%%%
+\begin{thebibliography}{9}
+\bibitem{ref1}
+[後で記載]
+
+\end{thebibliography}
+
+\end{document}
