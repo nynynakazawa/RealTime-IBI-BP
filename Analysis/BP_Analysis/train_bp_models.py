@@ -1,8 +1,7 @@
 """
 3手法の血圧推定モデルの学習・評価スクリプト
 
-このスクリプトは、連続血圧計の参照値と比較して3手法のMAPEを評価し、
-係数を再学習します。
+このスクリプトは、連続血圧計の参照値と比較して3手法のMAPEを評価し、係数を再学習します。
 
 使用方法:
     python train_bp_models.py --data_csv <CSVファイルパス> --output_dir <出力ディレクトリ>
@@ -173,6 +172,7 @@ def main():
     # データ読み込み
     print(f"Loading data from {args.data_csv}...")
     df = pd.read_csv(args.data_csv)
+    df.columns = [col.strip() for col in df.columns]
     print(f"Loaded {len(df)} samples")
 
     # 参照値のカラム名

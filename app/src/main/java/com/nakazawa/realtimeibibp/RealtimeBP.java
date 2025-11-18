@@ -75,9 +75,17 @@ public class RealtimeBP {
 
     // --- 回帰係数（暫定調整） ---
     // SBP: C0 + C1*A + C2*HR + C3*V2P_relTTP + C4*P2V_relTTP
-    private static final double C0 = 80, C1 = 0.5, C2 = 0.1, C3 = 0.1, C4 = -0.1;
+    private static final double C0 = 90.99418684531054;
+    private static final double C1 = -0.33103981867725246;
+    private static final double C2 = 0.38828017759845956;
+    private static final double C3 = 19.020251261188356;
+    private static final double C4 = -10.367306468369557;
     // DBP: D0 + D1*A + D2*HR + D3*V2P_relTTP + D4*P2V_relTTP
-    private static final double D0 = 60, D1 = 0.3, D2 = 0.05, D3 = 0.05, D4 = -0.05;
+    private static final double D0 = 71.8549569972503;
+    private static final double D1 = -0.3390322884709934;
+    private static final double D2 = 0.37363763271379236;
+    private static final double D3 = 30.307750213574913;
+    private static final double D4 = -4.358409966514669;
 
     /**
      * BaseLogicからのコールバック用メソッド

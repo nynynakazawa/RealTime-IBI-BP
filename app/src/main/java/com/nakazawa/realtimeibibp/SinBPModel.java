@@ -83,18 +83,18 @@ public class SinBPModel {
     // 線形回帰係数（Sin波パラメータのみを使用）
     // 注意: 振幅Aと平均値MeanはLogic1で正規化された値（0-10範囲）を使用
     // SBP = ALPHA0 + ALPHA1*A + ALPHA2*HR + ALPHA3*Mean + ALPHA4*Phi
-    private static final double ALPHA0 = 90.0;   // 切片
-    private static final double ALPHA1 = 4.5;     // 振幅係数（正規化後0-10範囲）
-    private static final double ALPHA2 = 0.25;    // 心拍数係数
-    private static final double ALPHA3 = 0.15;    // 平均値係数（正規化後0-10範囲）
-    private static final double ALPHA4 = 2.0;     // 位相係数（rad単位）
+    private static final double ALPHA0 = 95.39402961316823;   // 切片
+    private static final double ALPHA1 = -3.762595606784152;  // M3_A
+    private static final double ALPHA2 = 0.24908874582353308; // M3_HR
+    private static final double ALPHA3 = -1.6100153812223845; // M3_Mean
+    private static final double ALPHA4 = 9.12175706080051;    // M3_Phi
     
     // DBP = BETA0 + BETA1*A + BETA2*HR + BETA3*Mean + BETA4*Phi
-    private static final double BETA0 = 65.0;     // 切片
-    private static final double BETA1 = 2.8;      // 振幅係数（正規化後0-10範囲）
-    private static final double BETA2 = 0.12;     // 心拍数係数
-    private static final double BETA3 = 0.08;    // 平均値係数（正規化後0-10範囲）
-    private static final double BETA4 = 1.2;     // 位相係数（rad単位）
+    private static final double BETA0 = 67.34747188254181;     // 切片
+    private static final double BETA1 = -2.628219145912584;    // M3_A
+    private static final double BETA2 = 0.17606500339002112;   // M3_HR
+    private static final double BETA3 = 0.08848823378217655;   // M3_Mean
+    private static final double BETA4 = 5.298822771183181;     // M3_Phi
     
     // リスナー
     public interface SinBPModelListener {

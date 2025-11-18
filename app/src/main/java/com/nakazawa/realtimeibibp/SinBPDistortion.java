@@ -88,24 +88,24 @@ public class SinBPDistortion {
     // 固定係数（ベースBP推定）
     // 注意: 振幅AはLogic1で正規化された値（0-10範囲）を使用
     // 振幅Aが1-10程度なので、係数を大きくする
-    private static final double ALPHA0 = 80.0;
-    private static final double ALPHA1 = 5.0;   // 0.5 → 5.0 (10倍) - 正規化後0-10範囲
-    private static final double ALPHA2 = 0.3;
-    private static final double BETA0 = 60.0;
-    private static final double BETA1 = 3.0;    // 0.3 → 3.0 (10倍) - 正規化後0-10範囲
-    private static final double BETA2 = 0.15;
+    private static final double ALPHA0 = 88.34518456743993;
+    private static final double ALPHA1 = 1.363158169768225;
+    private static final double ALPHA2 = 0.26677311586673697;
+    private static final double BETA0 = 58.42490151615361;
+    private static final double BETA1 = 0.2369765283796678;
+    private static final double BETA2 = 0.3126812621844999;
     
     // 血管特性補正係数（AIを除去、Stiffness_sinを強化、両方のrelTTPを使用）
-    private static final double ALPHA3 = 5.0;   // 谷→山relTTP係数
-    private static final double ALPHA4 = 3.0;    // 山→谷relTTP係数
-    private static final double ALPHA5 = 0.1;     // Stiffness_sin係数（0.01 → 0.1に大幅強化）
-    private static final double BETA3 = 3.0;     // 谷→山relTTP係数
-    private static final double BETA4 = 2.0;     // 山→谷relTTP係数
-    private static final double BETA5 = 0.05;    // Stiffness_sin係数（0.005 → 0.05に大幅強化）
+    private static final double ALPHA3 = 13.729954945787677;
+    private static final double ALPHA4 = -13.530484677446342;
+    private static final double ALPHA5 = -5.476218463840064;
+    private static final double BETA3 = 20.09923301596818;
+    private static final double BETA4 = -8.934800855089374;
+    private static final double BETA5 = -5.38454832473881;
     
     // 第3段：歪み補正係数（Eによる最終補正）
-    private static final double ALPHA6 = 0.1;    // SBP歪み補正係数（0.01 → 0.1）
-    private static final double BETA6 = 0.05;   // DBP歪み補正係数（0.005 → 0.05）
+    private static final double ALPHA6 = 11.185672104352467;
+    private static final double BETA6 = 12.880804301918507;
     
     // 理想曲線データ（UI表示用）
     private double currentMean = 0;
