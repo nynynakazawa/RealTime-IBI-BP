@@ -65,11 +65,22 @@ public class MainActivity extends AppCompatActivity
 
     private ExecutorService rlExecutor;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    
+    // ===== 画面輝度制御 =====
+    private void setMaxBrightness() {
+        WindowManager.LayoutParams layoutParams = getWindow().getAttributes();
+        layoutParams.screenBrightness = 1.0f; // 最大輝度（0.0-1.0）
+        getWindow().setAttributes(layoutParams);
+    }
 
     // ===== onCreate =====
     @Override protected void onCreate(Bundle s){
         super.onCreate(s);
         setContentView(R.layout.activity_main);
+        
+        // 画面の輝度を最大に設定
+        setMaxBrightness();
+        
         requestCameraPermission();
         initUi();
         initAnalyzer();
@@ -343,6 +354,13 @@ public class MainActivity extends AppCompatActivity
         if (code == CAMERA_PERMISSION_REQUEST_CODE &&
                 (r.length == 0 || r[0] != PackageManager.PERMISSION_GRANTED))
             showPermissionSettingsDialog();
+    }
+    
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // アプリが再開されたときに輝度を最大に設定
+        setMaxBrightness();
     }
 
     // ===== onActivityResult =====

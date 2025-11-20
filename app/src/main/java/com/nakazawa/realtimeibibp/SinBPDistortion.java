@@ -87,25 +87,31 @@ public class SinBPDistortion {
     
     // 固定係数（ベースBP推定）
     // 注意: 振幅AはLogic1で正規化された値（0-10範囲）を使用
-    // 振幅Aが1-10程度なので、係数を大きくする
-    private static final double ALPHA0 = 88.34518456743993;
-    private static final double ALPHA1 = 1.363158169768225;
-    private static final double ALPHA2 = 0.26677311586673697;
-    private static final double BETA0 = 58.42490151615361;
-    private static final double BETA1 = 0.2369765283796678;
-    private static final double BETA2 = 0.3126812621844999;
+    // 2025-11-19評価結果より最適化（SinBP_DがSBPで最適：MAPE 14.50%, RMSE 18.98 mmHg）
+    // SBP: ALPHA0 + ALPHA1*A + ALPHA2*HR
+    private static final double ALPHA0 = 131.99686804848434;
+    private static final double ALPHA1 = -0.3271413268382667;
+    private static final double ALPHA2 = 0.05454556495488837;
+    // DBP: BETA0 + BETA1*A + BETA2*HR
+    private static final double BETA0 = 95.52708476163076;
+    private static final double BETA1 = 0.1536767897207671;
+    private static final double BETA2 = -0.018594037932735407;
     
-    // 血管特性補正係数（AIを除去、Stiffness_sinを強化、両方のrelTTPを使用）
-    private static final double ALPHA3 = 13.729954945787677;
-    private static final double ALPHA4 = -13.530484677446342;
-    private static final double ALPHA5 = -5.476218463840064;
-    private static final double BETA3 = 20.09923301596818;
-    private static final double BETA4 = -8.934800855089374;
-    private static final double BETA5 = -5.38454832473881;
+    // 血管特性補正係数（V2P_relTTP, P2V_relTTP, Stiffness）
+    // SBP: ALPHA3*V2P_relTTP + ALPHA4*P2V_relTTP + ALPHA5*Stiffness
+    private static final double ALPHA3 = 4.736422858935619;
+    private static final double ALPHA4 = 4.701034167811119;
+    private static final double ALPHA5 = -0.1120919056102185;
+    // DBP: BETA3*V2P_relTTP + BETA4*P2V_relTTP + BETA5*Stiffness
+    private static final double BETA3 = 0.9115587102435615;
+    private static final double BETA4 = -8.499318748120087;
+    private static final double BETA5 = 0.020923035435363904;
     
     // 第3段：歪み補正係数（Eによる最終補正）
-    private static final double ALPHA6 = 11.185672104352467;
-    private static final double BETA6 = 12.880804301918507;
+    // SBP: ALPHA6*E
+    private static final double ALPHA6 = -0.27060472591547996;
+    // DBP: BETA6*E
+    private static final double BETA6 = 0.01802616265096718;
     
     // 理想曲線データ（UI表示用）
     private double currentMean = 0;
@@ -124,6 +130,8 @@ public class SinBPDistortion {
     private final Deque<Double> phaseHistory = new ArrayDeque<>(3);
     private double lastPhaseShift = 0.0;
     private static final double MAX_PHASE_CHANGE = Math.PI / 4; // 最大位相変化量
+    private int consecutiveFailedSyncs = 0; // 連続して同期に失敗した回数
+    private static final int MAX_FAILED_SYNCS = 3; // 最大連続失敗回数（この回数以上でリセット）
     
     // 処理時間遅延補正用
     private static final long PROCESSING_DELAY_MS = 100; // 処理時間による遅延（ミリ秒）
@@ -394,7 +402,7 @@ public class SinBPDistortion {
         }
         
         // その拍の歪み計算（動的な比率を使用）
-        calculateDistortion(beatSamples, currentA, currentPhi, ibi, systoleRatio, diastoleRatio);
+        calculateDistortion(beatSamples, beatTimes, currentA, currentPhi, ibi, systoleRatio, diastoleRatio);
         
         Log.d(TAG + "-ProcessPeak", String.format(
                 "After distortion calc: hasIdealCurve=%b, startTime=%d, endTime=%d",
@@ -453,6 +461,7 @@ public class SinBPDistortion {
     
     /**
      * 前の拍のrPPGデータから収縮期/拡張期の比率を計算
+     * 低心拍数ではサンプル数が多くなるため、より安定した谷の検出が必要
      * @param beatSamples 1拍分のサンプル値
      * @param beatTimes 1拍分の時刻（ms）
      * @param ibi 周期（ms）
@@ -469,26 +478,49 @@ public class SinBPDistortion {
             return new double[]{1.0/3.0, 2.0/3.0};
         }
         
-        // 谷の位置を検出（最小値）
-        int valleyIndex = 0;
+        // 低心拍数ではサンプル数が多くなるため、移動平均でスムージングしてから谷を検出
+        // 移動平均のウィンドウサイズはサンプル数に応じて調整
+        int windowSize = Math.max(3, Math.min(7, N / 10)); // サンプル数の10%程度、最小3、最大7
+        List<Double> smoothedSamples = smoothSamples(beatSamples, windowSize);
+        
+        // ピーク位置を検出（開始点がピークと仮定）
+        int peakIndex = 0;
+        double maxValue = Double.NEGATIVE_INFINITY;
+        int searchRange = Math.max(3, (int)(N * 0.2)); // 最初の20%の範囲
+        for (int i = 0; i < searchRange && i < smoothedSamples.size(); i++) {
+            if (smoothedSamples.get(i) > maxValue) {
+                maxValue = smoothedSamples.get(i);
+                peakIndex = i;
+            }
+        }
+        
+        // 谷の位置を検出（ピーク以降の最小値）
+        // ピークから後半80%の範囲で谷を探索（最後の20%は次のピークの可能性があるため除外）
+        int valleySearchStart = peakIndex;
+        int valleySearchEnd = Math.min(N - 1, (int)(N * 0.8));
+        int valleyIndex = valleySearchStart;
         double minValue = Double.MAX_VALUE;
-        for (int i = 0; i < N; i++) {
-            if (beatSamples.get(i) < minValue) {
-                minValue = beatSamples.get(i);
+        
+        for (int i = valleySearchStart; i <= valleySearchEnd; i++) {
+            if (smoothedSamples.get(i) < minValue) {
+                minValue = smoothedSamples.get(i);
                 valleyIndex = i;
             }
         }
         
-        // 谷の位置が極端に端にある場合は、より安定した方法で検出
-        // ピーク（開始点）から谷までの距離を計算
-        // ピークは t=0（開始時刻）に位置すると仮定
-        
         // 谷の時刻を取得
-        long peakTime = beatTimes.get(0);
+        long peakTime = beatTimes.get(peakIndex);
         long valleyTime = beatTimes.get(valleyIndex);
         
         // 拡張期の時間（ピーク→谷）
         double diastoleTime = valleyTime - peakTime;
+        
+        // 異常値チェック：拡張期が負の値や異常に大きい値の場合はデフォルト値を使用
+        if (diastoleTime < 0 || diastoleTime > ibi * 0.9) {
+            Log.w(TAG, String.format("Invalid diastole time: %.1f ms (IBI=%.1f ms), using default",
+                    diastoleTime, ibi));
+            return new double[]{1.0/3.0, 2.0/3.0};
+        }
         
         // 収縮期の時間（谷→次のピーク = IBI - 拡張期）
         double systoleTime = ibi - diastoleTime;
@@ -507,10 +539,37 @@ public class SinBPDistortion {
         }
         
         Log.d(TAG + "-Ratio", String.format(
-                "Calculated ratio: systole=%.3f (%.1f ms), diastole=%.3f (%.1f ms), IBI=%.1f ms",
-                systoleRatio, systoleTime, diastoleRatio, diastoleTime, ibi));
+                "Calculated ratio: systole=%.3f (%.1f ms), diastole=%.3f (%.1f ms), IBI=%.1f ms, N=%d, window=%d",
+                systoleRatio, systoleTime, diastoleRatio, diastoleTime, ibi, N, windowSize));
         
         return new double[]{systoleRatio, diastoleRatio};
+    }
+    
+    /**
+     * 移動平均でサンプルをスムージング（ノイズ除去）
+     * @param samples 元のサンプル値
+     * @param windowSize 移動平均のウィンドウサイズ
+     * @return スムージング後のサンプル値
+     */
+    private List<Double> smoothSamples(List<Double> samples, int windowSize) {
+        List<Double> smoothed = new ArrayList<>();
+        int N = samples.size();
+        int halfWindow = windowSize / 2;
+        
+        for (int i = 0; i < N; i++) {
+            double sum = 0.0;
+            int count = 0;
+            
+            // ウィンドウ内の平均を計算
+            for (int j = Math.max(0, i - halfWindow); j <= Math.min(N - 1, i + halfWindow); j++) {
+                sum += samples.get(j);
+                count++;
+            }
+            
+            smoothed.add(sum / count);
+        }
+        
+        return smoothed;
     }
     
     /**
@@ -632,8 +691,15 @@ public class SinBPDistortion {
      * 歪み指標の計算（動的な比率を使用）
      * 非対称サイン波モデルからの残差を計算
      * 注意: beatSamplesはLogic1で正規化された値（0-10範囲）を使用
+     * @param beatSamples 1拍分のサンプル値
+     * @param beatTimes 1拍分の時刻（ms）
+     * @param A 振幅
+     * @param phi 位相
+     * @param ibi 周期（ms）
+     * @param systoleRatio 収縮期比率
+     * @param diastoleRatio 拡張期比率
      */
-    private void calculateDistortion(List<Double> beatSamples, double A, double phi, double ibi,
+    private void calculateDistortion(List<Double> beatSamples, List<Long> beatTimes, double A, double phi, double ibi,
                                      double systoleRatio, double diastoleRatio) {
         if (A < 1e-6) {
             currentE = 0;
@@ -675,30 +741,19 @@ public class SinBPDistortion {
         currentIBIms = T;
         
         // ピーク検出時に理想曲線の位相を再同期（位相フィルタリング適用）
-        // シンプルに：previousPeakTime を理想曲線のピーク位置に合わせる（前の拍を処理しているため）
-        // 理想曲線のピーク位置を探索して、その時刻をpreviousPeakTimeに対応させる
-        double maxValue = -1.0;
-        double peakPhaseTime = 0;
-        int searchSteps = 100;
-        for (int i = 0; i < searchSteps; i++) {
-            double t = (double) i * T / searchSteps;
-            double val = asymmetricSineBasis(t, T, systoleRatio, diastoleRatio);
-            if (val > maxValue) {
-                maxValue = val;
-                peakPhaseTime = t;
-            }
-        }
-        // 位相調整（実測値と理想曲線の位相整合のみ）
-        // 実測値のピーク位置に基づいて理想曲線の開始時刻を直接調整
+        // 実測値のピーク位置を正確に検出して理想曲線と同期
+        // 低心拍数では1拍のサンプル数が多くなるため、より正確な位相探索が必要
+        double peakPhaseTime = findPeakPhaseInBeat(beatSamples, beatTimes, T, systoleRatio, diastoleRatio);
+        
+        // 位相調整（実測値と理想曲線の位相整合）
         double phaseOffset = calculatePhaseOffset(peakPhaseTime, T);
-        peakPhaseTime = phaseOffset;
         
         Log.d(TAG + "-PhaseAdjust", String.format(
-                "Phase adjustment: original=%.1f, offset=%.1f, T=%.1f",
-                peakPhaseTime / 3, phaseOffset, T));
+                "Phase adjustment: peakPhaseTime=%.1f, offset=%.1f, T=%.1f, HR=%.1f",
+                peakPhaseTime, phaseOffset, T, 60000.0 / T));
         
-        // 位相フィルタリング + 重み付け調整を適用
-        double filteredPhaseTime = applyPhaseFiltering(peakPhaseTime);
+        // 位相フィルタリング + 重み付け調整を適用（心拍数に応じて動的に調整）
+        double filteredPhaseTime = applyPhaseFiltering(phaseOffset, T);
         
         // 理想曲線の開始時刻と終了時刻を設定（前の拍の範囲）
         // 前の拍のピーク時刻から次のピーク時刻（現在のピーク時刻）までが理想曲線の範囲
@@ -913,42 +968,134 @@ public class SinBPDistortion {
     }
     
     /**
-     * 位相フィルタリング + 重み付け調整を適用
+     * 位相フィルタリング + 重み付け調整を適用（心拍数に応じて動的に調整）
+     * @param rawPhaseTime 生の位相オフセット
+     * @param ibi 周期（ms）
+     * @return フィルタリング後の位相オフセット
      */
-    private double applyPhaseFiltering(double rawPhaseTime) {
+    private double applyPhaseFiltering(double rawPhaseTime, double ibi) {
+        // 心拍数を計算
+        double hr = 60000.0 / ibi;
+        
+        // 低心拍数（HR < 70）では、位相フィルタリングの重みを下げて、より迅速に同期を修正
+        // 高心拍数（HR > 90）では、従来通り強いフィルタリングを適用
+        double filterWeight;
+        if (hr < 70) {
+            // 低心拍数：重みを下げて（50%）、より迅速に同期を修正
+            filterWeight = 0.5;
+        } else if (hr < 90) {
+            // 中程度：60%の重み
+            filterWeight = 0.6;
+        } else {
+            // 高心拍数：従来通り70%の重み
+            filterWeight = 0.7;
+        }
+        
         // 1. 位相差を計算
         double phaseDifference = rawPhaseTime - lastPhaseShift;
         
-        // 2. 急激な変化を制限
-        if (Math.abs(phaseDifference) > MAX_PHASE_CHANGE) {
-            double sign = Math.signum(phaseDifference);
-            phaseDifference = sign * MAX_PHASE_CHANGE;
+        // 2. 急激な変化を制限（低心拍数ではより大きな変化を許容）
+        double maxChange = MAX_PHASE_CHANGE;
+        if (hr < 70) {
+            // 低心拍数では、より大きな位相変化を許容（周期が長いため）
+            maxChange = MAX_PHASE_CHANGE * 1.5;
         }
         
-        // 3. 重み付け調整（70%の重み）
-        double adjustedPhaseTime = lastPhaseShift + phaseDifference * 0.7;
+        if (Math.abs(phaseDifference) > maxChange) {
+            double sign = Math.signum(phaseDifference);
+            phaseDifference = sign * maxChange;
+            consecutiveFailedSyncs++;
+        } else {
+            // 同期が成功した場合はリセット
+            consecutiveFailedSyncs = 0;
+        }
         
-        // 4. 位相履歴に追加
+        // 3. 連続して同期に失敗した場合は、より積極的に位相を修正
+        if (consecutiveFailedSyncs >= MAX_FAILED_SYNCS) {
+            Log.w(TAG + "-PhaseFilter", String.format(
+                    "Too many failed syncs (%d), resetting phase", consecutiveFailedSyncs));
+            // 位相をリセットして、現在の位相を直接使用
+            lastPhaseShift = rawPhaseTime;
+            phaseHistory.clear();
+            phaseHistory.addLast(rawPhaseTime);
+            consecutiveFailedSyncs = 0;
+            return rawPhaseTime;
+        }
+        
+        // 4. 重み付け調整（心拍数に応じた動的な重み）
+        double adjustedPhaseTime = lastPhaseShift + phaseDifference * filterWeight;
+        
+        // 5. 位相履歴に追加
         phaseHistory.addLast(adjustedPhaseTime);
         if (phaseHistory.size() > 3) {
             phaseHistory.pollFirst();
         }
         
-        // 5. 移動平均フィルタ
+        // 6. 移動平均フィルタ
         double sum = 0.0;
         for (double phase : phaseHistory) {
             sum += phase;
         }
         double filteredPhaseTime = sum / phaseHistory.size();
         
-        // 6. 更新
+        // 7. 更新
         lastPhaseShift = filteredPhaseTime;
         
         Log.d(TAG + "-PhaseFilter", String.format(
-                "Phase filtering: raw=%.1f, adjusted=%.1f, filtered=%.1f",
-                rawPhaseTime, adjustedPhaseTime, filteredPhaseTime));
+                "Phase filtering: raw=%.1f, adjusted=%.1f, filtered=%.1f, HR=%.1f, weight=%.2f",
+                rawPhaseTime, adjustedPhaseTime, filteredPhaseTime, hr, filterWeight));
         
         return filteredPhaseTime;
+    }
+    
+    /**
+     * 1拍分のデータから実測値のピーク位置を正確に検出
+     * 低心拍数ではサンプル数が多くなるため、より正確な検出が必要
+     * @param beatSamples 1拍分のサンプル値
+     * @param beatTimes 1拍分の時刻（ms）
+     * @param T 周期（ms）
+     * @param systoleRatio 収縮期比率
+     * @param diastoleRatio 拡張期比率
+     * @return ピーク位置（ms、0からTの範囲）
+     */
+    private double findPeakPhaseInBeat(List<Double> beatSamples, List<Long> beatTimes, 
+                                       double T, double systoleRatio, double diastoleRatio) {
+        int N = beatSamples.size();
+        if (N < 3) {
+            return 0.0;
+        }
+        
+        // 実測値のピーク位置を検出（開始点がピークと仮定）
+        // ただし、ノイズの影響を考慮して、最初の20%の範囲で最大値を探索
+        int searchRange = Math.max(3, (int)(N * 0.2)); // 最初の20%の範囲
+        int peakIndex = 0;
+        double maxValue = Double.NEGATIVE_INFINITY;
+        
+        for (int i = 0; i < searchRange && i < N; i++) {
+            if (beatSamples.get(i) > maxValue) {
+                maxValue = beatSamples.get(i);
+                peakIndex = i;
+            }
+        }
+        
+        // ピーク位置を時刻に変換
+        long peakTime = beatTimes.get(peakIndex);
+        long startTime = beatTimes.get(0);
+        double peakPhaseTime = peakTime - startTime;
+        
+        // 周期内に正規化
+        while (peakPhaseTime < 0) {
+            peakPhaseTime += T;
+        }
+        while (peakPhaseTime >= T) {
+            peakPhaseTime -= T;
+        }
+        
+        Log.d(TAG + "-PeakFind", String.format(
+                "Found peak at index %d, phaseTime=%.1f ms (out of %.1f ms), N=%d",
+                peakIndex, peakPhaseTime, T, N));
+        
+        return peakPhaseTime;
     }
     
     /**
@@ -982,6 +1129,7 @@ public class SinBPDistortion {
         // 位相フィルタリング用のリセット
         phaseHistory.clear();
         lastPhaseShift = 0.0;
+        consecutiveFailedSyncs = 0;
         
         lastPeakValue = 0;
         lastPeakTime = 0;

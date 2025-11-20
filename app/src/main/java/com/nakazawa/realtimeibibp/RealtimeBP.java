@@ -73,19 +73,21 @@ public class RealtimeBP {
     private double lastPeakToValleyRelTTP; // 山→谷のrelTTP
     private double lastAmplitude; // 振幅（A）
 
-    // --- 回帰係数（暫定調整） ---
+    // --- 回帰係数（2025-11-19評価結果より最適化） ---
     // SBP: C0 + C1*A + C2*HR + C3*V2P_relTTP + C4*P2V_relTTP
-    private static final double C0 = 90.99418684531054;
-    private static final double C1 = -0.33103981867725246;
-    private static final double C2 = 0.38828017759845956;
-    private static final double C3 = 19.020251261188356;
-    private static final double C4 = -10.367306468369557;
+    // 注意: SBPはSinBP_Dが最適だが、RealTimeBPの係数も更新
+    private static final double C0 = 133.77490025413275;
+    private static final double C1 = 1.9997572883251764;
+    private static final double C2 = -0.38399670958208165;
+    private static final double C3 = -1.927205277981527;
+    private static final double C4 = -13.591847716565027;
     // DBP: D0 + D1*A + D2*HR + D3*V2P_relTTP + D4*P2V_relTTP
-    private static final double D0 = 71.8549569972503;
-    private static final double D1 = -0.3390322884709934;
-    private static final double D2 = 0.37363763271379236;
-    private static final double D3 = 30.307750213574913;
-    private static final double D4 = -4.358409966514669;
+    // RealTimeBPが最適（MAPE: 25.39%, RMSE: 24.12 mmHg）
+    private static final double D0 = 61.19320908587856;
+    private static final double D1 = 0.3288750385838032;
+    private static final double D2 = 0.586981343790007;
+    private static final double D3 = 19.96143223147578;
+    private static final double D4 = 3.009385177749186;
 
     /**
      * BaseLogicからのコールバック用メソッド
