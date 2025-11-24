@@ -47,10 +47,10 @@ RESAMPLE_RATE_HZ = 30.0  # beatsデータをリサンプリングする周波数
 
 def extract_session_key(name: str) -> Optional[str]:
     """
-    ファイル名から IT/NY + 数字のセッションキーを抽出する (例: IT1, NY3)
+    ファイル名から任意の2文字のイニシャル + 数字のセッションキーを抽出する (例: IT1, NY3, GE1, AB5)
     """
     stem = Path(name).stem
-    match = re.search(r"(IT|NY)\s*[-_]?\s*(\d+)", stem, flags=re.IGNORECASE)
+    match = re.search(r"([A-Za-z]{2})\s*[-_]?\s*(\d+)", stem)
     if not match:
         return None
     return f"{match.group(1).upper()}{match.group(2)}"
@@ -154,7 +154,7 @@ def remove_outliers_from_beats(df: pd.DataFrame) -> pd.DataFrame:
     if removed_physio > 0:
         print(f"    beats: 生理学的範囲外を除去: {removed_physio} サンプル")
     
-    # 2. 統計的外れ値検出（±3σ）
+    # 2. 統計的外れ値検出（±3.5σ）
     if len(df_clean) >= 3:
         for col in ["SBP", "DBP"]:
             mean_val = df_clean[col].mean()
@@ -162,12 +162,12 @@ def remove_outliers_from_beats(df: pd.DataFrame) -> pd.DataFrame:
             
             if std_val > 0:
                 z_scores = np.abs((df_clean[col] - mean_val) / std_val)
-                outlier_mask = z_scores > 3.0
+                outlier_mask = z_scores > 3.5
                 removed_stats = outlier_mask.sum()
                 
                 if removed_stats > 0:
                     df_clean.loc[outlier_mask, col] = np.nan
-                    print(f"    beats: {col}の統計的外れ値（±3σ）を除去: {removed_stats} サンプル")
+                    print(f"    beats: {col}の統計的外れ値（±3.5σ）を除去: {removed_stats} サンプル")
         
         df_clean = df_clean.dropna(subset=["SBP", "DBP"])
     
@@ -191,12 +191,12 @@ def remove_outliers_from_beats(df: pd.DataFrame) -> pd.DataFrame:
                 neighbor_mean = (prev_val + next_val) / 2.0
                 diff = abs(curr_val - neighbor_mean)
                 
-                if diff > 3.0 * std_val:
+                if diff > 3.5 * std_val:
                     df_clean.loc[df_clean.index[i], col] = np.nan
                     removed_temporal += 1
         
         if removed_temporal > 0:
-            print(f"    beats: 時系列的外れ値（前後との差>3σ）を除去: {removed_temporal} サンプル")
+            print(f"    beats: 時系列的外れ値（前後との差>3.5σ）を除去: {removed_temporal} サンプル")
             df_clean = df_clean.dropna(subset=["SBP", "DBP"])
     
     final_count = len(df_clean)

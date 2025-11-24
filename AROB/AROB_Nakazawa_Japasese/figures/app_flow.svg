@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 500">
+  <!-- Definitions for arrow markers -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#333"/>
+    </marker>
+  </defs>
+
+  <!-- Styles -->
+  <style>
+    .box { fill: #f0f8ff; stroke: #4682b4; stroke-width: 2; rx: 10; ry: 10; }
+    .text { font-family: sans-serif; font-size: 14px; text-anchor: middle; fill: #333; }
+    .arrow { stroke: #333; stroke-width: 2; marker-end: url(#arrowhead); fill: none; }
+    .label { font-family: sans-serif; font-size: 12px; fill: #666; text-anchor: middle; }
+    .group-box { fill: none; stroke: #ccc; stroke-width: 1; stroke-dasharray: 5,5; rx: 10; ry: 10; }
+  </style>
+
+  <!-- 1. Input -->
+  <rect x="50" y="220" width="120" height="60" class="box" />
+  <text x="110" y="245" class="text">Smartphone</text>
+  <text x="110" y="265" class="text">Camera (30fps)</text>
+
+  <!-- 2. Preprocessing -->
+  <rect x="220" y="220" width="140" height="60" class="box" />
+  <text x="290" y="245" class="text">Green Signal</text>
+  <text x="290" y="265" class="text">Extraction</text>
+
+  <!-- Arrow Input -> Preprocessing -->
+  <path d="M170 250 L220 250" class="arrow" />
+
+  <!-- Branch 1: RTBP (Top) -->
+  <rect x="500" y="50" width="160" height="60" class="box" />
+  <text x="580" y="75" class="text">RTBP</text>
+  <text x="580" y="95" class="text">(Ridge Reg.)</text>
+  
+  <!-- Branch 2: sinBP(M) (Middle) -->
+  <rect x="400" y="220" width="140" height="60" class="box" />
+  <text x="470" y="245" class="text">Sin Wave</text>
+  <text x="470" y="265" class="text">Fitting</text>
+
+  <rect x="650" y="220" width="160" height="60" class="box" />
+  <text x="730" y="245" class="text">sinBP(M)</text>
+  <text x="730" y="265" class="text">(Ridge Reg.)</text>
+
+  <!-- Branch 3: sinBP(D) (Bottom) -->
+  <rect x="400" y="380" width="140" height="60" class="box" />
+  <text x="470" y="405" class="text">Distortion</text>
+  <text x="470" y="425" class="text">Calculation</text>
+
+  <rect x="650" y="380" width="160" height="60" class="box" />
+  <text x="730" y="405" class="text">sinBP(D)</text>
+  <text x="730" y="425" class="text">(Ridge Reg.)</text>
+
+  <!-- Edges -->
+  
+  <!-- To RTBP -->
+  <path d="M360 250 L380 250 L380 80 L500 80" class="arrow" />
+  
+  <!-- To Sin Wave Fitting -->
+  <path d="M360 250 L400 250" class="arrow" />
+
+  <!-- To sinBP(M) -->
+  <path d="M540 250 L650 250" class="arrow" />
+
+  <!-- To Distortion Calculation (from Green Signal) -->
+  <path d="M360 250 L380 250 L380 410 L400 410" class="arrow" />
+  
+  <!-- To Distortion Calculation (from Sin Wave Fitting) -->
+  <path d="M470 280 L470 380" class="arrow" />
+
+  <!-- To sinBP(D) -->
+  <path d="M540 410 L650 410" class="arrow" />
+
+  <!-- Labels -->
+  <text x="440" y="70" class="label">Green Signal</text>
+  <text x="595" y="240" class="label">Sin Params (A, Mean, Phi)</text>
+  <text x="595" y="400" class="label">Distortion (E, Stiffness)</text>
+  <text x="485" y="340" class="label">Sin Wave</text>
+
+</svg>
