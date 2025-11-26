@@ -356,6 +356,9 @@ def save_scatter_plot(
     ax.legend(loc="upper left", fontsize=8)
     fig.tight_layout()
     fig.savefig(output_path, format="svg")
+    # Save as PNG as well
+    png_path = output_path.with_suffix(".png")
+    fig.savefig(png_path, format="png", dpi=300)
     plt.close(fig)
 
 
@@ -388,6 +391,9 @@ def save_bland_altman_plot(
     ax.legend(loc="best", fontsize=8)
     fig.tight_layout()
     fig.savefig(output_path, format="svg")
+    # Save as PNG as well
+    png_path = output_path.with_suffix(".png")
+    fig.savefig(png_path, format="png", dpi=300)
     plt.close(fig)
 
 

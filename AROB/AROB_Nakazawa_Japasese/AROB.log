@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.10.8)  24 NOV 2025 12:05
+This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.10.8)  26 NOV 2025 17:02
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -587,8 +587,30 @@ Underfull \hbox (badness 10000) has occurred while \output is active
  []
 
 [2]
-File: figures/app_flow.png Graphic file (type bmp)
-<figures/app_flow.png>
+File: figures/RealTimeBP_SBP_bland_altman.png Graphic file (type bmp)
+<figures/RealTimeBP_SBP_bland_altman.png>
+File: figures/SinBP_M_SBP_bland_altman.png Graphic file (type bmp)
+<figures/SinBP_M_SBP_bland_altman.png>
+File: figures/SinBP_D_SBP_bland_altman.png Graphic file (type bmp)
+<figures/SinBP_D_SBP_bland_altman.png>
+File: figures/RealTimeBP_DBP_bland_altman.png Graphic file (type bmp)
+<figures/RealTimeBP_DBP_bland_altman.png>
+File: figures/SinBP_M_DBP_bland_altman.png Graphic file (type bmp)
+<figures/SinBP_M_DBP_bland_altman.png>
+File: figures/SinBP_D_DBP_bland_altman.png Graphic file (type bmp)
+<figures/SinBP_D_DBP_bland_altman.png>
+File: figures/comparison_SBP_barplot_MAE.png Graphic file (type bmp)
+<figures/comparison_SBP_barplot_MAE.png>
+File: figures/comparison_SBP_barplot_RMSE.png Graphic file (type bmp)
+<figures/comparison_SBP_barplot_RMSE.png>
+File: figures/comparison_SBP_barplot_MAPE.png Graphic file (type bmp)
+<figures/comparison_SBP_barplot_MAPE.png>
+File: figures/comparison_DBP_barplot_MAE.png Graphic file (type bmp)
+<figures/comparison_DBP_barplot_MAE.png>
+File: figures/comparison_DBP_barplot_RMSE.png Graphic file (type bmp)
+<figures/comparison_DBP_barplot_RMSE.png>
+File: figures/comparison_DBP_barplot_MAPE.png Graphic file (type bmp)
+<figures/comparison_DBP_barplot_MAPE.png>
 
 
 
@@ -599,6 +621,12 @@ Underfull \hbox (badness 10000) has occurred while \output is active
  []
 
 [3]
+Underfull \hbox (badness 1509) in paragraph at lines 379--383
+[]\TU/HiraginoMinchoProN(0)/m/n/10 本 研 究 の 主 な 貢 献 は 以 下 の 通 り で あ る。| \TU/lmr/
+m/n/10 (1)
+ []
+
+
 
 
 
@@ -608,206 +636,47 @@ Underfull \hbox (badness 10000) has occurred while \output is active
  []
 
 [4]
-
-
-
-
-Underfull \hbox (badness 10000) has occurred while \output is active
-[]
- []
-
-[5]
-
-
-Overfull \hbox (16.42168pt too wide) in paragraph at lines 505--513
- [][] 
- []
-
-File: figures/Waveform_sinWave_scatter.png Graphic file (type bmp)
-<figures/Waveform_sinWave_scatter.png>
-
-
-
-Underfull \hbox (badness 10000) has occurred while \output is active
-[]
- []
-
-[6]
-Overfull \hbox (30.06165pt too wide) in paragraph at lines 535--544
- [][] 
- []
-
-
-Overfull \hbox (30.06165pt too wide) in paragraph at lines 550--559
- [][] 
- []
-
-
-Underfull \hbox (badness 6078) in paragraph at lines 561--562
-[]\TU/HiraginoMinchoProN(0)/m/n/10 結 果 と し て、|  提 案 手 法 で あ る \TU/lmr/bx/n/10 s
-inBP(D)
- []
-
-
-Underfull \hbox (badness 2951) in paragraph at lines 561--562
-\TU/HiraginoMinchoProN(0)/m/n/10 が、| \TU/lmr/m/n/10 SBP |\TU/HiraginoMinchoProN
-(0)/m/n/10 ・| \TU/lmr/m/n/10 DBP \TU/HiraginoMinchoProN(0)/m/n/10 と も に 最 も 高 い
- 精 度  |（最 小 の
- []
-
-File: figures/comparison_SBP_barplot.png Graphic file (type bmp)
-<figures/comparison_SBP_barplot.png>
-File: figures/comparison_DBP_barplot.png Graphic file (type bmp)
-<figures/comparison_DBP_barplot.png>
-
-
-File: figures/sinBP_D_SBP_scatter.png Graphic file (type bmp)
-<figures/sinBP_D_SBP_scatter.png>
-File: figures/sinBP_D_SBP_bland_altman.png Graphic file (type bmp)
-<figures/sinBP_D_SBP_bland_altman.png>
-
-Underfull \hbox (badness 1348) in paragraph at lines 593--593
-[]\TU/lmr/bx/n/10 Fig. 6\TU/lmr/m/n/10 .  Bland-Altman plot of SBP estimation
- []
-
-
-
-
-Underfull \hbox (badness 10000) has occurred while \output is active
-[]
- []
-
-[7]
-
-
-
-
-Underfull \hbox (badness 10000) has occurred while \output is active
-[]
- []
-
-[8]
-
-Package xeCJK Warning: Unknown CJK family `\CJKttdefault' is being ignored.
-(xeCJK)                
-(xeCJK)                Try to use `\setCJKmonofont[<...>]{<...>}' to define
-(xeCJK)                it.
-
-
-Overfull \hbox (157.15158pt too wide) in paragraph at lines 692--692
-[]\TU/lmtt/m/n/10 public void calculateDistortion(ArrayList<Double> beatSamples
-, double ibi) {[] 
- []
-
-
-Overfull \hbox (10.15158pt too wide) in paragraph at lines 692--692
-[]    \TU/lmtt/m/n/10 // 1 \TU/HiraginoMinchoProN(0)/m/n/10 拍 遅 延 で 比 率 を 計 算 （
- 前 の 拍 の 比 率 を 使 用 ） [] 
- []
-
-
-
-
-Overfull \hbox (167.65158pt too wide) in paragraph at lines 692--692
-[]        \TU/lmtt/m/n/10 double sNorm = asymmetricsineBasis(t, T, systoleRatio
-, diastoleRatio);[] 
- []
-
-
-Overfull \hbox (46.90158pt too wide) in paragraph at lines 692--692
-[]        \TU/lmtt/m/n/10 double error = beatSamples.get(i) - idealValue;[] 
- []
-
-
-Overfull \hbox (62.65158pt too wide) in paragraph at lines 692--692
-[]    \TU/lmtt/m/n/10 currentE = Math.sqrt(sumSquaredError / N);  // RMS \TU/Hi
-raginoMinchoProN(0)/m/n/10 誤 差 [] 
- []
-
-
-Underfull \hbox (badness 10000) detected at line 715
+Underfull \hbox (badness 10000) detected at line 387
 []\TU/lmr/m/n/10 [1][]
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 716--717
-[]\TU/lmr/m/n/10 World Health Organization. ”Hyperten-
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 716--717
-\TU/lmr/m/n/10 sion.” World Health Organization, 2023.
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 716--717
-\TU/lmr/m/n/10 https://www.who.int/news-room/fact-
- []
-
-
-Underfull \hbox (badness 10000) detected at line 718
+Underfull \hbox (badness 10000) detected at line 390
 []\TU/lmr/m/n/10 [2][]
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 719--720
-[]\TU/lmr/m/n/10 Whelton, Paul K., et al. ”2017
- []
-
-
-Overfull \hbox (102.42157pt too wide) in paragraph at lines 719--720
-\TU/lmr/m/n/10 ACC/AHA/AAPA/ABC/ACPM/AGS/APhA/ASH/ASPC/NMA/PCNA
- []
-
-
-Underfull \hbox (badness 10000) detected at line 721
+Underfull \hbox (badness 10000) detected at line 393
 []\TU/lmr/m/n/10 [3][]
  []
 
 
-Underfull \hbox (badness 10000) detected at line 724
+Underfull \hbox (badness 10000) detected at line 396
 []\TU/lmr/m/n/10 [4][]
  []
 
 
-Underfull \hbox (badness 10000) detected at line 727
+Underfull \hbox (badness 10000) detected at line 399
 []\TU/lmr/m/n/10 [5][]
  []
 
 
-Underfull \hbox (badness 10000) detected at line 730
+Underfull \hbox (badness 10000) detected at line 402
 []\TU/lmr/m/n/10 [6][]
  []
 
 
-
-
-Underfull \hbox (badness 10000) has occurred while \output is active
-[]
- []
-
-[9]
-Underfull \hbox (badness 10000) detected at line 733
+Underfull \hbox (badness 10000) detected at line 405
 []\TU/lmr/m/n/10 [7][]
  []
 
 
-Underfull \hbox (badness 10000) detected at line 736
+Underfull \hbox (badness 10000) detected at line 408
 []\TU/lmr/m/n/10 [8][]
  []
 
 
-Underfull \hbox (badness 1337) in paragraph at lines 737--738
-[]\TU/lmr/m/n/10 Zhang, Liang, et al. ”Developing personalized
- []
-
-
-Underfull \hbox (badness 1803) in paragraph at lines 737--738
-\TU/lmr/m/n/10 able sensors data using minimally-trained do-
- []
-
-
-Underfull \hbox (badness 10000) detected at line 739
+Underfull \hbox (badness 10000) detected at line 411
 []\TU/lmr/m/n/10 [9][]
  []
 
@@ -820,25 +689,19 @@ Underfull \hbox (badness 10000) has occurred while \output is active
 []
  []
 
-[10
-
-] (./AROB.aux)
+[5] (./AROB.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2022/08/05>
  ***********
-
-
-LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
-
  ) 
 Here is how much of TeX's memory you used:
- 9229 strings out of 473832
- 247538 string characters out of 5729481
- 736209 words of memory out of 5000000
- 32084 multiletter control sequences out of 15000+600000
+ 9178 strings out of 473832
+ 242857 string characters out of 5729481
+ 721209 words of memory out of 5000000
+ 32027 multiletter control sequences out of 15000+600000
  583078 words of font info for 148 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 94i,12n,93p,525b,491s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 94i,12n,93p,525b,341s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
-Output written on AROB.pdf (10 pages).
+Output written on AROB.pdf (5 pages).

@@ -119,6 +119,9 @@ def save_scatter_plot(
     ax.legend(loc="upper left", fontsize=10)
     fig.tight_layout()
     fig.savefig(output_path, format="svg", bbox_inches="tight")
+    # Save as PNG as well
+    png_path = output_path.with_suffix(".png")
+    fig.savefig(png_path, format="png", bbox_inches="tight", dpi=300)
     plt.close(fig)
 
 
@@ -160,6 +163,9 @@ def save_bland_altman_plot(
     ax.legend(loc="best", fontsize=10)
     fig.tight_layout()
     fig.savefig(output_path, format="svg", bbox_inches="tight")
+    # Save as PNG as well
+    png_path = output_path.with_suffix(".png")
+    fig.savefig(png_path, format="png", bbox_inches="tight", dpi=300)
     plt.close(fig)
 
 
@@ -169,7 +175,7 @@ def save_comparison_barplot(
     output_path: Path,
 ) -> None:
     """
-    3手法の比較バーグラフを生成・保存
+    3手法の比較バーグラフを生成・保存（各メトリックを個別の正方形画像として保存）
     """
     methods = []
     mae_means = []
@@ -189,43 +195,68 @@ def save_comparison_barplot(
         mape_stds.append(res["mape_std"])
     
     x = np.arange(len(methods))
-    width = 0.25
+    width = 0.6  # Wider bars for single plot
     
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5), dpi=150)
+    # Get output directory and base name
+    output_dir = output_path.parent
+    base_name = output_path.stem  # e.g., "comparison_SBP_barplot"
     
-    # MAE
-    ax1.bar(x - width, mae_means, width, yerr=mae_stds, label="MAE", alpha=0.8, capsize=5)
-    ax1.set_xlabel("Method", fontsize=12)
-    ax1.set_ylabel("MAE (mmHg)", fontsize=12)
-    ax1.set_title(f"{target} - Mean Absolute Error", fontsize=13, fontweight="bold")
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(methods, rotation=15, ha="right")
-    ax1.grid(True, axis="y", linestyle="--", alpha=0.3)
-    ax1.legend()
+    # Create 3 separate square plots
+    # 1. MAE
+    fig_mae, ax_mae = plt.subplots(1, 1, figsize=(6, 6), dpi=150)
+    ax_mae.bar(x, mae_means, width, yerr=mae_stds, alpha=0.8, capsize=5, color='#1f77b4')
+    ax_mae.set_xlabel("Method", fontsize=14, fontweight='bold')
+    ax_mae.set_ylabel("MAE (mmHg)", fontsize=14, fontweight='bold')
+    ax_mae.set_title(f"{target} - MAE", fontsize=16, fontweight="bold", pad=15)
+    ax_mae.set_xticks(x)
+    ax_mae.set_xticklabels(methods, rotation=0, ha="center", fontsize=12)
+    ax_mae.grid(True, axis="y", linestyle="--", alpha=0.3)
+    ax_mae.tick_params(axis='both', which='major', labelsize=11)
+    fig_mae.tight_layout()
+    mae_path_svg = output_dir / f"{base_name}_MAE.svg"
+    mae_path_png = output_dir / f"{base_name}_MAE.png"
+    fig_mae.savefig(mae_path_svg, format="svg", bbox_inches="tight")
+    fig_mae.savefig(mae_path_png, format="png", bbox_inches="tight", dpi=150)
+    plt.close(fig_mae)
     
-    # RMSE
-    ax2.bar(x, rmse_means, width, yerr=rmse_stds, label="RMSE", alpha=0.8, capsize=5, color="orange")
-    ax2.set_xlabel("Method", fontsize=12)
-    ax2.set_ylabel("RMSE (mmHg)", fontsize=12)
-    ax2.set_title(f"{target} - Root Mean Squared Error", fontsize=13, fontweight="bold")
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(methods, rotation=15, ha="right")
-    ax2.grid(True, axis="y", linestyle="--", alpha=0.3)
-    ax2.legend()
+    # 2. RMSE
+    fig_rmse, ax_rmse = plt.subplots(1, 1, figsize=(6, 6), dpi=150)
+    ax_rmse.bar(x, rmse_means, width, yerr=rmse_stds, alpha=0.8, capsize=5, color='#ff7f0e')
+    ax_rmse.set_xlabel("Method", fontsize=14, fontweight='bold')
+    ax_rmse.set_ylabel("RMSE (mmHg)", fontsize=14, fontweight='bold')
+    ax_rmse.set_title(f"{target} - RMSE", fontsize=16, fontweight="bold", pad=15)
+    ax_rmse.set_xticks(x)
+    ax_rmse.set_xticklabels(methods, rotation=0, ha="center", fontsize=12)
+    ax_rmse.grid(True, axis="y", linestyle="--", alpha=0.3)
+    ax_rmse.tick_params(axis='both', which='major', labelsize=11)
+    fig_rmse.tight_layout()
+    rmse_path_svg = output_dir / f"{base_name}_RMSE.svg"
+    rmse_path_png = output_dir / f"{base_name}_RMSE.png"
+    fig_rmse.savefig(rmse_path_svg, format="svg", bbox_inches="tight")
+    fig_rmse.savefig(rmse_path_png, format="png", bbox_inches="tight", dpi=150)
+    plt.close(fig_rmse)
     
-    # MAPE
-    ax3.bar(x + width, mape_means, width, yerr=mape_stds, label="MAPE", alpha=0.8, capsize=5, color="green")
-    ax3.set_xlabel("Method", fontsize=12)
-    ax3.set_ylabel("MAPE (%)", fontsize=12)
-    ax3.set_title(f"{target} - Mean Absolute Percentage Error", fontsize=13, fontweight="bold")
-    ax3.set_xticks(x)
-    ax3.set_xticklabels(methods, rotation=15, ha="right")
-    ax3.grid(True, axis="y", linestyle="--", alpha=0.3)
-    ax3.legend()
+    # 3. MAPE
+    fig_mape, ax_mape = plt.subplots(1, 1, figsize=(6, 6), dpi=150)
+    ax_mape.bar(x, mape_means, width, yerr=mape_stds, alpha=0.8, capsize=5, color='#2ca02c')
+    ax_mape.set_xlabel("Method", fontsize=14, fontweight='bold')
+    ax_mape.set_ylabel("MAPE (%)", fontsize=14, fontweight='bold')
+    ax_mape.set_title(f"{target} - MAPE", fontsize=16, fontweight="bold", pad=15)
+    ax_mape.set_xticks(x)
+    ax_mape.set_xticklabels(methods, rotation=0, ha="center", fontsize=12)
+    ax_mape.grid(True, axis="y", linestyle="--", alpha=0.3)
+    ax_mape.tick_params(axis='both', which='major', labelsize=11)
+    fig_mape.tight_layout()
+    mape_path_svg = output_dir / f"{base_name}_MAPE.svg"
+    mape_path_png = output_dir / f"{base_name}_MAPE.png"
+    fig_mape.savefig(mape_path_svg, format="svg", bbox_inches="tight")
+    fig_mape.savefig(mape_path_png, format="png", bbox_inches="tight", dpi=150)
+    plt.close(fig_mape)
     
-    fig.tight_layout()
-    fig.savefig(output_path, format="svg", bbox_inches="tight")
-    plt.close(fig)
+    print(f"  Individual barplots saved:")
+    print(f"    MAE: {mae_path_svg} and {mae_path_png}")
+    print(f"    RMSE: {rmse_path_svg} and {rmse_path_png}")
+    print(f"    MAPE: {mape_path_svg} and {mape_path_png}")
 
 def remove_outliers(df, target_col, time_col=None, subject_col="subject_id"):
     """
