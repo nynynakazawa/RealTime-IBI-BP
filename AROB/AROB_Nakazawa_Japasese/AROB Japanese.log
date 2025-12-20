@@ -1,9 +1,9 @@
-This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.10.8)  17 DEC 2025 22:33
+This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.10.8)  17 DEC 2025 22:03
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
-**AROB.tex
-(./AROB.tex
+**"AROB Japanese.tex"
+(./AROB Japanese.tex
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
 (./AROB.cls (/usr/local/texlive/2025/texmf-dist/tex/latex/psnfss/times.sty
@@ -489,8 +489,8 @@ Package fontspec Info:
 (fontspec)             - 'bold italic' (b/it) with NFSS spec.: <->"Hiragino
 (fontspec)             Mincho ProN/BI/OT:script=hani;language=dflt;"
 
- (./AROB.aux)
-\openout1 = `AROB.aux'.
+ (./AROB Japanese.aux)
+\openout1 = `"AROB Japanese.aux"'.
 
 LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 29.
 LaTeX Font Info:    ... okay on input line 29.
@@ -581,32 +581,12 @@ Underfull \hbox (badness 10000) has occurred while \output is active
 
 
 ]
-Underfull \hbox (badness 2846) in paragraph at lines 106--107
-[]\TU/lmr/m/n/10 An interaction term $\OML/cmm/m/it/10 E[]$ \TU/lmr/m/n/10 capt
-ures amplitude-
+Overfull \hbox (1.91324pt too wide) detected at line 75
+$\OML/cmm/m/it/10 ^^R\OT1/cmr/m/n/10 (\OML/cmm/m/it/10 t\OT1/cmr/m/n/10 ) = []$
+  
  []
 
 
-
-
-Underfull \hbox (badness 5490) in paragraph at lines 124--125
-[]\TU/lmr/m/n/10 (3) sinBP(D): Augments RTBP features with
- []
-
-
-Underfull \hbox (badness 1708) in paragraph at lines 145--147
-[]\TU/lmr/m/n/10 Ethics: The study followed the Declaration of
- []
-
-
-Underfull \hbox (badness 1490) in paragraph at lines 145--147
-\TU/lmr/m/n/10 Helsinki and received institutional ethics approval.
- []
-
-
-Underfull \hbox (badness 1303) in paragraph at lines 160--162
-\TU/lmr/m/n/10 RMSE [mmHg], and MAPE [%]. AAMI criteria
- []
 
 
 
@@ -641,20 +621,9 @@ File: figures/comparison_DBP_barplot_RMSE.png Graphic file (type bmp)
 File: figures/comparison_DBP_barplot_MAPE.png Graphic file (type bmp)
 <figures/comparison_DBP_barplot_MAPE.png>
 
-Underfull \hbox (badness 1038) in paragraph at lines 267--269
-\TU/lmr/m/n/10 index $\OML/cmm/m/it/10 E$ \TU/lmr/m/n/10 exhibited large positi
-ve coefficients (SBP:
- []
 
 
-Underfull \vbox (badness 1048) has occurred while \output is active []
-
-
-
-
-Underfull \hbox (badness 2582) in paragraph at lines 287--288
-[]\TU/lmr/m/n/10 Furthermore, sinBP(D) outperforming sinBP(M)
- []
+Underfull \vbox (badness 4048) has occurred while \output is active []
 
 
 
@@ -664,26 +633,14 @@ Underfull \hbox (badness 10000) has occurred while \output is active
  []
 
 [3]
-Underfull \hbox (badness 10000) detected at line 303
+
+
+Underfull \hbox (badness 10000) detected at line 286
 []\TU/lmr/m/n/10 [1][]
  []
 
 
-Underfull \hbox (badness 10000) detected at line 306
-[]\TU/lmr/m/n/10 [2][]
- []
-
-
-
-
-Underfull \hbox (badness 10000) detected at line 309
-[]\TU/lmr/m/n/10 [3][]
- []
-
-
-Underfull \hbox (badness 10000) detected at line 312
-[]\TU/lmr/m/n/10 [4][]
- []
+Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 
@@ -693,27 +650,42 @@ Underfull \hbox (badness 10000) has occurred while \output is active
  []
 
 [4]
-Underfull \hbox (badness 10000) detected at line 315
+Underfull \hbox (badness 10000) detected at line 289
+[]\TU/lmr/m/n/10 [2][]
+ []
+
+
+Underfull \hbox (badness 10000) detected at line 292
+[]\TU/lmr/m/n/10 [3][]
+ []
+
+
+Underfull \hbox (badness 10000) detected at line 295
+[]\TU/lmr/m/n/10 [4][]
+ []
+
+
+Underfull \hbox (badness 10000) detected at line 298
 []\TU/lmr/m/n/10 [5][]
  []
 
 
-Underfull \hbox (badness 10000) detected at line 318
+Underfull \hbox (badness 10000) detected at line 301
 []\TU/lmr/m/n/10 [6][]
  []
 
 
-Underfull \hbox (badness 10000) detected at line 321
+Underfull \hbox (badness 10000) detected at line 304
 []\TU/lmr/m/n/10 [7][]
  []
 
 
-Underfull \hbox (badness 10000) detected at line 324
+Underfull \hbox (badness 10000) detected at line 307
 []\TU/lmr/m/n/10 [8][]
  []
 
 
-Underfull \hbox (badness 10000) detected at line 327
+Underfull \hbox (badness 10000) detected at line 310
 []\TU/lmr/m/n/10 [9][]
  []
 
@@ -726,21 +698,19 @@ Underfull \hbox (badness 10000) has occurred while \output is active
 []
  []
 
-[5
-
-] (./AROB.aux)
+[5] (./AROB Japanese.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2022/08/05>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 8982 strings out of 473832
- 229812 string characters out of 5729481
- 694035 words of memory out of 5000000
- 31839 multiletter control sequences out of 15000+600000
- 583022 words of font info for 141 fonts, out of 8000000 for 9000
+ 9099 strings out of 473832
+ 237603 string characters out of 5729481
+ 724229 words of memory out of 5000000
+ 31947 multiletter control sequences out of 15000+600000
+ 583086 words of font info for 149 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 94i,11n,93p,1072b,341s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 94i,11n,93p,536b,341s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
-Output written on AROB.pdf (5 pages).
+Output written on AROB Japanese.pdf (5 pages).

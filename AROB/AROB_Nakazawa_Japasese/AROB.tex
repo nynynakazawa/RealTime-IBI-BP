@@ -7,23 +7,23 @@
 \usepackage{svg}
 \setCJKmainfont{Hiragino Mincho ProN}
 
-\title{可視カメラ 30fps 環境の PPG に最適化した\\
-非対称サイン波モデル残差に基づく血圧推定}
+\title{Blood Pressure Estimation Based on Asymmetric Sine Wave Model\\
+Residuals Optimized for PPG in 30fps Visible Camera Environment}
 
-\author{中澤 祐介${}^{1\dagger}$，南雲健人${}^{1}$，野澤昭雄${}^{1}$}
+\author{Yusuke Nakazawa${}^{1\dagger}$, Kent Nagumo${}^{1}$, Akio Nozawa${}^{1}$}
 % The dagger symbol indicates the presenter.
-\speaker{中澤 祐介}
+\speaker{Yusuke Nakazawa}
 
-\affils{${}^{1}$青山学院大学大学院理工学研究科 電気電子工学専攻\\
+\affils{${}^{1}$Department of Electrical and Electronic Engineering, Graduate School of Science and Engineering, Aoyama Gakuin University\\
 (Tel: 080-5326-3916; E-mail: nynynakazawa@gmail.com)\\
 }
 
 \abstract{%
-スマートフォン可視カメラ由来の擬似PPGに対し、周波数分解に依存しない新規な血圧推定手法を提案する。30fpsという低サンプリングレート環境において、従来の周波数解析アプローチは高次高調波の正確な抽出が困難である。本研究では、既存の形態学的特徴量アプローチ(RTBP:RealTimeBloodPressure)をベースラインとして採用し、新規に提案する2つの手法を実装し、比較する。第一に、sin波フィットのパラメータ(振幅、位相、平均値)を直接特徴量として使用した線形回帰モデル(sinBP(M): sinBP(Model))である。第二に、生理学的に妥当な非対称サイン波モデルからの残差(歪み指標E)を特徴量として使用した3段階推定モデル(sinBP(D): sinBP(Distortion))である。sinBP(M)とsinBP(D)は、PPG波形の本質的な特性を抽出し、ノイズの影響を受けにくい安定した血圧推定を実現する。本研究の評価は、連続血圧計を参照として、30fps可視カメラのrPPG環境を使用した3つの異なる血圧推定手法(RTBP、sinBP(M)、sinBP(D))を比較し、新規手法の優位性を検証する。
+We propose a novel blood pressure estimation method for pseudo-PPG signals from smartphone visible cameras that does not rely on frequency decomposition. At a low sampling rate of 30\,fps, conventional frequency-based approaches struggle to extract high-order harmonics accurately. This study adopts the morphological feature approach RTBP (RealTimeBloodPressure) as a baseline and compares two newly proposed methods. The first, sinBP(M), uses the asymmetric sine wave fit parameters (amplitude, phase, mean) directly as regression features. The second, sinBP(D), augments RTBP features with the model residual (distortion index $E$) derived from a physiologically motivated asymmetric sine wave model. Both sinBP(M) and sinBP(D) capture essential waveform characteristics and provide stable blood pressure estimation with reduced noise sensitivity. This study compares RTBP, sinBP(M), and sinBP(D) against a clinical-grade continuous blood pressure monitor in a 30\,fps visible-camera rPPG environment and demonstrates the superiority of the proposed methods.
 }
 
 \keywords{%
-血圧推定、光電容積脈波、スマートフォン、非対称サイン波モデル、歪み指標
+Blood pressure estimation, Photoplethysmography, Smartphone, Asymmetric sine wave model, Distortion index
 }
 
 \begin{document}
@@ -32,176 +32,146 @@
 
 %-----------------------------------------------------------------------
 
-\section{序論}
+\section{Introduction}
 
-\subsection{背景と動機}
-連続的な非侵襲血圧モニタリングは、心血管疾患の早期発見・管理に不可欠である\cite{ref1,ref2}。近年、スマートフォンの可視カメラを用いた光電容積脈波(PPG)による血圧推定が注目されている\cite{ref3}。しかし、スマホカメラは30fpsと低フレームレートであり、可視光特有の照明変動やノイズの影響を受けやすい。これらの制約により、微細な特徴点(ピークやTTP)に依存する形態学的解析や、高次高調波を必要とする周波数解析は、位相ゆらぎ等に対して脆弱である\cite{ref4,ref5}。
+Continuous non-invasive blood pressure monitoring is essential for the early detection and management of cardiovascular diseases \cite{ref1,ref2}. In recent years, photoplethysmography (PPG) obtained from smartphone visible cameras has attracted attention as a simple, non-invasive blood pressure estimation modality \cite{ref3}.
 
-\subsection{従来研究の課題と本研究のアプローチ}
-従来のPPG血圧推定は、主に(1)形態学的特徴量(ピーク、TTP等)\cite{ref6}、(2)周波数解析(FFT等)\cite{ref7}、(3)機械学習(深層学習等)\cite{ref8}に分類される。しかし、30fps環境では、サンプリング点が粗く微細な形状変化を捉えきれないため、点に依存する形態学的特徴量は不安定となる。また、ナイキスト周波数が低く(15Hz)、周波数解析も困難である。
+PPG waveform features reflect underlying vascular physiology. Amplitude ($A$) indicates vascular distensibility and stroke volume \cite{ref3,ref4}, while peak interval reflects autonomic activity. Relative time-to-peak (TTP), the ratio of peak arrival time to the pulse period, captures earlier reflected-wave return in stiffer vessels and serves as an arteriosclerosis indicator \cite{ref5,ref6}. A linear relationship between these PPG features and blood pressure has been established \cite{ref5,ref7,ref8}. Conventional approaches extract such features via morphological analysis (peaks, TTP) \cite{ref5}, frequency analysis (FFT) \cite{ref9}, or machine learning (deep learning) \cite{ref10}.
 
-そこで本研究では、個々の点や周波数成分ではなく、\textbf{「波形全体の形状(Shape)」}に着目する。30fpsという低FPS・高ノイズ環境においても、1拍分の全データポイントを用いてモデル関数にフィットさせることで、局所的なノイズやサンプリングのズレを平滑化し、ロバストな特徴抽出が可能であると仮説を立てた。
+However, standard smartphone cameras typically operate at 30\,fps, which is insufficient for precise pulse-wave analysis, and they are susceptible to illumination fluctuations and motion artifacts. Under these conditions, morphological features that depend on fine timing (peak positions, TTP) become unstable, and frequency analysis is constrained by the low sampling rate \cite{ref11,ref12}.
 
-具体的には、収縮期・拡張期の非対称性を考慮した\textbf{非対称サイン波モデル}を提案する。単純な正弦波では表現できないPPG特有の急峻な立ち上がりと緩やかな減衰\cite{ref11}を、収縮期と拡張期で異なる時間スケールを持つモデルで近似する。このモデルへの適合により得られるパラメータは、以下のように生理学的特性を反映する。
+To address these limitations, this study focuses on the overall waveform shape rather than local feature points or frequency components. The overall waveform shape changes depending on blood pressure. We hypothesize that fitting a model function to all data points within one beat smooths out local noise and sampling jitter, enabling robust feature extraction even in a 30\,fps, high-noise environment.
 
-第一に、\textbf{振幅($A$)}は、血管のしなやかさ(伸展性)や血液の拍出量を反映する\cite{ref3,ref11}。
-第二に、波形の鋭さを示す\textbf{相対TTP}は、血管が硬くなるほど反射波が早期に戻る現象(脈波伝播速度の上昇)を捉え、動脈硬化の指標となる\cite{ref6,ref14}。
-第三に、滑らかなモデル波形からの\textbf{「逸脱(残差$E$)」}である。これは、モデルでは表現できない微細な歪み成分(重複切痕など)を定量化したものであり、加速度脈波(APG)解析で知られる血管老化の特徴を反映すると考えられる\cite{ref13}。
-最後に、血管の圧力-容積関係の非線形性\cite{ref15}を考慮した\textbf{相互作用項($E\sqrt{A}$)}である。血管は血圧が高い(振幅が大きい)ほど硬くなる特性があるため、歪み$E$を振幅$A$で重み付けすることで、この非線形な硬化特性を捉える。
+We propose an asymmetric sine wave model that accounts for the asymmetry between the systolic and diastolic phases. Gamma, Beta, and skewed-Gaussian models have been reported for PPG representation \cite{ref13,ref14}, but they require many parameters, incur high computational costs, and are noise-sensitive at low sampling rates. In contrast, the proposed model captures the steep rise and gradual decay characteristic of PPG using the systolic-to-diastolic time ratio ($\alpha$). With only four parameters (amplitude, phase, mean, $\alpha$), the model captures the main waveform features at low computational cost and remains robust at 30\,fps.
 
-\subsection{本研究の目的と貢献}
-本研究の目的は、非対称サイン波モデルを用いた新規手法の有効性を検証することである。具体的には、以下の3手法を実装し、比較する。なお、PPG特徴量と血圧には線形関係が存在することが示されているため\cite{ref6,ref9,ref10}、全手法において多重共線性を考慮した正則化項を持つ\textbf{Ridge回帰}を採用する\cite{ref12}。
+The objective of this study is to verify the effectiveness of this asymmetric sine wave model. We examined the following three methods.
+(1) RTBP (Baseline): Morphological features (amplitude, heart rate, relative TTP) \cite{ref5}.
+(2) Proposed method (Asymmetric sine wave model):
+(2-1) sinBP(M): Parameters obtained by fitting the asymmetric sine wave model (amplitude, phase, mean) used directly as features.
+(2-2) sinBP(D): RTBP features augmented with the model residual (distortion index $E$) and vascular stiffness index ($E\sqrt{A}$).
 
-\noindent
-(1) \textbf{RTBP}: 既存の形態学的特徴量(振幅、心拍数、相対TTP)を用いる手法\cite{ref6}。これをベースラインとして比較する。\\[0.5em]
-(2) \textbf{sinBP(M)}: 提案モデル(非対称サイン波モデル)のパラメータ(振幅、位相、平均値)を特徴量とする手法。\\[0.5em]
-(3) \textbf{sinBP(D)}: RTBPをベースに、提案モデルとの残差(歪み)と血管硬さ指標($E\sqrt{A}$)を特徴量とする手法。
+All methods employ Ridge regression to handle multicollinearity \cite{ref15}.
 
-本研究の主な貢献は以下の通りである。
-第一に、30fpsの低品質な映像環境においても安定した特徴抽出を可能にする「非対称サイン波モデル適合手法」の新規アプローチ\textbf{sinBP(M/D)}を提案した点である。点計測に依存する従来手法(RTBP)に対し、波形形状全体を利用することでノイズへの頑健性を高めるアプローチである。
-第二に、生理学的モデルからの「逸脱(残差)」を血管硬化の指標として活用する新規アプローチ\textbf{sinBP(D)}を提示した点である。単なる誤差として扱われがちな残差を、血圧推定において重要な生理学的情報(歪み)としてモデル化する枠組みを構築した。
-第三に、臨床グレードの計測機器を用いた厳密な比較実験により、各手法の有効性を検証した点である。基本構造を捉えるモデルパラメータと、微細な変化を捉える残差が、それぞれ血圧推定にどのように寄与するかを定量的に評価する。
+The main contribution is an ``asymmetric sine wave model fitting method'' that enables stable feature extraction even in a low-quality 30\,fps video environment. Unlike RTBP, which relies on point measurements, this approach exploits the entire waveform shape, enhancing robustness to noise.
 
 %-----------------------------------------------------------------------
 
-\section{手法}
+\section{Methods}
 
-\subsection{非対称サイン波モデル}
-PPG波形は、収縮期が短く拡張期が長い非対称性を有する\cite{ref15}。本研究では、この特性を反映した非対称サイン波モデル(式\ref{eq:asymmetric_model})を定義する。
+\subsection{Asymmetric Sine Wave Model}
+The PPG waveform exhibits asymmetry: the systolic (rising) phase is short, whereas the diastolic (falling) phase is long \cite{ref16}. We fit an asymmetric sine wave model $s(t)$ to the measured waveform $x[n]$ via least squares. The model represents the systolic and diastolic phases with sine waves of different effective frequencies (Eq.\,\ref{eq:asymmetric_model}).
+
 \begin{equation}
-s(t) = \text{mean} + A \cdot s_{\text{norm}}(t)
+s(t) = \text{mean} + \frac{A}{2} \cdot \sin(\theta(t))
 \label{eq:asymmetric_model}
 \end{equation}
 
 \begin{equation}
-s_{\text{norm}}(t) = \frac{1 + \cos(\theta(t) + \phi_0)}{2}
-\label{eq:asymmetric_norm}
-\end{equation}
-
-\begin{equation}
 \theta(t) = \begin{cases}
-\frac{3\pi}{2} \cdot \frac{t'}{T} & (0 \leq t' \leq \alpha T) \\
-\pi + 3\pi \cdot \frac{t' - \alpha T}{T} & 
-(\alpha T < t' \leq T)
+-\dfrac{\pi}{2} + \pi \cdot \dfrac{t'}{T_{sys}} & (0 \leq t' < T_{sys}) \;\; [\text{Rising}] \\[6pt]
+\dfrac{\pi}{2} + \pi \cdot \dfrac{t' - T_{sys}}{T_{dia}} & (T_{sys} \leq t' < T) \;\; [\text{Falling}]
 \end{cases}
 \label{eq:asymmetric_theta}
 \end{equation}
 
-ここで、$A$は振幅、meanは平均値、$T$は周期(IBI)である。$t' = (t - \tau^*) \bmod T$は1拍内の位相時間、$\phi_0$は小さな位相シフト、$\tau^*$は各拍ごとにピーク位置を整合させるためのパラメータである。また、$\alpha$は収縮期の割合を表すパラメータであり、初期値として$\alpha \approx 1/3$(拡張期は$1-\alpha \approx 2/3$)と仮定する。
+Here, $A$ is amplitude, mean is the DC offset, and $T$ is the beat period (IBI). $T_{sys}$ and $T_{dia}$ denote systolic and diastolic durations, respectively, with $T = T_{sys} + T_{dia}$. The variable $t' = (t - \tau_{\text{foot}}) \bmod T$ is the intra-beat phase time, where $\tau_{\text{foot}}$ aligns the beat start (valley). During the rising phase, $\sin$ sweeps from $-1$ to $+1$ (valley to peak); during the falling phase, it sweeps from $+1$ to $-1$ (peak to valley), producing the characteristic asymmetric PPG pulse.
 
-実装では、1拍遅延処理により前の拍の実測データから収縮期/拡張期比率を自動計算し、その比率に基づいて動的にモデルパラメータ$\alpha$を決定する。デフォルト値として、ピーク→谷が周期の約2/3、谷→次ピークが約1/3となる比率を使用するが、各拍ごとに実測データから計算された動的な比率が用いられる。
+The systolic/diastolic ratio $\alpha = T_{sys}/T$ is computed from the measured data, with $\alpha = 1/3$ as an initial value.
 
-\subsection{血圧推定手法}
-本研究では、以下の3手法を比較する。全手法でRidge回帰を用いる。
+\subsection{Feature Extraction}
+Features are extracted from three perspectives:
 
-\subsubsection{RTBP (ベースライン)}
-既存の形態学的特徴量のみを用いる手法である\cite{ref6}。特徴量として、振幅$A$、心拍数HR、および相対TTP(V2P, P2V)を使用する。
-\begin{equation}
-\begin{split}
-\text{SBP}_{\text{RTBP}}&= C_0 + C_1 \cdot A + C_2 \cdot \text{HR} \\
-&\quad + C_3 \cdot \text{V2P\_relTTP} + C_4 \cdot \text{P2V\_relTTP}
-\end{split}
-\label{eq:rtbp_sbp}
-\end{equation}
+(1) Morphological Features (used in RTBP):
+\begin{itemize}
+\item Amplitude ($A$): AC component magnitude; reflects vascular distensibility.
+\item Heart Rate (HR): Beats per minute; reflects autonomic activity.
+\item Relative TTP: Rising-time ratio (V2P\_relTTP) and falling-time ratio (P2V\_relTTP); reflects vascular stiffness.
+\end{itemize}
 
-\begin{equation}
-\begin{split}
-\text{SBP}_{\text{RTBP}}&= D_0 + D_1 \cdot A + D_2 \cdot \text{HR} \\
-&\quad + D_3 \cdot \text{V2P\_relTTP} + D_4 \cdot \text{P2V\_relTTP}
-\end{split}
-\label{eq:rtbp_dbp}
-\end{equation}
+(2) Model Parameters (from asymmetric sine wave fit):
+\begin{itemize}
+\item Amplitude ($A$): Model amplitude.
+\item Mean: DC component.
+\item Phase ($\Phi$): Waveform phase shift.
+\end{itemize}
 
-\subsubsection{sinBP(M) (提案手法1)}
-モデルパラメータを直接特徴量とする手法である。特徴量として、振幅$A$、心拍数HR、平均値Mean、位相$\Phi$を使用する。
-\begin{equation}
-\begin{split}
-\text{SBP}_{\text{Model}}&= \alpha_0 + \alpha_1 \cdot A + \alpha_2 \cdot \text{HR} \\
-&\quad + \alpha_3 \cdot \text{Mean} + \alpha_4 \cdot \Phi
-\end{split}
-\label{eq:sinbp_m_sbp}
-\end{equation}
+(3) Model Residual Features: 
+The residual $E$ quantifies the divergence between the measured waveform $x[n]$ and model $s[n]$ as RMS error (Eq.\,\ref{eq:distortion}).
 
-\begin{equation}
-\begin{split}
-\text{DBP}_{\text{Model}} &= \beta_0 + \beta_1 \cdot A + \beta_2 \cdot \text{HR} \\
-&\quad + \beta_3 \cdot \text{Mean} + \beta_4 \cdot \Phi
-\end{split}
-\label{eq:sinbp_m_dbp}
-\end{equation}
-
-\subsubsection{sinBP(D) (提案手法2)}
-モデル残差(歪み)を特徴量とする手法である。特徴量として、$A$, HR, 相対TTPに加え、Stiffness\_sin($E\sqrt{A}$)および歪み$E$を使用する。
-歪み指標$E$は、実測波形$x[n]$とモデル波形$s[n]$のRMS誤差である(式\ref{eq:distortion})。
 \begin{equation}
 E = \sqrt{\frac{1}{N} \sum_{n=1}^{N} (x[n] - s[n])^2}
 \label{eq:distortion}
 \end{equation}
 
-さらに、歪み指標$E$と振幅$A$の平方根の積を、血管硬さ指標Stiffness\_sinとして定義する：
+An interaction term $E\sqrt{A}$ captures amplitude-dependent stiffness:
+
 \begin{equation}
 \text{Stiffness}_{\text{sin}} = E \sqrt{A}
 \label{eq:stiffness}
 \end{equation}
 
-推定は2段階で行う: (1)ベースBP+血管特性補正(RTBP + Stiffness), (2)歪み補正(+$E$)。
+\subsection{Blood Pressure Estimation Process}
+\subsubsection{Preprocessing}
+Peak detection, beat segmentation, time normalization ($N=64$ samples), peak alignment via phase search, and outlier removal (IBI and amplitude criteria) are performed.
 
-【第1段: ベースBP+血管特性補正】
-\begin{equation}
-\begin{split}
-\text{SBP}_{\text{vascular}} &= \text{SBP}_{\text{RTBP}} \\
-&\quad + \text{ALPHA}_5 \cdot \text{Stiffness}_{\text{sin}}
-\end{split}
-\label{eq:sinbp_d_sbp_model}
-\end{equation}
+\subsubsection{Estimation Model Construction}
+Three regression models are compared. All use Ridge regression \cite{ref15}.
 
-\begin{equation}
-\begin{split}
-\text{DBP}_{\text{vascular}} &= \text{DBP}_{\text{RTBP}} \\
-&\quad + \text{BETA}_5 \cdot \text{Stiffness}_{\text{sin}}
-\end{split}
-\label{eq:sinbp_d_dbp_model}
-\end{equation}
+(1) RTBP: Uses morphological features only ($A$, HR, V2P\_relTTP, P2V\_relTTP).
 
-【第2段: 歪み補正】
-\begin{equation}
-\text{SBP}_{\text{Distortion}} = \text{SBP}_{\text{vascular}} + \text{ALPHA}_6 \cdot E
-\label{eq:sinbp_d_sbp_final}
-\end{equation}
+(2) sinBP(M): Uses model parameters ($A$, HR, Mean, $\Phi$).
 
-\begin{equation}
-\text{DBP}_{\text{Distortion}} = \text{DBP}_{\text{vascular}} + \text{BETA}_6 \cdot E
-\label{eq:sinbp_d_dbp_final}
-\end{equation}
-
-\subsection{前処理}
-ピーク検出、ビート切り出し、時間正規化($N=64$)、ピーク整合(位相探索)、外れ値除去(IBI, 振幅変動)を実施する。
+(3) sinBP(D): Augments RTBP features with residual-based features in two stages:
+\begin{enumerate}
+\item \textit{Base BP + Vascular Correction:} RTBP features plus $\text{Stiffness}_{\text{sin}}$.
+\item \textit{Distortion Correction:} Residual $E$ refines the Stage-1 estimate.
+\end{enumerate}
 
 %-----------------------------------------------------------------------
 
-\section{実験計画}
-\subsection{プロトコル}
-\subsubsection{環境設定}
-デバイスにはGoogle Pixel 8のフロント可視カメラ(30fps)を使用し、指腹接触方式(第2指)で測定を行った。照明条件は室内400 luxとした。
+\section{Experimental Design}
 
-\subsubsection{参照値}
-参照デバイスとして、指先カフ(第3指)で実時間PPGを光学式パルスオキシメーター(IWS920-DEV 分解能409.6Hz)で同時計測した。また、指先カフ(第3指/第4指)で実時間血圧を連続血圧計(CNAP-Monitor 分解能1000Hz 臨床グレード)で同時計測した。測定条件として、測定間隔・体位・安静時間を統一した。
+\subsection{Experimental Environment}
 
-\subsubsection{被験者}
-被験者は20～23歳の健康な成人男性5名であり、不整脈重度等の除外条件を設けた。各被験者につき3回ずつ計測を行った。
+Device:
+A Google Pixel 8 front camera (30\,fps) acquired PPG via fingertip contact (index finger) under 400\,lux indoor lighting.
 
-\subsubsection{倫理}
-同意取得・匿名化・暗号化保存を実施する。
+Reference Instruments:
+A clinical-grade continuous blood pressure monitor (CNAP-Monitor, 1000\,Hz) measured reference BP at the fingernail cuff (middle/ring finger). Simultaneously, an optical pulse oximeter (IWS920-DEV, 409.6\,Hz) recorded reference PPG at the middle finger. Measurement intervals, posture, and rest periods were standardized.
 
-\subsection{評価指標}
-本研究では以下の指標を用いて評価を行う。まず波形評価として、参照波形とスマホ波形(Green/sinWave)を時間同期し、MAPE、MAE、相関係数で評価する。次に血圧推定精度については、5分割時系列交差検証を用い、MAE, RMSE, MAPEで3手法を比較検証する。その際、AAMI基準($|\text{MD}|\leq 5, \text{SD}\leq 8$)も参照する。さらにアブレーションとして、各特徴量の寄与を係数分析により評価する。
+Subjects:
+Five healthy males aged 20--23 participated; severe arrhythmia was an exclusion criterion. Each subject underwent three measurement sessions.
 
-\section{結果}
-\subsection{波形評価}
-表\ref{tab:waveform_eval}に波形評価結果を示す。\textbf{sinWave}はGreenと比較してMAPEで約11.5ポイント改善し、相関係数も向上した。これはモデル近似がノイズ除去として機能したことを示す。
+Ethics:
+The study followed the Declaration of Helsinki and received institutional ethics approval. Written informed consent was obtained, and data were anonymized and encrypted.
 
-\begin{table}[h]
-\caption{Waveform evaluation results (Average of all sessions)}
+\subsection{Experimental Procedure}
+Subjects were seated at rest. The CNAP cuff was placed on the left middle finger; the right index finger lightly contacted the smartphone camera. Each 180-second session comprised:
+\begin{enumerate}
+\item Resting (60\,s): Natural breathing.
+\item Deep breathing (60\,s): 5\,s inhale / 5\,s exhale to induce BP variation.
+\item Recovery (60\,s): Return to natural breathing.
+\end{enumerate}
+
+\subsection{Evaluation Metrics}
+Waveform Evaluation:
+The raw Green-channel PPG and the fitted sinWave were time-aligned with the reference and evaluated via MAPE, MAE, and correlation.
+
+BP Estimation Accuracy:
+Five-fold time-series cross-validation was used. Metrics include MAE [mmHg], RMSE [mmHg], and MAPE [\%]. AAMI criteria ($|\text{MD}| \leq 5$\,mmHg, SD $\leq 8$\,mmHg) are referenced.
+
+Ablation:
+Feature contributions were assessed via regression coefficient analysis.
+
+%-----------------------------------------------------------------------
+
+\section{Results}
+
+\subsection{Waveform Evaluation}
+Table\,\ref{tab:waveform_eval} shows waveform accuracy. The sinWave improved MAPE by 11.5 percentage points over the raw Green channel and achieved a higher correlation, indicating that model fitting serves as effective noise reduction.
+
+\begin{table}[t]
+\caption{Waveform accuracy (session average)}
 \label{tab:waveform_eval}
 \centering
 \small
@@ -209,16 +179,16 @@ E = \sqrt{\frac{1}{N} \sum_{n=1}^{N} (x[n] - s[n])^2}
 \hline
 Channel & MAPE [\%] & MAE & RMSE & Bias & Corr \\
 \hline
-\textbf{sinWave} & \textbf{18.22} & \textbf{1.82} & \textbf{2.24} & -0.66 & \textbf{0.19} \\
-Green & 29.71 & 2.97 & 3.64 & +0.42 & 0.07 \\
+sinWave & 18.22 & 1.82 & 2.24 & $-$0.66 & 0.19 \\
+Green   & 29.71 & 2.97 & 3.64 & $+$0.42 & 0.07 \\
 \hline
 \end{tabular}
 \end{table}
 
-\subsection{血圧推定精度}
-表\ref{tab:sbp_acc}, \ref{tab:dbp_acc}に推定精度を示す。提案手法\textbf{sinBP(D)}がSBP/DBP共に最小のMAE/RMSEを達成した。特にRMSEの改善が顕著であり、大きな誤差を抑制できている。
+\subsection{Blood Pressure Estimation Accuracy}
+Tables\,\ref{tab:sbp_acc} and \ref{tab:dbp_acc} summarize BP estimation accuracy. sinBP(D) achieved the lowest MAE and RMSE for both SBP and DBP, with particularly notable RMSE reduction, indicating suppression of large errors. Figures\,\ref{fig:sbp_ba_all} and \ref{fig:dbp_ba_all} present Bland--Altman plots; sinBP(D) exhibits reduced bias and narrower limits of agreement compared to RTBP. Figures\,\ref{fig:sbp_comp} and \ref{fig:dbp_comp} compare method accuracies.
 
-\begin{table}[h]
+\begin{table}[t]
 \caption{SBP estimation accuracy}
 \label{tab:sbp_acc}
 \centering
@@ -227,14 +197,14 @@ Green & 29.71 & 2.97 & 3.64 & +0.42 & 0.07 \\
 \hline
 Method & MAPE [\%] & MAE [mmHg] & RMSE [mmHg] \\
 \hline
-\textbf{sinBP(D)} & \textbf{16.44} & \textbf{18.98} & \textbf{24.17} \\
+RTBP     & 17.82 & 20.66 & 28.02 \\
 sinBP(M) & 16.92 & 19.47 & 24.70 \\
-RTBP & 17.82 & 20.66 & 28.02 \\
+sinBP(D) & 16.44 & 18.98 & 24.17 \\
 \hline
 \end{tabular}
 \end{table}
 
-\begin{table}[h]
+\begin{table}[t]
 \caption{DBP estimation accuracy}
 \label{tab:dbp_acc}
 \centering
@@ -243,9 +213,9 @@ RTBP & 17.82 & 20.66 & 28.02 \\
 \hline
 Method & MAPE [\%] & MAE [mmHg] & RMSE [mmHg] \\
 \hline
-\textbf{sinBP(D)} & \textbf{21.72} & \textbf{14.84} & \textbf{19.31} \\
+RTBP     & 23.14 & 16.11 & 22.43 \\
 sinBP(M) & 22.30 & 15.20 & 19.73 \\
-RTBP & 23.14 & 16.11 & 22.43 \\
+sinBP(D) & 21.72 & 14.84 & 19.31 \\
 \hline
 \end{tabular}
 \end{table}
@@ -257,7 +227,7 @@ RTBP & 23.14 & 16.11 & 22.43 \\
 \includegraphics[width=0.32\textwidth]{figures/SinBP_M_SBP_bland_altman.png}
 \hfill
 \includegraphics[width=0.32\textwidth]{figures/SinBP_D_SBP_bland_altman.png}
-\caption{Bland-Altman plots of SBP. Left: RTBP, Center: sinBP(M), Right: sinBP(D).}
+\caption{Bland--Altman plots for SBP. Left: RTBP, Center: sinBP(M), Right: sinBP(D).}
 \label{fig:sbp_ba_all}
 \end{figure*}
 
@@ -268,7 +238,7 @@ RTBP & 23.14 & 16.11 & 22.43 \\
 \includegraphics[width=0.32\textwidth]{figures/SinBP_M_DBP_bland_altman.png}
 \hfill
 \includegraphics[width=0.32\textwidth]{figures/SinBP_D_DBP_bland_altman.png}
-\caption{Bland-Altman plots of DBP. Left: RTBP, Center: sinBP(M), Right: sinBP(D).}
+\caption{Bland--Altman plots for DBP. Left: RTBP, Center: sinBP(M), Right: sinBP(D).}
 \label{fig:dbp_ba_all}
 \end{figure*}
 
@@ -279,7 +249,7 @@ RTBP & 23.14 & 16.11 & 22.43 \\
 \includegraphics[width=0.49\linewidth]{figures/comparison_SBP_barplot_RMSE.png}
 \\[0.5em]
 \includegraphics[width=0.49\linewidth]{figures/comparison_SBP_barplot_MAPE.png}
-\caption{Comparison of SBP estimation accuracy across three methods (RTBP, sinBP(M), sinBP(D)). Top left: MAE, Top right: RMSE, Bottom: MAPE.}
+\caption{SBP accuracy comparison (RTBP, sinBP(M), sinBP(D)). Top-left: MAE, Top-right: RMSE, Bottom: MAPE.}
 \label{fig:sbp_comp}
 \end{figure}
 
@@ -290,87 +260,92 @@ RTBP & 23.14 & 16.11 & 22.43 \\
 \includegraphics[width=0.49\linewidth]{figures/comparison_DBP_barplot_RMSE.png}
 \\[0.5em]
 \includegraphics[width=0.49\linewidth]{figures/comparison_DBP_barplot_MAPE.png}
-\caption{Comparison of DBP estimation accuracy across three methods (RTBP, sinBP(M), sinBP(D)). Top left: MAE, Top right: RMSE, Bottom: MAPE.}
+\caption{DBP accuracy comparison (RTBP, sinBP(M), sinBP(D)). Top-left: MAE, Top-right: RMSE, Bottom: MAPE.}
 \label{fig:dbp_comp}
 \end{figure}
 
-\textbf{sinBP(D)における特徴量の寄与}:
-sinBP(D)では、歪み指標\textbf{E}がSBP・DBPともに大きな正の係数(SBP: +14.88, DBP: +15.20)を持っていた。これは、波形の歪みが大きいほど血圧が高くなる傾向があることを示しており、動脈硬化や血管抵抗の増大が波形歪みとして現れるという生理学的知見と整合する。
-一方、血管硬さ指標\textbf{Stiffness\_sin} ($E\sqrt{A}$) は負の係数(SBP: -2.40, DBP: -3.44)を示した。これは単独の歪みだけでなく、振幅との相互作用項が補正として機能していることを示唆する。
+Feature Contributions in sinBP(D):
+The distortion index $E$ exhibited large positive coefficients (SBP: $+14.88$, DBP: $+15.20$), implying that greater waveform distortion is associated with higher BP---consistent with the physiological link between arteriosclerosis, increased vascular resistance, and waveform distortion. In contrast, $\text{Stiffness}_{\text{sin}}$ ($E\sqrt{A}$) showed negative coefficients (SBP: $-2.40$, DBP: $-3.44$), suggesting that the amplitude-weighted term provides a corrective effect.
 
-\textbf{sinBP(M)における特徴量の寄与}:
-sinBP(M)では、位相\textbf{Phi}が正の係数(SBP: +11.79, DBP: +15.69)を持ち、血圧推定に大きく寄与していることが確認された。これは、脈波の伝播速度や反射波のタイミング(位相)が血圧と密接に関連していることを裏付けている。
+Feature Contributions in sinBP(M):
+Phase $\Phi$ had positive coefficients (SBP: $+11.79$, DBP: $+15.69$), confirming its significant contribution to BP estimation and reflecting the close relationship between pulse-wave timing and blood pressure.
 
-\section{考察}
+%-----------------------------------------------------------------------
 
-\subsection{結果の解釈}
+\section{Discussion}
 
-本研究の結果は、30fpsという低サンプリングレート環境において、周波数解析に依存しない非対称サイン波モデルによる近似アプローチが有効であることを強く支持している。
+\subsection{Interpretation of Results}
+These results strongly support the effectiveness of the asymmetric sine wave model approximation in a 30\,fps low-sampling-rate environment without relying on frequency analysis.
 
-まず、波形評価においてsinWaveチャンネルがGreenチャンネルよりも高い精度(低MAPE)を示したことは、非対称サイン波モデルがノイズ除去と波形整形フィルタとして機能し、PPGの基本成分を抽出できていることを意味する。生のGreen信号は照明変動や体動ノイズの影響を直接受けるが、モデル近似を行うことで、生理学的に妥当な「理想波形」への回帰が行われ、S/N比が向上したと考えられる。
+The improved waveform accuracy (lower MAPE) of sinWave over the raw Green channel demonstrates that the model acts as a noise-removal and waveform-shaping filter, extracting the fundamental PPG component. Model fitting regresses the signal toward a physiologically plausible ``ideal waveform,'' thereby improving the signal-to-noise ratio.
 
-次に、血圧推定においてsinBP(D)が最高精度を達成したことは、\textbf{「生理学的モデルからの逸脱(残差)」}が血圧推定において重要な情報を持っていることを示している。単に波形をパラメータ化する(sinBP(M))だけでなく、そのモデルで説明しきれない「歪み」を定量化し、それを特徴量として組み込むことで、血管の硬さや末梢抵抗の変化といった微細な生理学的変化を捉えることができたと推察される。
+The superior accuracy of sinBP(D) indicates that \emph{deviation from the physiological model} (residual) carries important BP-related information. Quantifying this ``distortion'' and incorporating it as a feature captures subtle physiological changes---such as vascular stiffness and peripheral resistance---that pure parameterization (sinBP(M)) cannot.
 
-\subsection{手法の優位性}
+\subsection{Superiority of the Proposed Method}
+RTBP relies on ``point'' information (peaks, valleys) and is therefore sensitive to sampling jitter at 30\,fps. In contrast, sinBP methods perform least-squares fitting over an entire beat, inherently smoothing timing errors. This robustness explains why sinBP(M) and sinBP(D) outperform RTBP.
 
-既存手法(RTBP)は、波形のピークや谷といった「点」の情報に依存するため、30fpsの粗い時間分解能では正確な特徴抽出が困難であった(サンプリング点がピークからずれる等)。これに対し、提案手法(sinBPシリーズ)は、1拍分の全データポイントを用いた最小二乗フィットを行うため、サンプリングタイミングのずれに対して頑健である。これが、sinBP(M)およびsinBP(D)がRTBPを上回る精度を出した主要因と考えられる。
+Furthermore, sinBP(D) outperforming sinBP(M) demonstrates the value of the ``physiological constraint'' imposed by the asymmetric model. The residual $E$, derived from a model that respects systolic/diastolic asymmetry, more purely reflects pathological or physiological distortion (e.g., vascular stiffening) than simple parameter extraction.
 
-さらに、sinBP(D)がsinBP(M)を上回った事実は、非対称サイン波モデルという「生理学的制約」の有効性を示している。単なるパラメータ抽出(sinBP(M))よりも、収縮期・拡張期の比率を考慮した非対称モデルの残差(E)の方が純粋な「病的/生理的歪み」を反映するようになったため、血圧との相関が高まったと考えられる。
+\subsection{Limitations and Future Work}
+MAPE remains around 16\%, short of AAMI criteria. Future work should address (1) individual calibration, (2) model extensions (e.g., second-harmonic terms), and (3) larger, more diverse datasets.
 
-\subsection{限界と展望}
-MAPEは16\%台であり、AAMI基準には達していない。今後は、(1)個人差補正(キャリブレーション)、(2)モデル拡張(第2高調波追加)、(3)データセット拡充に取り組む必要がある。
+%-----------------------------------------------------------------------
 
-\section{結論}
-本研究では、30fps可視カメラ環境向けに、非対称サイン波モデルを用いた血圧推定手法を提案した。実験の結果、モデル残差を用いたsinBP(D)が最も高い精度を示し、血管硬化を反映する歪み指標の有効性が確認された。
+\section{Conclusion}
+We proposed a blood pressure estimation method based on an asymmetric sine wave model optimized for 30\,fps visible-camera PPG. Experiments showed that sinBP(D), which leverages model residuals, achieved the highest accuracy, confirming the effectiveness of the distortion index as a vascular-stiffness indicator.
 
-本研究の主な貢献は以下の通りである。第一に、\textbf{sinBP(M)の有用性}として、非対称サイン波モデルへのフィットにより得られるパラメータ(振幅、位相、平均値)が、30fps環境においてもノイズに頑健な特徴量として機能することを示した。第二に、\textbf{sinBP(D)の新規性}として、生理学的に妥当なモデルからの「逸脱(残差)」を特徴量化することで、血管硬化や末梢抵抗の変化を捉え、血圧推定精度を向上させた。特に、歪み指標$E$と振幅$A$の組み合わせ(Stiffness\_sin)が有効であることを確認した。第三に、\textbf{低FPS環境での実現可能性}として、周波数分解に依存しない時間領域モデリングにより、一般的なスマートフォンカメラ(30fps)でも実用的な血圧トレンド推定が可能であることを実証した。
+The main contribution is an ``asymmetric sine wave model fitting method'' enabling stable feature extraction in low-quality 30\,fps video. Unlike point-based RTBP, this approach exploits the entire waveform shape for improved noise robustness.
 
-本手法は、専用デバイスを必要としない手軽な血圧モニタリング技術として、mHealth分野への貢献が期待される。今後は、個人差補正の導入や大規模データセットでの検証を進め、実用化を目指す。
+This method is expected to contribute to the mHealth field as a convenient blood pressure monitoring technology requiring no dedicated devices. Future work will pursue individual-difference calibration and validation on larger datasets toward practical deployment.
+
 %%%%%%%%%%%%%%%%% BIBLIOGRAPHY IN THE LaTeX file !!!!! %%%%%%%%%%%%%%%%%%%%%%
-\begin{thebibliography}{15}
+\begin{thebibliography}{16}
 \bibitem{ref1}
-World Health Organization. "Global report on hypertension 2023: the race against a silent killer." Geneva: World Health Organization, 2023.
+World Health Organization. ``Global report on hypertension 2023: the race against a silent killer.'' Geneva: World Health Organization, 2023.
 
 \bibitem{ref2}
-Whelton, Paul K., et al. "2017 ACC/AHA Guideline for the Prevention, Detection, Evaluation, and Management of High Blood Pressure in Adults." \textit{Journal of the American College of Cardiology}, vol. 71, no. 19, 2018, pp. e127-e248.
+Whelton, Paul K., et al. ``2017 ACC/AHA Guideline for the Prevention, Detection, Evaluation, and Management of High Blood Pressure in Adults.'' \textit{Journal of the American College of Cardiology}, vol. 71, no. 19, 2018, pp. e127--e248.
 
 \bibitem{ref3}
-Sun, Yu, and Nitish Thakor. "Photoplethysmography revisited: from contact to noncontact, from point to imaging." \textit{IEEE Transactions on Biomedical Engineering}, vol. 63, no. 3, 2016, pp. 463-477.
+Sun, Yu, and Nitish Thakor. ``Photoplethysmography revisited: from contact to noncontact, from point to imaging.'' \textit{IEEE Transactions on Biomedical Engineering}, vol. 63, no. 3, 2016, pp. 463--477.
 
 \bibitem{ref4}
-Verkruysse, Wim, Lars O. Svaasand, and J. Stuart Nelson. "Remote plethysmographic imaging of skin perfusion." \textit{Optics Express}, vol. 16, no. 26, 2008, pp. 21434-21445.
+Allen, John. ``Photoplethysmography and its application in clinical physiological measurement.'' \textit{Physiological Measurement}, vol. 28, no. 3, 2007, pp. R1--R39.
 
 \bibitem{ref5}
-McDuff, Daniel, et al. "Improvements in remote cardiopulmonary measurement using a five band camera." \textit{IEEE Transactions on Biomedical Engineering}, vol. 61, no. 10, 2014, pp. 2593-2601.
+Millasseau, Sandrine C., et al. ``Contour analysis of the photoplethysmographic pulse measured at the finger.'' \textit{Journal of Hypertension}, vol. 24, no. 8, 2006, pp. 1449--1456.
 
 \bibitem{ref6}
-Millasseau, Sandrine C., et al. "Contour analysis of the photoplethysmographic pulse measured at the finger." \textit{Journal of Hypertension}, vol. 24, no. 8, 2006, pp. 1449-1456.
+Nichols, Wilmer W. ``Clinical measurement of arterial stiffness obtained from noninvasive pressure waveforms.'' \textit{American Journal of Hypertension}, vol. 18, no. 1, 2005, pp. 3S--10S.
 
 \bibitem{ref7}
-Alian, Aymen A., and Kirk H. Shelley. "Photoplethysmography." \textit{Best Practice \& Research Clinical Anaesthesiology}, vol. 28, no. 4, 2014, pp. 395-406.
+Charlton, Peter H., et al. ``Assessing model age from the photoplethysmogram: a systematic review.'' \textit{IEEE Reviews in Biomedical Engineering}, vol. 12, 2019, pp. 179--202.
 
 \bibitem{ref8}
-Zhang, Liang, et al. "Developing personalized models of blood pressure estimation from wearable sensors data using minimally-trained domain adversarial neural networks." \textit{Proceedings of Machine Learning Research}, vol. 126, 2020, pp. 97-120.
+Elgendi, Mohamed. ``On the analysis of fingertip photoplethysmogram signals.'' \textit{Current Cardiology Reviews}, vol. 8, no. 1, 2012, pp. 14--25.
 
 \bibitem{ref9}
-Charlton, Peter H., et al. "Assessing model age from the photoplethysmogram: a systematic review." \textit{IEEE Reviews in Biomedical Engineering}, vol. 12, 2019, pp. 179-202.
+Alian, Aymen A., and Kirk H. Shelley. ``Photoplethysmography.'' \textit{Best Practice \& Research Clinical Anaesthesiology}, vol. 28, no. 4, 2014, pp. 395--406.
 
 \bibitem{ref10}
-Elgendi, Mohamed. "On the analysis of fingertip photoplethysmogram signals." \textit{Current Cardiology Reviews}, vol. 8, no. 1, 2012, pp. 14-25.
+Zhang, Liang, et al. ``Developing personalized models of blood pressure estimation from wearable sensors data using minimally-trained domain adversarial neural networks.'' \textit{Proceedings of Machine Learning Research}, vol. 126, 2020, pp. 97--120.
 
 \bibitem{ref11}
-Allen, John. "Photoplethysmography and its application in clinical physiological measurement." \textit{Physiological Measurement}, vol. 28, no. 3, 2007, pp. R1-R39.
+Verkruysse, Wim, Lars O. Svaasand, and J. Stuart Nelson. ``Remote plethysmographic imaging of skin perfusion.'' \textit{Optics Express}, vol. 16, no. 26, 2008, pp. 21434--21445.
 
 \bibitem{ref12}
-Mukkamala, Ramakrishna, et al. "Toward ubiquitous blood pressure monitoring via pulse transit time: theory and practice." \textit{IEEE Transactions on Biomedical Engineering}, vol. 62, no. 8, 2015, pp. 1879-1901.
+McDuff, Daniel, et al. ``Improvements in remote cardiopulmonary measurement using a five band camera.'' \textit{IEEE Transactions on Biomedical Engineering}, vol. 61, no. 10, 2014, pp. 2593--2601.
 
 \bibitem{ref13}
-Takazawa, Kenji, et al. "Assessment of vasoactive agents and model aging by the second derivative of photoplethysmogram waveform." \textit{Hypertension}, vol. 32, no. 2, 1998, pp. 365-370.
+Basso, G., Haakma, R., and Vullings, R. ``A skewed-Gaussian model for pulse decomposition.'' \textit{Physiological Measurement}, vol. 45, no. 11, 2024.
 
 \bibitem{ref14}
-Nichols, Wilmer W. "Clinical measurement of arterial stiffness obtained from noninvasive pressure waveforms." \textit{American Journal of Hypertension}, vol. 18, no. 1, 2005, pp. 3S-10S.
+Tiinanen, T., Popa, A.-G., K\"{a}pyl\"{a}, M., and Fr\"{a}nti, A. ``Model selection for the pulse decomposition analysis of fingertip photoplethysmograms.'' \textit{Proc. IEEE Eng. Med. Biol. Soc. (EMBC)}, 2017, pp. 1624--1627.
 
 \bibitem{ref15}
+Mukkamala, Ramakrishna, et al. ``Toward ubiquitous blood pressure monitoring via pulse transit time: theory and practice.'' \textit{IEEE Transactions on Biomedical Engineering}, vol. 62, no. 8, 2015, pp. 1879--1901.
+
+\bibitem{ref16}
 Hall, John E., and Michael E. Hall. \textit{Guyton and Hall Textbook of Medical Physiology}. 14th ed., Elsevier, 2020.
 \end{thebibliography}
 
