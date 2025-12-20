@@ -296,32 +296,32 @@ sinBP(D)は、本研究で新規に提案する手法であり、非対称サイ
 【第2段: 血管特性補正】
 \begin{equation}
 \begin{split}
-\text{SBP}_{\text{vascular}} &= \text{SBP}_{\text{base}} \\
+\text{SBP}_{\text{Distortion} &= \text{SBP}_{\text{base}} \\
 &\quad + \text{ALPHA}_3 \cdot \text{V2P\_relTTP} \\
 &\quad + \text{ALPHA}_4 \cdot \text{P2V\_relTTP} \\
 &\quad + \text{ALPHA}_5 \cdot \text{Stiffness}_{\text{sin}}
 \end{split}
-\label{eq:sinbp_d_sbp_vascular}
+\label{eq:sinbp_d_sbp_model}
 \end{equation}
 
 \begin{equation}
 \begin{split}
-\text{DBP}_{\text{vascular}} &= \text{DBP}_{\text{base}} \\
+\text{DBP}_{\text{model}} &= \text{DBP}_{\text{base}} \\
 &\quad + \text{BETA}_3 \cdot \text{V2P\_relTTP} \\
 &\quad + \text{BETA}_4 \cdot \text{P2V\_relTTP} \\
 &\quad + \text{BETA}_5 \cdot \text{Stiffness}_{\text{sin}}
 \end{split}
-\label{eq:sinbp_d_dbp_vascular}
+\label{eq:sinbp_d_dbp_model}
 \end{equation}
 
 【第3段: 歪み補正】
 \begin{equation}
-\text{SBP} = \text{SBP}_{\text{vascular}} + \text{ALPHA}_6 \cdot E
+\text{SBP} = \text{SBP}_{\text{Distortion} + \text{ALPHA}_6 \cdot E
 \label{eq:sinbp_d_sbp_final}
 \end{equation}
 
 \begin{equation}
-\text{DBP} = \text{DBP}_{\text{vascular}} + \text{BETA}_6 \cdot E
+\text{DBP} = \text{DBP}_{\text{model}} + \text{BETA}_6 \cdot E
 \label{eq:sinbp_d_dbp_final}
 \end{equation}
 
@@ -778,7 +778,7 @@ Allen, John. "Photoplethysmography and its application in clinical physiological
 Kurylyak, Yuriy, et al. "A Neural Network-based method for continuous blood pressure estimation from a PPG signal." \textit{IEEE International Instrumentation and Measurement Technology Conference (I2MTC)}, 2013, pp. 280-283.
 
 \bibitem{ref13}
-Takazawa, Kenji, et al. "Assessment of vasoactive agents and vascular aging by the second derivative of photoplethysmogram waveform." \textit{Hypertension}, vol. 32, no. 2, 1998, pp. 365-370.
+Takazawa, Kenji, et al. "Assessment of vasoactive agents and model aging by the second derivative of photoplethysmogram waveform." \textit{Hypertension}, vol. 32, no. 2, 1998, pp. 365-370.
 
 \bibitem{ref14}
 Nichols, Wilmer W. "Clinical measurement of arterial stiffness obtained from noninvasive pressure waveforms." \textit{American Journal of Hypertension}, vol. 18, no. 1, 2005, pp. 3S-10S.

@@ -472,8 +472,8 @@ estimateBP(A, ibi, E)
     ├─ peakToValleyRelTTP
     └─ Stiffness_sin = E * sqrt(A)
   ↓
-  SBP_vascular = SBP_base + ALPHA3*V2P_relTTP + ALPHA4*P2V_relTTP + ALPHA5*Stiffness_sin
-  DBP_vascular = DBP_base + BETA3*V2P_relTTP + BETA4*P2V_relTTP + BETA5*Stiffness_sin
+  SBP_model = SBP_base + ALPHA3*V2P_relTTP + ALPHA4*P2V_relTTP + ALPHA5*Stiffness_sin
+  DBP_model = DBP_base + BETA3*V2P_relTTP + BETA4*P2V_relTTP + BETA5*Stiffness_sin
   ↓
   係数:
     ALPHA3=5.0, ALPHA4=3.0, ALPHA5=0.1
@@ -483,8 +483,8 @@ estimateBP(A, ibi, E)
   deltaSBP = ALPHA6 * E
   deltaDBP = BETA6 * E
   ↓
-  SBP_refined = SBP_vascular + deltaSBP
-  DBP_refined = DBP_vascular + deltaDBP
+  SBP_refined = SBP_model + deltaSBP
+  DBP_refined = DBP_model + deltaDBP
   ↓
   係数:
     ALPHA6=0.1, BETA6=0.05

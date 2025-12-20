@@ -35,62 +35,32 @@
 \section{序論}
 
 \subsection{背景と動機}
+連続的な非侵襲血圧モニタリングは、心血管疾患の早期発見・管理に不可欠である\cite{ref1,ref2}。近年、スマートフォンの可視カメラを用いた光電容積脈波(PPG)による血圧推定が注目されている\cite{ref3}。しかし、スマホカメラは30fpsと低フレームレートであり、可視光特有の照明変動やノイズの影響を受けやすい。これらの制約により、微細な特徴点(ピークやTTP)に依存する形態学的解析や、高次高調波を必要とする周波数解析は、位相ゆらぎ等に対して脆弱である\cite{ref4,ref5}。
 
-連続的な非侵襲血圧モニタリングは、心血管疾患の早期発見・管理に不可欠である\cite{ref1,ref2}。従来の間欠的なカフ測定は、日常的な変動を捉えるには不十分である。近年、スマートフォンの可視カメラを用いた光電容積脈波(PPG)による血圧推定が注目されている。PPGは専用デバイス不要でスマートフォンのみで測定可能な利点がある\cite{ref3}。
+\subsection{従来研究の課題と本研究のアプローチ}
+従来のPPG血圧推定は、主に(1)形態学的特徴量(ピーク、TTP等)\cite{ref6}、(2)周波数解析(FFT等)\cite{ref7}、(3)機械学習(深層学習等)\cite{ref8}に分類される。しかし、30fps環境では、サンプリング点が粗く微細な形状変化を捉えきれないため、点に依存する形態学的特徴量は不安定となる。また、ナイキスト周波数が低く(15Hz)、周波数解析も困難である。
 
-しかし、スマホカメラは30fpsと低フレームレートであり、従来の専用センサに比べ時間分解能が低い。また、可視光は照明変動やノイズの影響を受けやすく、自動露出(AEC)等の制御も信号範囲を制限する。これらの制約により、周波数分解を前提とした従来手法(高調波比やTHD等)は、位相ゆらぎ等に対して脆弱である\cite{ref4,ref5}。
+そこで本研究では、個々の点や周波数成分ではなく、\textbf{「波形全体の形状(Shape)」}に着目する。30fpsという低FPS・高ノイズ環境においても、1拍分の全データポイントを用いてモデル関数にフィットさせることで、局所的なノイズやサンプリングのズレを平滑化し、ロバストな特徴抽出が可能であると仮説を立てた。
 
-\subsection{従来研究の課題と線形回帰モデル}
+具体的には、収縮期・拡張期の非対称性を考慮した\textbf{非対称サイン波モデル}を提案する。単純な正弦波では表現できないPPG特有の急峻な立ち上がりと緩やかな減衰\cite{ref11}を、収縮期と拡張期で異なる時間スケールを持つモデルで近似する。このモデルへの適合により得られるパラメータは、以下のように生理学的特性を反映する。
 
-\subsubsection{従来研究の課題}
+第一に、\textbf{振幅($A$)}は、血管のしなやかさ(伸展性)や血液の拍出量を反映する\cite{ref3,ref11}。
+第二に、波形の鋭さを示す\textbf{相対TTP}は、血管が硬くなるほど反射波が早期に戻る現象(脈波伝播速度の上昇)を捉え、動脈硬化の指標となる\cite{ref6,ref14}。
+第三に、滑らかなモデル波形からの\textbf{「逸脱(残差$E$)」}である。これは、モデルでは表現できない微細な歪み成分(重複切痕など)を定量化したものであり、加速度脈波(APG)解析で知られる血管老化の特徴を反映すると考えられる\cite{ref13}。
+最後に、血管の圧力-容積関係の非線形性\cite{ref15}を考慮した\textbf{相互作用項($E\sqrt{A}$)}である。血管は血圧が高い(振幅が大きい)ほど硬くなる特性があるため、歪み$E$を振幅$A$で重み付けすることで、この非線形な硬化特性を捉える。
 
-従来のPPG血圧推定は主に以下に分類される：
+\subsection{本研究の目的と貢献}
+本研究の目的は、非対称サイン波モデルを用いた新規手法の有効性を検証することである。具体的には、以下の3手法を実装し、比較する。なお、PPG特徴量と血圧には線形関係が存在することが示されているため\cite{ref6,ref9,ref10}、全手法において多重共線性を考慮した正則化項を持つ\textbf{Ridge回帰}を採用する\cite{ref12}。
 
-\begin{enumerate}
-\item \textbf{形態学的特徴量}: 波形の特徴(ピーク、TTP等)を用いる\cite{ref6}。しかし、30fpsでは微細な形状変化の捕捉が困難である。
-\item \textbf{周波数解析}: FFT等で周波数特徴(高調波比等)を抽出する\cite{ref7}。しかし、30fps(ナイキスト周波数15Hz)では高次高調波の抽出が困難で、周波数特性も不安定になりがちである。
-\item \textbf{機械学習}: 深層学習等で直接推定する\cite{ref8}。しかし、大量のデータが必要で、低FPS条件での汎化性能に課題がある。
-\end{enumerate}
+\noindent
+(1) \textbf{RTBP}: 既存の形態学的特徴量(振幅、心拍数、相対TTP)を用いる手法\cite{ref6}。これをベースラインとして比較する。\\[0.5em]
+(2) \textbf{sinBP(M)}: 提案モデル(非対称サイン波モデル)のパラメータ(振幅、位相、平均値)を特徴量とする手法。\\[0.5em]
+(3) \textbf{sinBP(D)}: RTBPをベースに、提案モデルとの残差(歪み)と血管硬さ指標($E\sqrt{A}$)を特徴量とする手法。
 
-\subsubsection{線形回帰モデルの採用}
-
-PPG特徴量と血圧には線形関係が存在することが示されている\cite{ref6,ref9,ref10}。本研究では、特徴量間の多重共線性を考慮し、正則化項を持つ\textbf{Ridge回帰}を採用する\cite{ref8,ref12}。以下の3手法を比較する。
-
-\textbf{RTBP(既存)}: 形態学的特徴量(振幅、心拍数、相対TTP)を用いる\cite{ref6}。振幅は血管拡張能、心拍数は循環動態を反映する。
-
-\textbf{sinBP(M)(新規)}: sin波フィットのパラメータ(振幅$A$、平均値Mean、位相$\Phi$)を用いる。$A$は血管伸展性、Meanは自律神経活動、$\Phi$は脈波伝播速度を反映し、ノイズに強い推定が期待される\cite{ref11,ref12}。
-
-\textbf{sinBP(D)(新規)}: 非対称サイン波モデルからの残差(歪み$E$)を用いる。$E$は血管硬化に伴う波形歪みを定量化し\cite{ref13,ref14}、$E\sqrt{A}$は血管硬さの合成指標として機能すると予想される。
-
-\subsection{sin近似を選んだ理由}
-
-30fps・高ノイズ環境でsin波近似を採用した理由は以下の通りである。
-
-第一に、\textbf{周波数分解の回避}である。30fpsでは高次高調波の正確な抽出が困難だが、sin波近似は時間領域で直接モデル化するため安定している。
-第二に、\textbf{生理学的妥当性}である。収縮期・拡張期の非対称性を考慮したモデルを、1拍ごとに動的に適合させることで生理的特性を表現できる。
-第三に、\textbf{ノイズ頑健性}である。1拍全体をモデル化するため、局所的なノイズの影響を受けにくい。
-第四に、\textbf{計算効率}である。少数のパラメータで表現でき、リアルタイム処理に適している。
-
-\subsection{本研究の目的と評価}
-
-本研究では、(1)RTBP、(2)sinBP(M)、(3)sinBP(D)の3手法を実装し、比較する。
-目的は以下の2点である：
-
-\begin{enumerate}
-\item \textbf{波形評価}: 非対称サイン波モデルによる近似精度(MAPE)を評価し、30fps環境での適合性を検証する。
-\item \textbf{精度比較}: 連続血圧計を参照とし、新規手法(sinBP(M/D))が既存手法(RTBP)より高精度か検証する。
-\end{enumerate}
-
-\subsection{本研究の貢献}
-
-主な貢献は以下の4点である：
-
-\begin{enumerate}
-\item \textbf{sinBP(M)の新規性}: モデルパラメータ(振幅、位相、平均値)を特徴量とし、30fpsでも安定した推定を実現する手法を提案する。
-\item \textbf{sinBP(D)の新規性}: 生理学的モデルからの残差(歪み$E$)と血管硬さ指標($E\sqrt{A}$)を用いる新しい推定枠組みを提案する。
-\item \textbf{厳密な正規化}: IBI同期かつピーク整合による、拍ごとの変動を考慮した正規化を実装する。
-\item \textbf{対照実験}: 同一データ・同一前処理で3手法を比較し、各特徴量の寄与を定量化して優位性を検証する。
-\end{enumerate}
+本研究の主な貢献は以下の通りである。
+第一に、30fpsの低品質な映像環境においても安定した特徴抽出を可能にする「非対称サイン波モデル適合手法」の新規アプローチ\textbf{sinBP(M/D)}を提案した点である。点計測に依存する従来手法(RTBP)に対し、波形形状全体を利用することでノイズへの頑健性を高めるアプローチである。
+第二に、生理学的モデルからの「逸脱(残差)」を血管硬化の指標として活用する新規アプローチ\textbf{sinBP(D)}を提示した点である。単なる誤差として扱われがちな残差を、血圧推定において重要な生理学的情報(歪み)としてモデル化する枠組みを構築した。
+第三に、臨床グレードの計測機器を用いた厳密な比較実験により、各手法の有効性を検証した点である。基本構造を捉えるモデルパラメータと、微細な変化を捉える残差が、それぞれ血圧推定にどのように寄与するかを定量的に評価する。
 
 %-----------------------------------------------------------------------
 
@@ -125,13 +95,10 @@ s_{\text{norm}}(t) = \frac{1 + \cos(\theta(t) + \phi_0)}{2}
 本研究では、以下の3手法を比較する。全手法でRidge回帰を用いる。
 
 \subsubsection{RTBP (ベースライン)}
-形態学的特徴量のみを用いる手法。
-\begin{itemize}
-\item 特徴量: 振幅$A$、心拍数HR、相対TTP(V2P, P2V)
-\end{itemize}
+既存の形態学的特徴量のみを用いる手法である\cite{ref6}。特徴量として、振幅$A$、心拍数HR、および相対TTP(V2P, P2V)を使用する。
 \begin{equation}
 \begin{split}
-\text{SBP} &= C_0 + C_1 \cdot A + C_2 \cdot \text{HR} \\
+\text{SBP}_{\text{RTBP}}&= C_0 + C_1 \cdot A + C_2 \cdot \text{HR} \\
 &\quad + C_3 \cdot \text{V2P\_relTTP} + C_4 \cdot \text{P2V\_relTTP}
 \end{split}
 \label{eq:rtbp_sbp}
@@ -139,20 +106,17 @@ s_{\text{norm}}(t) = \frac{1 + \cos(\theta(t) + \phi_0)}{2}
 
 \begin{equation}
 \begin{split}
-\text{DBP} &= D_0 + D_1 \cdot A + D_2 \cdot \text{HR} \\
+\text{SBP}_{\text{RTBP}}&= D_0 + D_1 \cdot A + D_2 \cdot \text{HR} \\
 &\quad + D_3 \cdot \text{V2P\_relTTP} + D_4 \cdot \text{P2V\_relTTP}
 \end{split}
 \label{eq:rtbp_dbp}
 \end{equation}
 
 \subsubsection{sinBP(M) (提案手法1)}
-モデルパラメータを直接特徴量とする手法。
-\begin{itemize}
-\item 特徴量: 振幅$A$、心拍数HR、平均値Mean、位相$\Phi$
-\end{itemize}
+モデルパラメータを直接特徴量とする手法である。特徴量として、振幅$A$、心拍数HR、平均値Mean、位相$\Phi$を使用する。
 \begin{equation}
 \begin{split}
-\text{SBP} &= \alpha_0 + \alpha_1 \cdot A + \alpha_2 \cdot \text{HR} \\
+\text{SBP}_{\text{Model}}&= \alpha_0 + \alpha_1 \cdot A + \alpha_2 \cdot \text{HR} \\
 &\quad + \alpha_3 \cdot \text{Mean} + \alpha_4 \cdot \Phi
 \end{split}
 \label{eq:sinbp_m_sbp}
@@ -160,17 +124,14 @@ s_{\text{norm}}(t) = \frac{1 + \cos(\theta(t) + \phi_0)}{2}
 
 \begin{equation}
 \begin{split}
-\text{DBP} &= \beta_0 + \beta_1 \cdot A + \beta_2 \cdot \text{HR} \\
+\text{DBP}_{\text{Model}} &= \beta_0 + \beta_1 \cdot A + \beta_2 \cdot \text{HR} \\
 &\quad + \beta_3 \cdot \text{Mean} + \beta_4 \cdot \Phi
 \end{split}
 \label{eq:sinbp_m_dbp}
 \end{equation}
 
 \subsubsection{sinBP(D) (提案手法2)}
-モデル残差(歪み)を特徴量とする手法。
-\begin{itemize}
-\item 特徴量: $A$, HR, 相対TTP, Stiffness\_sin($E\sqrt{A}$), 歪み$E$
-\end{itemize}
+モデル残差(歪み)を特徴量とする手法である。特徴量として、$A$, HR, 相対TTPに加え、Stiffness\_sin($E\sqrt{A}$)および歪み$E$を使用する。
 歪み指標$E$は、実測波形$x[n]$とモデル波形$s[n]$のRMS誤差である(式\ref{eq:distortion})。
 \begin{equation}
 E = \sqrt{\frac{1}{N} \sum_{n=1}^{N} (x[n] - s[n])^2}
@@ -191,7 +152,7 @@ E = \sqrt{\frac{1}{N} \sum_{n=1}^{N} (x[n] - s[n])^2}
 \text{SBP}_{\text{vascular}} &= \text{SBP}_{\text{RTBP}} \\
 &\quad + \text{ALPHA}_5 \cdot \text{Stiffness}_{\text{sin}}
 \end{split}
-\label{eq:sinbp_d_sbp_vascular}
+\label{eq:sinbp_d_sbp_model}
 \end{equation}
 
 \begin{equation}
@@ -199,17 +160,17 @@ E = \sqrt{\frac{1}{N} \sum_{n=1}^{N} (x[n] - s[n])^2}
 \text{DBP}_{\text{vascular}} &= \text{DBP}_{\text{RTBP}} \\
 &\quad + \text{BETA}_5 \cdot \text{Stiffness}_{\text{sin}}
 \end{split}
-\label{eq:sinbp_d_dbp_vascular}
+\label{eq:sinbp_d_dbp_model}
 \end{equation}
 
 【第2段: 歪み補正】
 \begin{equation}
-\text{SBP} = \text{SBP}_{\text{vascular}} + \text{ALPHA}_6 \cdot E
+\text{SBP}_{\text{Distortion}} = \text{SBP}_{\text{vascular}} + \text{ALPHA}_6 \cdot E
 \label{eq:sinbp_d_sbp_final}
 \end{equation}
 
 \begin{equation}
-\text{DBP} = \text{DBP}_{\text{vascular}} + \text{BETA}_6 \cdot E
+\text{DBP}_{\text{Distortion}} = \text{DBP}_{\text{vascular}} + \text{BETA}_6 \cdot E
 \label{eq:sinbp_d_dbp_final}
 \end{equation}
 
@@ -221,33 +182,19 @@ E = \sqrt{\frac{1}{N} \sum_{n=1}^{N} (x[n] - s[n])^2}
 \section{実験計画}
 \subsection{プロトコル}
 \subsubsection{環境設定}
-\begin{itemize}
-\item \textbf{デバイス}: Google Pixel 8 フロント可視カメラ(30fps)
-\item \textbf{測定方式}: 指腹接触方式(第2指)
-\item \textbf{照明条件}: 室内 400 lux
-\end{itemize}
+デバイスにはGoogle Pixel 8のフロント可視カメラ(30fps)を使用し、指腹接触方式(第2指)で測定を行った。照明条件は室内400 luxとした。
 
 \subsubsection{参照値}
-\begin{itemize}
-\item \textbf{参照デバイス1}: 指先カフ(第3指)で実時間PPGを光学式パルスオキシメーター(IWS920-DEV 分解能409.6Hz)で同時計測
-\item \textbf{参照デバイス2}: 指先カフ(第3指/第4指)で実時間血圧を連続血圧計(CNAP-Monitor 分解能1000Hz 臨床グレード)で同時計測
-\item \textbf{測定条件}: 測定間隔・体位・安静時間を統一
-\end{itemize}
+参照デバイスとして、指先カフ(第3指)で実時間PPGを光学式パルスオキシメーター(IWS920-DEV 分解能409.6Hz)で同時計測した。また、指先カフ(第3指/第4指)で実時間血圧を連続血圧計(CNAP-Monitor 分解能1000Hz 臨床グレード)で同時計測した。測定条件として、測定間隔・体位・安静時間を統一した。
 
 \subsubsection{被験者}
-\begin{itemize}
-\item \textbf{被験者}: 20～23歳の健康な成人男性5名
-\item \textbf{除外条件}: 不整脈重度等
-\item \textbf{試行回数}: 各被験者につき3回ずつ計測
-\end{itemize}
+被験者は20～23歳の健康な成人男性5名であり、不整脈重度等の除外条件を設けた。各被験者につき3回ずつ計測を行った。
 
 \subsubsection{倫理}
 同意取得・匿名化・暗号化保存を実施する。
 
 \subsection{評価指標}
-\textbf{波形評価}: 参照波形とスマホ波形(Green/sinWave)を時間同期し、MAPE、MAE、相関係数で評価する。
-\textbf{血圧推定}: 5分割時系列交差検証を用い、MAE, RMSE, MAPEで3手法を比較する。AAMI基準($|\text{MD}|\leq 5, \text{SD}\leq 8$)も参照する。
-\textbf{アブレーション}: 各特徴量の寄与を係数分析により評価する。
+本研究では以下の指標を用いて評価を行う。まず波形評価として、参照波形とスマホ波形(Green/sinWave)を時間同期し、MAPE、MAE、相関係数で評価する。次に血圧推定精度については、5分割時系列交差検証を用い、MAE, RMSE, MAPEで3手法を比較検証する。その際、AAMI基準($|\text{MD}|\leq 5, \text{SD}\leq 8$)も参照する。さらにアブレーションとして、各特徴量の寄与を係数分析により評価する。
 
 \section{結果}
 \subsection{波形評価}
@@ -376,10 +323,7 @@ MAPEは16\%台であり、AAMI基準には達していない。今後は、(1)�
 \section{結論}
 本研究では、30fps可視カメラ環境向けに、非対称サイン波モデルを用いた血圧推定手法を提案した。実験の結果、モデル残差を用いたsinBP(D)が最も高い精度を示し、血管硬化を反映する歪み指標の有効性が確認された。
 
-本研究の主な貢献は以下の通りである。
-(1) \textbf{sinBP(M)の有用性}: 非対称サイン波モデルへのフィットにより得られるパラメータ(振幅、位相、平均値)が、30fps環境においてもノイズに頑健な特徴量として機能することを示した。
-(2) \textbf{sinBP(D)の新規性}: 生理学的に妥当なモデルからの「逸脱(残差)」を特徴量化することで、血管硬化や末梢抵抗の変化を捉え、血圧推定精度を向上させた。特に、歪み指標$E$と振幅$A$の組み合わせ(Stiffness\_sin)が有効であることを確認した。
-(3) \textbf{低FPS環境での実現可能性}: 周波数分解に依存しない時間領域モデリングにより、一般的なスマートフォンカメラ(30fps)でも実用的な血圧トレンド推定が可能であることを実証した。
+本研究の主な貢献は以下の通りである。第一に、\textbf{sinBP(M)の有用性}として、非対称サイン波モデルへのフィットにより得られるパラメータ(振幅、位相、平均値)が、30fps環境においてもノイズに頑健な特徴量として機能することを示した。第二に、\textbf{sinBP(D)の新規性}として、生理学的に妥当なモデルからの「逸脱(残差)」を特徴量化することで、血管硬化や末梢抵抗の変化を捉え、血圧推定精度を向上させた。特に、歪み指標$E$と振幅$A$の組み合わせ(Stiffness\_sin)が有効であることを確認した。第三に、\textbf{低FPS環境での実現可能性}として、周波数分解に依存しない時間領域モデリングにより、一般的なスマートフォンカメラ(30fps)でも実用的な血圧トレンド推定が可能であることを実証した。
 
 本手法は、専用デバイスを必要としない手軽な血圧モニタリング技術として、mHealth分野への貢献が期待される。今後は、個人差補正の導入や大規模データセットでの検証を進め、実用化を目指す。
 %%%%%%%%%%%%%%%%% BIBLIOGRAPHY IN THE LaTeX file !!!!! %%%%%%%%%%%%%%%%%%%%%%
@@ -409,7 +353,7 @@ Alian, Aymen A., and Kirk H. Shelley. "Photoplethysmography." \textit{Best Pract
 Zhang, Liang, et al. "Developing personalized models of blood pressure estimation from wearable sensors data using minimally-trained domain adversarial neural networks." \textit{Proceedings of Machine Learning Research}, vol. 126, 2020, pp. 97-120.
 
 \bibitem{ref9}
-Charlton, Peter H., et al. "Assessing vascular age from the photoplethysmogram: a systematic review." \textit{IEEE Reviews in Biomedical Engineering}, vol. 12, 2019, pp. 179-202.
+Charlton, Peter H., et al. "Assessing model age from the photoplethysmogram: a systematic review." \textit{IEEE Reviews in Biomedical Engineering}, vol. 12, 2019, pp. 179-202.
 
 \bibitem{ref10}
 Elgendi, Mohamed. "On the analysis of fingertip photoplethysmogram signals." \textit{Current Cardiology Reviews}, vol. 8, no. 1, 2012, pp. 14-25.
@@ -418,10 +362,10 @@ Elgendi, Mohamed. "On the analysis of fingertip photoplethysmogram signals." \te
 Allen, John. "Photoplethysmography and its application in clinical physiological measurement." \textit{Physiological Measurement}, vol. 28, no. 3, 2007, pp. R1-R39.
 
 \bibitem{ref12}
-Kurylyak, Yuriy, et al. "A Neural Network-based method for continuous blood pressure estimation from a PPG signal." \textit{IEEE International Instrumentation and Measurement Technology Conference (I2MTC)}, 2013, pp. 280-283.
+Mukkamala, Ramakrishna, et al. "Toward ubiquitous blood pressure monitoring via pulse transit time: theory and practice." \textit{IEEE Transactions on Biomedical Engineering}, vol. 62, no. 8, 2015, pp. 1879-1901.
 
 \bibitem{ref13}
-Takazawa, Kenji, et al. "Assessment of vasoactive agents and vascular aging by the second derivative of photoplethysmogram waveform." \textit{Hypertension}, vol. 32, no. 2, 1998, pp. 365-370.
+Takazawa, Kenji, et al. "Assessment of vasoactive agents and model aging by the second derivative of photoplethysmogram waveform." \textit{Hypertension}, vol. 32, no. 2, 1998, pp. 365-370.
 
 \bibitem{ref14}
 Nichols, Wilmer W. "Clinical measurement of arterial stiffness obtained from noninvasive pressure waveforms." \textit{American Journal of Hypertension}, vol. 18, no. 1, 2005, pp. 3S-10S.

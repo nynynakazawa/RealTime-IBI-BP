@@ -128,12 +128,12 @@
    DBP_base = 60 + 0.3*A + 0.15*HR
 
 2. 血管特性補正
-   SBP_vascular = SBP_base + 0.8*AI + 0.2*relTTP + 0.1*stiffness
-   DBP_vascular = DBP_base + 0.4*AI + 0.1*relTTP + 0.05*stiffness
+   SBP_model = SBP_base + 0.8*AI + 0.2*relTTP + 0.1*stiffness
+   DBP_model = DBP_base + 0.4*AI + 0.1*relTTP + 0.05*stiffness
 
 3. 歪み補正
-   SBP = SBP_vascular + 0.01*E
-   DBP = DBP_vascular + 0.005*E
+   SBP = SBP_model + 0.01*E
+   DBP = DBP_model + 0.005*E
 
 4. 制約
    if SBP < DBP + 10: SBP = DBP + 10
