@@ -397,6 +397,244 @@ def save_bland_altman_plot(
     plt.close(fig)
 
 
+def detect_beats(
+    time: np.ndarray,
+    values: np.ndarray,
+    min_period_s: float = 0.5,
+    max_period_s: float = 1.5,
+) -> List[Tuple[int, int]]:
+    """
+    ピーク検出によりビート区間を特定する。
+    
+    Parameters:
+    -----------
+    time : np.ndarray
+        時間配列（秒）
+    values : np.ndarray
+        信号値配列
+    min_period_s : float
+        最小ビート周期（秒）- 150 bpm に対応
+    max_period_s : float
+        最大ビート周期（秒）- 40 bpm に対応
+        
+    Returns:
+    --------
+    List[Tuple[int, int]]
+        各ビートの (開始インデックス, 終了インデックス) のリスト
+    """
+    valid_mask = np.isfinite(values)
+    if valid_mask.sum() < 10:
+        return []
+    
+    # 平均サンプリング間隔を推定
+    dt = np.median(np.diff(time[valid_mask]))
+    if dt <= 0:
+        return []
+    
+    min_distance = int(min_period_s / dt)
+    if min_distance < 1:
+        min_distance = 1
+    
+    # ピーク検出
+    from scipy.signal import find_peaks
+    peaks, _ = find_peaks(values, distance=min_distance)
+    
+    if len(peaks) < 2:
+        return []
+    
+    # 谷（ビート開始点）を検出：ピーク間の最小値
+    beats: List[Tuple[int, int]] = []
+    for i in range(len(peaks) - 1):
+        start_peak = peaks[i]
+        end_peak = peaks[i + 1]
+        
+        # ピーク間の時間差を確認
+        period = time[end_peak] - time[start_peak]
+        if period < min_period_s or period > max_period_s:
+            continue
+        
+        # ピーク間の最小値（谷）を見つける
+        segment = values[start_peak:end_peak + 1]
+        if len(segment) < 3:
+            continue
+        valley_local = np.argmin(segment)
+        valley_idx = start_peak + valley_local
+        
+        # 次のビートの谷を見つける
+        if i + 1 < len(peaks) - 1:
+            next_segment = values[end_peak:peaks[i + 2] + 1]
+            if len(next_segment) >= 3:
+                next_valley_local = np.argmin(next_segment)
+                next_valley_idx = end_peak + next_valley_local
+                beats.append((valley_idx, next_valley_idx))
+    
+    return beats
+
+
+def save_waveform_comparison_figure(
+    phone_df: pd.DataFrame,
+    output_path: Path,
+    num_examples: int = 3,
+) -> None:
+    """
+    Green と SinWave の波形比較図を生成する。
+    3つの代表的なビート例を表示：
+    (a) 高ノイズケース
+    (b) 典型的な品質ケース
+    (c) 低振幅ケース
+    
+    Parameters:
+    -----------
+    phone_df : pd.DataFrame
+        スマートフォン波形データ（経過時間_秒, Green, SinWave列を含む）
+    output_path : Path
+        出力ファイルパス
+    num_examples : int
+        表示するビート例の数（デフォルト: 3）
+    """
+    time_col = "経過時間_秒"
+    if time_col not in phone_df.columns:
+        print("Warning: 時間列が見つかりません。波形比較図をスキップします。")
+        return
+    
+    time = phone_df[time_col].to_numpy()
+    green = phone_df["Green"].to_numpy()
+    sinwave = phone_df["SinWave"].to_numpy()
+    
+    # ビート検出
+    beats = detect_beats(time, green)
+    
+    if len(beats) < num_examples:
+        print(f"Warning: 十分なビート数がありません（{len(beats)} < {num_examples}）。波形比較図をスキップします。")
+        return
+    
+    # 各ビートのノイズレベル（Green と SinWave の差の標準偏差）を計算
+    beat_noise = []
+    beat_amplitude = []
+    for start_idx, end_idx in beats:
+        if end_idx <= start_idx:
+            continue
+        g_seg = green[start_idx:end_idx]
+        s_seg = sinwave[start_idx:end_idx]
+        
+        valid = np.isfinite(g_seg) & np.isfinite(s_seg)
+        if valid.sum() < 5:
+            beat_noise.append(np.nan)
+            beat_amplitude.append(np.nan)
+            continue
+        
+        # ノイズ指標：Green と SinWave の差のRMS
+        diff = g_seg[valid] - s_seg[valid]
+        noise = float(np.sqrt(np.mean(diff ** 2)))
+        beat_noise.append(noise)
+        
+        # 振幅指標：Green のレンジ
+        amp = float(np.max(g_seg[valid]) - np.min(g_seg[valid]))
+        beat_amplitude.append(amp)
+    
+    beat_noise = np.array(beat_noise)
+    beat_amplitude = np.array(beat_amplitude)
+    
+    # 有効なビートのみを対象
+    valid_beats = np.isfinite(beat_noise) & np.isfinite(beat_amplitude)
+    if valid_beats.sum() < 3:
+        print("Warning: 有効なビートが不足しています。波形比較図をスキップします。")
+        return
+    
+    valid_indices = np.where(valid_beats)[0]
+    
+    # 3つの例を選択
+    # (a) 高ノイズ：ノイズが上位25パーセンタイルのビート
+    # (b) 典型的：ノイズが中央値付近のビート
+    # (c) 低振幅：振幅が下位25パーセンタイルのビート
+    
+    noise_sorted = np.argsort(beat_noise[valid_indices])
+    amp_sorted = np.argsort(beat_amplitude[valid_indices])
+    
+    # 高ノイズ例（上位25%から選択）
+    high_noise_idx = valid_indices[noise_sorted[-max(1, len(noise_sorted) // 4)]]
+    
+    # 典型例（中央から選択）
+    typical_idx = valid_indices[noise_sorted[len(noise_sorted) // 2]]
+    
+    # 低振幅例（下位25%から選択）
+    low_amp_idx = valid_indices[amp_sorted[max(0, len(amp_sorted) // 4)]]
+    
+    # 重複を避ける
+    selected = [high_noise_idx, typical_idx, low_amp_idx]
+    if len(set(selected)) < 3:
+        # 重複がある場合は別のビートを選択
+        available = set(valid_indices) - set(selected)
+        while len(set(selected)) < 3 and available:
+            new_idx = available.pop()
+            for i, idx in enumerate(selected):
+                if selected.count(idx) > 1:
+                    selected[i] = new_idx
+                    break
+    
+    # Figure 作成
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4), dpi=150)
+    titles = ["(a) High-noise case", "(b) Typical quality case", "(c) Low-amplitude case"]
+    
+    for ax, beat_idx, title in zip(axes, selected, titles):
+        start_idx, end_idx = beats[beat_idx]
+        
+        t_seg = time[start_idx:end_idx] - time[start_idx]  # 0から開始
+        g_seg = green[start_idx:end_idx]
+        s_seg = sinwave[start_idx:end_idx]
+        
+        # 正規化（比較しやすくするため）
+        g_min, g_max = np.nanmin(g_seg), np.nanmax(g_seg)
+        s_min, s_max = np.nanmin(s_seg), np.nanmax(s_seg)
+        
+        if g_max - g_min > 0:
+            g_norm = (g_seg - g_min) / (g_max - g_min)
+        else:
+            g_norm = g_seg
+        
+        if s_max - s_min > 0:
+            s_norm = (s_seg - s_min) / (s_max - s_min)
+        else:
+            s_norm = s_seg
+        
+        # プロット
+        ax.plot(t_seg * 1000, g_norm, 'b-', linewidth=1.5, alpha=0.7, label='Raw Green')
+        ax.plot(t_seg * 1000, s_norm, 'r-', linewidth=2, label='sinWave fit')
+        
+        # ピーク位置にマーカー
+        if len(g_norm) > 0:
+            g_peak_idx = np.nanargmax(g_norm)
+            s_peak_idx = np.nanargmax(s_norm)
+            
+            ax.axvline(t_seg[g_peak_idx] * 1000, color='blue', linestyle=':', alpha=0.5)
+            ax.axvline(t_seg[s_peak_idx] * 1000, color='red', linestyle=':', alpha=0.5)
+            
+            # ピーク位置の差を表示
+            peak_diff_ms = (t_seg[s_peak_idx] - t_seg[g_peak_idx]) * 1000
+            if abs(peak_diff_ms) > 1:
+                ax.annotate(f'Δpeak={peak_diff_ms:.1f}ms', 
+                           xy=(t_seg[g_peak_idx] * 1000, 1.05),
+                           fontsize=8, ha='center')
+        
+        ax.set_xlabel('Time [ms]')
+        ax.set_ylabel('Normalized amplitude')
+        ax.set_title(title)
+        ax.legend(loc='upper right', fontsize=8)
+        ax.grid(True, linestyle='--', alpha=0.3)
+        ax.set_ylim(-0.1, 1.2)
+    
+    fig.suptitle('Waveform comparison: Raw Green channel vs sinWave fit', fontsize=12, y=1.02)
+    fig.tight_layout()
+    
+    # 保存
+    fig.savefig(output_path, format="png", dpi=300, bbox_inches='tight')
+    svg_path = output_path.with_suffix(".svg")
+    fig.savefig(svg_path, format="svg", bbox_inches='tight')
+    plt.close(fig)
+    print(f"★ 波形比較図を保存しました: {output_path}")
+
+
+
 def extract_key(name: str) -> str:
     """
     ファイル名から基準キー (例: W1, W3) を抽出する。

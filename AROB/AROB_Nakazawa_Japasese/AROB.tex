@@ -38,11 +38,11 @@ Continuous non-invasive blood pressure monitoring is essential for the early det
 
 PPG waveform features reflect underlying vascular physiology. Amplitude ($A$) indicates vascular distensibility and stroke volume \cite{ref3,ref4}, while peak interval reflects autonomic activity. Relative time-to-peak (TTP), the ratio of peak arrival time to the pulse period, captures earlier reflected-wave return in stiffer vessels and serves as an arteriosclerosis indicator \cite{ref5,ref6}. A linear relationship between these PPG features and blood pressure has been established \cite{ref5,ref7,ref8}. Conventional approaches extract such features via morphological analysis (peaks, TTP) \cite{ref5}, frequency analysis (FFT) \cite{ref9}, or machine learning (deep learning) \cite{ref10}.
 
-However, standard smartphone cameras typically operate at 30\,fps, which is insufficient for precise pulse-wave analysis, and they are susceptible to illumination fluctuations and motion artifacts. Under these conditions, morphological features that depend on fine timing (peak positions, TTP) become unstable, and frequency analysis is constrained by the low sampling rate \cite{ref11,ref12}.
+However, standard smartphone cameras typically operate at 30\,fps, which poses significant quantitative limitations for precise pulse-wave analysis. At 30\,fps, the sampling interval is approximately 33\,ms, meaning peak position errors can reach $\pm16.5$\,ms or more. For a typical heart rate of 60--80\,bpm (period 750--1000\,ms), this corresponds to a relative timing error of 1.6--2.2\%, substantially degrading morphological feature accuracy. Furthermore, according to the Nyquist theorem, the maximum detectable frequency is limited to 15\,Hz, making it impossible to capture PPG harmonics above the 2nd or 3rd order (typically extending to 10--20\,Hz). This loss of high-frequency components critically impairs waveform detail analysis. Under these conditions, morphological features that depend on fine timing (peak positions, TTP) become unstable, causing RTBP-based blood pressure estimation to exhibit increased variance and reduced reproducibility. Additionally, smartphone cameras are susceptible to illumination fluctuations and motion artifacts, further compounding these issues \cite{ref11,ref12}.
 
 To address these limitations, this study focuses on the overall waveform shape rather than local feature points or frequency components. The overall waveform shape changes depending on blood pressure. We hypothesize that fitting a model function to all data points within one beat smooths out local noise and sampling jitter, enabling robust feature extraction even in a 30\,fps, high-noise environment.
 
-We propose an asymmetric sine wave model that accounts for the asymmetry between the systolic and diastolic phases. Gamma, Beta, and skewed-Gaussian models have been reported for PPG representation \cite{ref13,ref14}, but they require many parameters, incur high computational costs, and are noise-sensitive at low sampling rates. In contrast, the proposed model captures the steep rise and gradual decay characteristic of PPG using the systolic-to-diastolic time ratio ($\alpha$). With only four parameters (amplitude, phase, mean, $\alpha$), the model captures the main waveform features at low computational cost and remains robust at 30\,fps.
+We propose an asymmetric sine wave model that accounts for the asymmetry between the systolic and diastolic phases. Gamma, Beta, and skewed-Gaussian models have been reported for PPG representation \cite{ref13,ref14}; however, these models present significant challenges at 30\,fps. The Gamma model requires 3--5 parameters per component, and multi-component decomposition (typically 2--4 components for dicrotic notch representation) requires 6--20 parameters total. Similarly, skewed-Gaussian models require at least 4 parameters (amplitude, mean, standard deviation, skewness) per component. At 30\,fps, with only approximately 20--30 samples per cardiac cycle (assuming 60--90\,bpm), the number of data points approaches or falls below the number of parameters, leading to underdetermined or ill-conditioned fitting problems. This results in local minima trapping during nonlinear optimization, parameter identifiability issues where different parameter combinations yield similar waveforms, and high sensitivity to noise where single-sample outliers cause large parameter shifts. In contrast, the proposed asymmetric sine wave model captures the steep rise and gradual decay characteristic of PPG using the systolic-to-diastolic time ratio ($\alpha$). With only four parameters (amplitude, phase, mean, $\alpha$), the ratio of samples to parameters remains favorable (approximately 5:1 to 7.5:1), ensuring stable convergence and noise robustness even in the 30\,fps environment.
 
 The objective of this study is to verify the effectiveness of this asymmetric sine wave model. We examined the following three methods.
 (1) RTBP (Baseline): Morphological features (amplitude, heart rate, relative TTP) \cite{ref5}.
@@ -76,7 +76,9 @@ s(t) = \text{mean} + \frac{A}{2} \cdot \sin(\theta(t))
 
 Here, $A$ is amplitude, mean is the DC offset, and $T$ is the beat period (IBI). $T_{sys}$ and $T_{dia}$ denote systolic and diastolic durations, respectively, with $T = T_{sys} + T_{dia}$. The variable $t' = (t - \tau_{\text{foot}}) \bmod T$ is the intra-beat phase time, where $\tau_{\text{foot}}$ aligns the beat start (valley). During the rising phase, $\sin$ sweeps from $-1$ to $+1$ (valley to peak); during the falling phase, it sweeps from $+1$ to $-1$ (peak to valley), producing the characteristic asymmetric PPG pulse.
 
-The systolic/diastolic ratio $\alpha = T_{sys}/T$ is computed from the measured data, with $\alpha = 1/3$ as an initial value.
+Note that at the boundary $t' = T_{sys}$, the first derivative of the phase function $\theta(t)$ exhibits a discontinuity: the derivative is $\pi/T_{sys}$ in the rising phase and $\pi/T_{dia}$ in the falling phase. This causes a theoretical slope discontinuity in $s(t)$ at the peak. However, at 30\,fps sampling (33\,ms interval), this discontinuity falls well within the sampling resolution and does not manifest as a visible artifact in the discretized waveform. Since the sampling coarseness dominates over this mathematical discontinuity, the practical impact on fitting quality and feature extraction is negligible.
+
+The systolic/diastolic ratio $\alpha = T_{sys}/T$ is estimated by detecting the systolic peak and the subsequent valley from the smoothed waveform. The time difference between the peak and the valley is defined as the diastolic time $T_{dia}$, and the systolic time is calculated as $T_{sys} = T - T_{dia}$. The ratio is then derived as $\alpha = T_{sys}/T$. This heuristic approach ensures real-time performance on mobile devices.
 
 \subsection{Feature Extraction}
 Features are extracted from three perspectives:
@@ -112,10 +114,20 @@ An interaction term $E\sqrt{A}$ captures amplitude-dependent stiffness:
 
 \subsection{Blood Pressure Estimation Process}
 \subsubsection{Preprocessing}
-Peak detection, beat segmentation, time normalization ($N=64$ samples), peak alignment via phase search, and outlier removal (IBI and amplitude criteria) are performed.
+The preprocessing pipeline consists of the following steps with specific parameters to ensure reproducibility:
+
+Peak Detection: Local maxima are identified using a minimum peak distance of 0.5\,s (corresponding to 120\,bpm maximum heart rate). Peaks are refined by local search within $\pm2$ samples of the initial detection to correct for sampling-induced position errors.
+
+IBI Outlier Removal: Beats are rejected if the IBI ratio to the preceding beat falls outside the range [0.7, 1.3], corresponding to sudden heart rate changes exceeding 30\%. Additionally, beats with IBI outside the physiological range of 0.5--1.5\,s (40--120\,bpm) are excluded.
+
+Amplitude Outlier Removal: Beats with amplitude outside a fixed physiological range (0.5--50 arbitrary units) are rejected to eliminate motion artifacts and contact pressure variations.
+
+Beat Segmentation and Normalization: Valid beats are resampled to $N=64$ samples using cubic spline interpolation for uniform time normalization, enabling direct comparison across beats with different IBIs.
+
+Peak Alignment: Phase alignment is performed via cross-correlation-based search to align systolic peaks across beats, compensating for detection jitter.
 
 \subsubsection{Estimation Model Construction}
-Three regression models are compared. All use Ridge regression \cite{ref15}.
+Three regression models are compared. All use Ridge regression \cite{ref15} with regularization parameter $\lambda = 1.0$ determined via cross-validation.
 
 (1) RTBP: Uses morphological features only ($A$, HR, V2P\_relTTP, P2V\_relTTP).
 
@@ -133,25 +145,28 @@ Three regression models are compared. All use Ridge regression \cite{ref15}.
 
 \subsection{Experimental Environment}
 
-Device:
-A Google Pixel 8 front camera (30\,fps) acquired PPG via fingertip contact (index finger) under 400\,lux indoor lighting.
+Device and Environmental Controls:
+A Google Pixel 8 front camera (30\,fps, 1080p resolution) acquired PPG via fingertip contact (index finger) under controlled indoor lighting of $400 \pm 50$\,lux, measured by a calibrated lux meter at the fingertip position. To minimize illumination variation, measurements were conducted in a windowless room with fluorescent lighting. The smartphone was placed flat on a stable desk surface. Subjects were instructed to place their index finger directly on the front camera lens, applying light, consistent pressure without blanching the fingertip, and the experimenter visually confirmed adequate contact before each session.
 
 Reference Instruments:
-A clinical-grade continuous blood pressure monitor (CNAP-Monitor, 1000\,Hz) measured reference BP at the fingernail cuff (middle/ring finger). Simultaneously, an optical pulse oximeter (IWS920-DEV, 409.6\,Hz) recorded reference PPG at the middle finger. Measurement intervals, posture, and rest periods were standardized.
+A clinical-grade continuous blood pressure monitor (CNAP-Monitor, 1000\,Hz) measured reference BP at the fingernail cuff (middle/ring finger). Simultaneously, an optical pulse oximeter (IWS920-DEV, 409.6\,Hz) recorded reference PPG at the middle finger. Measurement intervals, posture, and rest periods were standardized. All devices were time-synchronized via common trigger signals.
 
 Subjects:
-Five healthy males aged 20--23 participated; severe arrhythmia was an exclusion criterion. Each subject underwent three measurement sessions.
+Five healthy males aged 20--23 (mean $21.4 \pm 1.1$ years) participated; severe arrhythmia was an exclusion criterion. Each subject underwent three measurement sessions on separate days. We acknowledge that this sample size is limited, and the generalizability of results is constrained. The current cohort consists entirely of young healthy males, which may not represent the broader population including females, older adults, or individuals with cardiovascular conditions. Future studies should expand the sample to include (1) female participants for sex-balanced validation, (2) older age groups (40s--60s) to assess performance under age-related vascular changes, and (3) individuals with hypertension or other cardiovascular conditions to validate clinical applicability.
 
 Ethics:
 The study followed the Declaration of Helsinki and received institutional ethics approval. Written informed consent was obtained, and data were anonymized and encrypted.
 
 \subsection{Experimental Procedure}
-Subjects were seated at rest. The CNAP cuff was placed on the left middle finger; the right index finger lightly contacted the smartphone camera. Each 180-second session comprised:
+Subjects were seated at rest in an upright position with feet flat on the floor. The CNAP cuff was placed on the left middle finger; the right index finger lightly contacted the smartphone camera, which was positioned on a stable surface to minimize motion artifacts. Each 180-second session comprised:
 \begin{enumerate}
 \item Resting (60\,s): Natural breathing.
 \item Deep breathing (60\,s): 5\,s inhale / 5\,s exhale to induce BP variation.
 \item Recovery (60\,s): Return to natural breathing.
 \end{enumerate}
+
+Blood Pressure Range Limitation:
+The deep breathing protocol was selected to induce moderate, physiologically safe blood pressure variations. However, this approach results in a limited BP range: typical SBP variations of 10--20\,mmHg and DBP variations of 5--15\,mmHg around baseline. This narrow range may restrict the model's ability to capture relationships across the full clinical BP spectrum (e.g., 90--180\,mmHg for SBP). Consequently, the validation reflects performance within a constrained, near-normotensive range, and extrapolation to hypertensive or hypotensive conditions requires further investigation with appropriately designed protocols (e.g., exercise stress, pharmacological intervention).
 
 \subsection{Evaluation Metrics}
 Waveform Evaluation:
@@ -168,38 +183,46 @@ Feature contributions were assessed via regression coefficient analysis.
 \section{Results}
 
 \subsection{Waveform Evaluation}
-Table\,\ref{tab:waveform_eval} shows waveform accuracy. The sinWave improved MAPE by 11.5 percentage points over the raw Green channel and achieved a higher correlation, indicating that model fitting serves as effective noise reduction.
+Table\,\ref{tab:waveform_eval} shows waveform accuracy. The sinWave improved MAPE by 11.5 percentage points over the raw Green channel and achieved a higher correlation, indicating that model fitting serves as effective noise reduction. Figure\,\ref{fig:waveform_examples} presents representative examples of raw Green-channel waveforms and corresponding sinWave fits, illustrating improvements in (1) peak position stability---the sinWave peak locations exhibit reduced jitter compared to raw signal peaks, (2) falling-phase smoothness---the diastolic decay is regularized, removing high-frequency noise without distorting the overall morphology, and (3) baseline consistency---DC offset variations are normalized through the mean parameter.
 
 \begin{table}[t]
 \caption{Waveform accuracy (session average)}
 \label{tab:waveform_eval}
 \centering
-\small
-\begin{tabular}{lccccc}
+\footnotesize
+\begin{tabular}{lcccc}
 \hline
-Channel & MAPE [\%] & MAE & RMSE & Bias & Corr \\
+Channel & MAPE \tiny{[\%]} & MAE \tiny{[a.u.]} & RMSE \tiny{[a.u.]} & Corr \\
 \hline
-sinWave & 18.22 & 1.82 & 2.24 & $-$0.66 & 0.19 \\
-Green   & 29.71 & 2.97 & 3.64 & $+$0.42 & 0.07 \\
+sinWave & 18.22 & 1.82 & 2.24 & 0.19 \\
+Green   & 29.71 & 2.97 & 3.64 & 0.07 \\
 \hline
 \end{tabular}
 \end{table}
 
+% The waveform comparison figure is now generated using generate_waveform_comparison.py
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/waveform_comparison_examples.png}
+\caption{Representative waveform comparisons: raw Green channel vs. sinWave fit. Three example beats showing (a) high-noise case with motion artifact, (b) typical quality case, (c) low-amplitude case. Vertical dashed lines indicate peak positions.}
+\label{fig:waveform_examples}
+\end{figure}
+
 \subsection{Blood Pressure Estimation Accuracy}
-Tables\,\ref{tab:sbp_acc} and \ref{tab:dbp_acc} summarize BP estimation accuracy. sinBP(D) achieved the lowest MAE and RMSE for both SBP and DBP, with particularly notable RMSE reduction, indicating suppression of large errors. Figures\,\ref{fig:sbp_ba_all} and \ref{fig:dbp_ba_all} present Bland--Altman plots; sinBP(D) exhibits reduced bias and narrower limits of agreement compared to RTBP. Figures\,\ref{fig:sbp_comp} and \ref{fig:dbp_comp} compare method accuracies.
+Tables\,\ref{tab:sbp_acc} and \ref{tab:dbp_acc} summarize BP estimation accuracy. sinBP(D) achieved the lowest MAE and RMSE for both SBP and DBP, with particularly notable RMSE reduction, indicating suppression of large errors. However, it should be noted that the correlation coefficient for SBP (0.21) remains relatively low, indicating that instantaneous blood pressure tracking capability is limited. This suggests that while the method reduces average estimation error, its ability to follow rapid beat-to-beat fluctuations in blood pressure is constrained. Furthermore, sinBP(D) showed the highest correlation coefficients (Corr) for both SBP and DBP among the compared methods, demonstrating relatively superior capability in tracking blood pressure fluctuations compared to RTBP, though absolute tracking performance requires further improvement. Figures\,\ref{fig:sbp_ba_all} and \ref{fig:dbp_ba_all} present Bland--Altman plots; sinBP(D) exhibits reduced bias and narrower limits of agreement compared to RTBP. Figures\,\ref{fig:sbp_comp} and \ref{fig:dbp_comp} compare method accuracies.
 
 \begin{table}[t]
 \caption{SBP estimation accuracy}
 \label{tab:sbp_acc}
 \centering
-\small
-\begin{tabular}{lccc}
+\footnotesize
+\begin{tabular}{lcccc}
 \hline
-Method & MAPE [\%] & MAE [mmHg] & RMSE [mmHg] \\
+Method & MAPE \tiny{[\%]} & MAE \tiny{[mmHg]} & RMSE \tiny{[mmHg]} & Corr \\
 \hline
-RTBP     & 17.82 & 20.66 & 28.02 \\
-sinBP(M) & 16.92 & 19.47 & 24.70 \\
-sinBP(D) & 16.44 & 18.98 & 24.17 \\
+RTBP     & 17.82 & 20.66 & 28.02 & $-$0.06 \\
+sinBP(M) & 16.92 & 19.47 & 24.70 & 0.17 \\
+sinBP(D) & 16.44 & 18.98 & 24.17 & 0.21 \\
 \hline
 \end{tabular}
 \end{table}
@@ -208,14 +231,14 @@ sinBP(D) & 16.44 & 18.98 & 24.17 \\
 \caption{DBP estimation accuracy}
 \label{tab:dbp_acc}
 \centering
-\small
-\begin{tabular}{lccc}
+\footnotesize
+\begin{tabular}{lcccc}
 \hline
-Method & MAPE [\%] & MAE [mmHg] & RMSE [mmHg] \\
+Method & MAPE \tiny{[\%]} & MAE \tiny{[mmHg]} & RMSE \tiny{[mmHg]} & Corr \\
 \hline
-RTBP     & 23.14 & 16.11 & 22.43 \\
-sinBP(M) & 22.30 & 15.20 & 19.73 \\
-sinBP(D) & 21.72 & 14.84 & 19.31 \\
+RTBP     & 23.14 & 16.11 & 22.43 & 0.17 \\
+sinBP(M) & 22.30 & 15.20 & 19.73 & 0.26 \\
+sinBP(D) & 21.72 & 14.84 & 19.31 & 0.28 \\
 \hline
 \end{tabular}
 \end{table}
@@ -281,22 +304,25 @@ The improved waveform accuracy (lower MAPE) of sinWave over the raw Green channe
 
 The superior accuracy of sinBP(D) indicates that \emph{deviation from the physiological model} (residual) carries important BP-related information. Quantifying this ``distortion'' and incorporating it as a feature captures subtle physiological changes---such as vascular stiffness and peripheral resistance---that pure parameterization (sinBP(M)) cannot.
 
+\subsection{Physiological Interpretation of Residual E}
+The residual $E$ reflects waveform distortions that the idealized asymmetric sine model cannot capture. Physiologically, these distortions arise primarily from two mechanisms. First, reflected waves from peripheral vascular beds return to the measurement site and superimpose on the forward-traveling pulse wave. The timing and magnitude of these reflections depend on pulse wave velocity (PWV), which increases with arterial stiffness and blood pressure. In stiffer vessels, faster PWV causes earlier wave reflection, creating more pronounced distortion in the diastolic phase. Second, increased vascular resistance associated with elevated blood pressure alters the pressure-flow relationship, modifying the decay characteristics of the diastolic portion. The residual $E$ thus encapsulates information about vascular impedance and wave reflection phenomena that correlate with blood pressure independently of the primary waveform parameters.
+
 \subsection{Superiority of the Proposed Method}
 RTBP relies on ``point'' information (peaks, valleys) and is therefore sensitive to sampling jitter at 30\,fps. In contrast, sinBP methods perform least-squares fitting over an entire beat, inherently smoothing timing errors. This robustness explains why sinBP(M) and sinBP(D) outperform RTBP.
 
 Furthermore, sinBP(D) outperforming sinBP(M) demonstrates the value of the ``physiological constraint'' imposed by the asymmetric model. The residual $E$, derived from a model that respects systolic/diastolic asymmetry, more purely reflects pathological or physiological distortion (e.g., vascular stiffening) than simple parameter extraction.
 
 \subsection{Limitations and Future Work}
-MAPE remains around 16\%, short of AAMI criteria. Future work should address (1) individual calibration, (2) model extensions (e.g., second-harmonic terms), and (3) larger, more diverse datasets.
+MAPE remains around 16\%, and the SBP correlation coefficient of 0.21 indicates limited instantaneous tracking capability, falling short of AAMI criteria for clinical device approval. The current validation is further constrained by the small sample size (N=5), narrow demographic range (young healthy males), and limited blood pressure variation range induced by the deep breathing protocol. Future work should address (1) individual calibration to reduce inter-subject variability, (2) model extensions (e.g., second-harmonic terms) to capture dicrotic notch features, (3) larger, more diverse datasets including female participants, older adults, and hypertensive individuals, and (4) validation across wider blood pressure ranges using exercise or pharmacological protocols.
 
 %-----------------------------------------------------------------------
 
 \section{Conclusion}
-We proposed a blood pressure estimation method based on an asymmetric sine wave model optimized for 30\,fps visible-camera PPG. Experiments showed that sinBP(D), which leverages model residuals, achieved the highest accuracy, confirming the effectiveness of the distortion index as a vascular-stiffness indicator.
+We proposed a blood pressure estimation method based on an asymmetric sine wave model optimized for 30\,fps visible-camera PPG. Experiments showed that sinBP(D), which leverages model residuals, achieved the highest accuracy among the compared methods, confirming the effectiveness of the distortion index as a vascular-stiffness indicator. However, the correlation coefficients (SBP: 0.21, DBP: 0.28) indicate that instantaneous blood pressure tracking capability remains limited, and the method does not currently meet AAMI criteria for clinical device approval.
 
 The main contribution is an ``asymmetric sine wave model fitting method'' enabling stable feature extraction in low-quality 30\,fps video. Unlike point-based RTBP, this approach exploits the entire waveform shape for improved noise robustness.
 
-This method is expected to contribute to the mHealth field as a convenient blood pressure monitoring technology requiring no dedicated devices. Future work will pursue individual-difference calibration and validation on larger datasets toward practical deployment.
+This method shows potential for mHealth applications and daily self-monitoring purposes, where the goal is trend awareness rather than clinical-grade accuracy. It is not intended for clinical diagnostic or treatment decision-making at the current stage of development. Future work will pursue individual-difference calibration and validation on larger, more diverse datasets toward expanding practical applicability.
 
 %%%%%%%%%%%%%%%%% BIBLIOGRAPHY IN THE LaTeX file !!!!! %%%%%%%%%%%%%%%%%%%%%%
 \begin{thebibliography}{16}

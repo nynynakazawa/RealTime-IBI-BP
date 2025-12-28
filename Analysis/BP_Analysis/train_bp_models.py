@@ -101,7 +101,7 @@ def save_scatter_plot(
         stats_text = f"r = {corr:.3f}\nMAE = {mae_val:.2f} mmHg\nRMSE = {rmse_val:.2f} mmHg"
         ax.text(0.05, 0.95, stats_text, transform=ax.transAxes,
                 verticalalignment="top", bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
-                fontsize=10)
+                fontsize=14)
     else:
         # 推定値が定数の場合
         if np.std(est) < 1e-10:
@@ -110,13 +110,14 @@ def save_scatter_plot(
                       label=f"Constant estimate = {mean_est:.2f} mmHg")
             print(f"    WARNING: Estimate is constant, cannot compute regression")
     
-    ax.set_xlabel(f"Reference {target} (mmHg)", fontsize=12)
-    ax.set_ylabel(f"Estimated {target} (mmHg)", fontsize=12)
-    ax.set_title(f"{method_name} - {target}", fontsize=14, fontweight="bold")
+    ax.set_xlabel(f"Reference {target} (mmHg)", fontsize=18)
+    ax.set_ylabel(f"Estimated {target} (mmHg)", fontsize=18)
+    ax.set_title(f"{method_name} - {target}", fontsize=20, fontweight="bold")
     ax.set_xlim(min_lim, max_lim)
     ax.set_ylim(min_lim, max_lim)
     ax.grid(True, linestyle="--", alpha=0.3)
-    ax.legend(loc="upper left", fontsize=10)
+    ax.tick_params(axis='both', which='major', labelsize=14)
+    ax.legend(loc="upper left", fontsize=14)
     fig.tight_layout()
     fig.savefig(output_path, format="svg", bbox_inches="tight")
     # Save as PNG as well
@@ -156,11 +157,12 @@ def save_bland_altman_plot(
     ax.axhline(loa_lower, color="gray", linestyle="--", linewidth=1.5,
                label=f"-1.96 SD = {loa_lower:.2f} mmHg")
     
-    ax.set_xlabel(f"Mean of Reference and Estimated {target} (mmHg)", fontsize=12)
-    ax.set_ylabel(f"Difference (Estimated - Reference) (mmHg)", fontsize=12)
-    ax.set_title(f"{method_name} - {target} Bland-Altman Plot", fontsize=14, fontweight="bold")
+    ax.set_xlabel(f"Mean of Reference and Estimated {target} (mmHg)", fontsize=18)
+    ax.set_ylabel(f"Difference (Estimated - Reference) (mmHg)", fontsize=18)
+    ax.set_title(f"{method_name} - {target} Bland-Altman Plot", fontsize=20, fontweight="bold")
     ax.grid(True, linestyle="--", alpha=0.3)
-    ax.legend(loc="best", fontsize=10)
+    ax.tick_params(axis='both', which='major', labelsize=14)
+    ax.legend(loc="best", fontsize=14)
     fig.tight_layout()
     fig.savefig(output_path, format="svg", bbox_inches="tight")
     # Save as PNG as well
@@ -205,13 +207,13 @@ def save_comparison_barplot(
     # 1. MAE
     fig_mae, ax_mae = plt.subplots(1, 1, figsize=(6, 6), dpi=150)
     ax_mae.bar(x, mae_means, width, yerr=mae_stds, alpha=0.8, capsize=5, color='#1f77b4')
-    ax_mae.set_xlabel("Method", fontsize=14, fontweight='bold')
-    ax_mae.set_ylabel("MAE (mmHg)", fontsize=14, fontweight='bold')
-    ax_mae.set_title(f"{target} - MAE", fontsize=16, fontweight="bold", pad=15)
+    ax_mae.set_xlabel("Method", fontsize=18, fontweight='bold')
+    ax_mae.set_ylabel("MAE (mmHg)", fontsize=18, fontweight='bold')
+    ax_mae.set_title(f"{target} - MAE", fontsize=20, fontweight="bold", pad=15)
     ax_mae.set_xticks(x)
-    ax_mae.set_xticklabels(methods, rotation=0, ha="center", fontsize=12)
+    ax_mae.set_xticklabels(methods, rotation=0, ha="center", fontsize=16)
     ax_mae.grid(True, axis="y", linestyle="--", alpha=0.3)
-    ax_mae.tick_params(axis='both', which='major', labelsize=11)
+    ax_mae.tick_params(axis='both', which='major', labelsize=14)
     fig_mae.tight_layout()
     mae_path_svg = output_dir / f"{base_name}_MAE.svg"
     mae_path_png = output_dir / f"{base_name}_MAE.png"
@@ -222,13 +224,13 @@ def save_comparison_barplot(
     # 2. RMSE
     fig_rmse, ax_rmse = plt.subplots(1, 1, figsize=(6, 6), dpi=150)
     ax_rmse.bar(x, rmse_means, width, yerr=rmse_stds, alpha=0.8, capsize=5, color='#ff7f0e')
-    ax_rmse.set_xlabel("Method", fontsize=14, fontweight='bold')
-    ax_rmse.set_ylabel("RMSE (mmHg)", fontsize=14, fontweight='bold')
-    ax_rmse.set_title(f"{target} - RMSE", fontsize=16, fontweight="bold", pad=15)
+    ax_rmse.set_xlabel("Method", fontsize=18, fontweight='bold')
+    ax_rmse.set_ylabel("RMSE (mmHg)", fontsize=18, fontweight='bold')
+    ax_rmse.set_title(f"{target} - RMSE", fontsize=20, fontweight="bold", pad=15)
     ax_rmse.set_xticks(x)
-    ax_rmse.set_xticklabels(methods, rotation=0, ha="center", fontsize=12)
+    ax_rmse.set_xticklabels(methods, rotation=0, ha="center", fontsize=16)
     ax_rmse.grid(True, axis="y", linestyle="--", alpha=0.3)
-    ax_rmse.tick_params(axis='both', which='major', labelsize=11)
+    ax_rmse.tick_params(axis='both', which='major', labelsize=14)
     fig_rmse.tight_layout()
     rmse_path_svg = output_dir / f"{base_name}_RMSE.svg"
     rmse_path_png = output_dir / f"{base_name}_RMSE.png"
@@ -239,13 +241,13 @@ def save_comparison_barplot(
     # 3. MAPE
     fig_mape, ax_mape = plt.subplots(1, 1, figsize=(6, 6), dpi=150)
     ax_mape.bar(x, mape_means, width, yerr=mape_stds, alpha=0.8, capsize=5, color='#2ca02c')
-    ax_mape.set_xlabel("Method", fontsize=14, fontweight='bold')
-    ax_mape.set_ylabel("MAPE (%)", fontsize=14, fontweight='bold')
-    ax_mape.set_title(f"{target} - MAPE", fontsize=16, fontweight="bold", pad=15)
+    ax_mape.set_xlabel("Method", fontsize=18, fontweight='bold')
+    ax_mape.set_ylabel("MAPE (%)", fontsize=18, fontweight='bold')
+    ax_mape.set_title(f"{target} - MAPE", fontsize=20, fontweight="bold", pad=15)
     ax_mape.set_xticks(x)
-    ax_mape.set_xticklabels(methods, rotation=0, ha="center", fontsize=12)
+    ax_mape.set_xticklabels(methods, rotation=0, ha="center", fontsize=16)
     ax_mape.grid(True, axis="y", linestyle="--", alpha=0.3)
-    ax_mape.tick_params(axis='both', which='major', labelsize=11)
+    ax_mape.tick_params(axis='both', which='major', labelsize=14)
     fig_mape.tight_layout()
     mape_path_svg = output_dir / f"{base_name}_MAPE.svg"
     mape_path_png = output_dir / f"{base_name}_MAPE.png"
@@ -499,6 +501,7 @@ def eval_one_method(df, feature_cols, target_col, groups=None, split_strategy="g
     mape_list = []
     mae_list = []
     rmse_list = []
+    corr_list = []
     coefs_list = []
     intercept_list = []
     scaler_stats = []
@@ -673,10 +676,12 @@ def eval_one_method(df, feature_cols, target_col, groups=None, split_strategy="g
         fold_mape = mape(eval_y_true, eval_y_pred)
         fold_mae = mean_absolute_error(eval_y_true, eval_y_pred)
         fold_rmse = np.sqrt(mean_squared_error(eval_y_true, eval_y_pred))
+        fold_corr = np.corrcoef(eval_y_true, eval_y_pred)[0, 1]
         
         mape_list.append(fold_mape)
         mae_list.append(fold_mae)
         rmse_list.append(fold_rmse)
+        corr_list.append(fold_corr)
         
         # 予測値と参照値を保存（numpy配列の場合はtolist()、既にリストの場合はそのまま）
         if isinstance(eval_y_true, np.ndarray):
@@ -714,7 +719,7 @@ def eval_one_method(df, feature_cols, target_col, groups=None, split_strategy="g
             "scale": scaler.scale_.tolist()
         })
 
-        print(f"{method_name} Fold {fold_idx+1}: MAPE={fold_mape:.2f}%, MAE={fold_mae:.2f}, RMSE={fold_rmse:.2f}")
+        print(f"{method_name} Fold {fold_idx+1}: MAPE={fold_mape:.2f}%, MAE={fold_mae:.2f}, RMSE={fold_rmse:.2f}, Corr={fold_corr:.3f}")
 
     return {
         "mape_mean": float(np.mean(mape_list)),
@@ -724,6 +729,8 @@ def eval_one_method(df, feature_cols, target_col, groups=None, split_strategy="g
         "mae_std": float(np.std(mae_list, ddof=1)),
         "rmse_mean": float(np.mean(rmse_list)),
         "rmse_std": float(np.std(rmse_list, ddof=1)),
+        "corr_mean": float(np.mean(corr_list)),
+        "corr_std": float(np.std(corr_list, ddof=1)),
         "coef_each_fold": coefs_list,
         "intercept_each_fold": intercept_list,
         "scaler_stats_each_fold": scaler_stats,
@@ -928,10 +935,13 @@ def main():
             "mae_std": res["mae_std"],
             "rmse_mean": res["rmse_mean"],
             "rmse_std": res["rmse_std"],
+            "corr_mean": res["corr_mean"],
+            "corr_std": res["corr_std"],
         })
         print(f"{method_name}: MAPE={res['mape_mean']:.2f}±{res['mape_std']:.2f}%, "
               f"MAE={res['mae_mean']:.2f}±{res['mae_std']:.2f}, "
-              f"RMSE={res['rmse_mean']:.2f}±{res['rmse_std']:.2f}")
+              f"RMSE={res['rmse_mean']:.2f}±{res['rmse_std']:.2f}, "
+              f"Corr={res['corr_mean']:.3f}±{res['corr_std']:.3f}")
 
     # 結果を保存
     summary_df = pd.DataFrame(summary_data)
