@@ -1,0 +1,88 @@
+\begin{thebibliography}{10}
+
+\bibitem{Whelton2018}
+Paul~K. Whelton, Robert~M. Carey, Wilbert~S. Aronow, Donald~E. Casey, Karen~J.
+  Collins, Cheryl Dennison~Himmelfarb, Steven~M. DePalma, Samuel Gidding,
+  Kenneth~A. Jamerson, Daniel~W. Jones, et~al.
+\newblock 2017 {ACC}/{AHA} guideline for the prevention, detection, evaluation,
+  and management of high blood pressure in adults.
+\newblock {\em Journal of the American College of Cardiology},
+  71(19):e127--e248, 2018.
+
+\bibitem{Sun2016}
+Yu~Sun and Nitish Thakor.
+\newblock Photoplethysmography revisited: From contact to noncontact, from
+  point to imaging.
+\newblock {\em IEEE Transactions on Biomedical Engineering}, 63(3):463--477,
+  2016.
+
+\bibitem{Verkruysse2008}
+Wim Verkruysse, Lars~O. Svaasand, and J.~Stuart Nelson.
+\newblock Remote plethysmographic imaging of skin perfusion.
+\newblock {\em Optics Express}, 16(26):21434--21445, 2008.
+
+\bibitem{Millasseau2006}
+Sandrine~C. Millasseau, James~M. Ritter, Kenji Takazawa, and Phil~J.
+  Chowienczyk.
+\newblock Contour analysis of the photoplethysmographic pulse measured at the
+  finger.
+\newblock {\em Journal of Hypertension}, 24(8):1449--1456, 2006.
+
+\bibitem{Alian2014}
+Aymen~A. Alian and Kirk~H. Shelley.
+\newblock Photoplethysmography.
+\newblock {\em Best Practice \& Research Clinical Anaesthesiology},
+  28(4):395--406, 2014.
+
+\bibitem{McDuff2014}
+Daniel McDuff, Sarah Gontarek, and Rosalind~W. Picard.
+\newblock Improvements in remote cardiopulmonary measurement using a five band
+  camera.
+\newblock {\em IEEE Transactions on Biomedical Engineering}, 61(10):2593--2601,
+  2014.
+
+\bibitem{Finnegan2023}
+Eoin Finnegan, Shaun Davidson, Mirae Harford, Peter Watkinson, Lionel
+  Tarassenko, and Mauricio Villarroel.
+\newblock Features from the photoplethysmogram and the electrocardiogram for
+  estimating changes in blood pressure.
+\newblock {\em Scientific Reports}, 13:986, 2023.
+
+\bibitem{Fleischhauer2022}
+Vincent Fleischhauer, Aarne Feldheiser, and Sebastian Zaunseder.
+\newblock Beat-to-beat blood pressure estimation by photoplethysmography and
+  its interpretation.
+\newblock {\em Sensors}, 22(18):7037, 2022.
+
+\bibitem{Allen2007}
+John Allen.
+\newblock Photoplethysmography and its application in clinical physiological
+  measurement.
+\newblock {\em Physiological Measurement}, 28(3):R1--R39, 2007.
+
+\bibitem{Hall2020}
+John~E. Hall and Michael~E. Hall.
+\newblock {\em Guyton and Hall Textbook of Medical Physiology}.
+\newblock Elsevier, 14 edition, 2020.
+
+\bibitem{vanPutten2023}
+Lieke~D. van Putten and Kate~E. Bamford.
+\newblock Improving systolic blood pressure prediction from remote
+  photoplethysmography using a stacked ensemble regressor.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition Workshops}, pages 5957--5964, 2023.
+
+\bibitem{Pan2024}
+Jiating Pan, Lishi Liang, Yongbo Liang, Qunfeng Tang, Zhencheng Chen, and
+  Jianming Zhu.
+\newblock Robust modelling of arterial blood pressure reconstruction from
+  photoplethysmography.
+\newblock {\em Scientific Reports}, 14(1):30333, 2024.
+
+\bibitem{Huang2025}
+Xinyi Huang, Xianbin Zhang, Richard Millham, Lin Xu, and Wanqing Wu.
+\newblock Robust estimation of unsteady beat-to-beat systolic blood pressure
+  trends using photoplethysmography contextual cycles.
+\newblock {\em Sensors}, 25(12):3625, 2025.
+
+\end{thebibliography}

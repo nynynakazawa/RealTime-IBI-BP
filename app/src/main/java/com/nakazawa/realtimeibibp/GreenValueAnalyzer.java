@@ -97,7 +97,6 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private final List<Double> recM2_HR = new ArrayList<>();
     private final List<Double> recM2_V2P_relTTP = new ArrayList<>();
     private final List<Double> recM2_P2V_relTTP = new ArrayList<>();
-    private final List<Double> recM2_Stiffness = new ArrayList<>();
     private final List<Double> recM2_E = new ArrayList<>();
     private final List<Double> recM2_SBP = new ArrayList<>();
     private final List<Double> recM2_DBP = new ArrayList<>();
@@ -591,11 +590,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                             
                             // Method2 (SinBP_D) 特徴量
                             if (sinBPDistortion != null) {
-                                recM2_A.add(sinBPDistortion.getCurrentAmplitude());
+                                recM2_A.add(sinBPDistortion.getCurrentRegressionAmplitude());
                                 recM2_HR.add(sinBPDistortion.getCurrentHR());
                                 recM2_V2P_relTTP.add(sinBPDistortion.getCurrentValleyToPeakRelTTP());
                                 recM2_P2V_relTTP.add(sinBPDistortion.getCurrentPeakToValleyRelTTP());
-                                recM2_Stiffness.add(sinBPDistortion.getCurrentStiffness());
                                 recM2_E.add(sinBPDistortion.getCurrentDistortion());
                                 recM2_SBP.add(sinBPDistortion.getLastSinSBP());
                                 recM2_DBP.add(sinBPDistortion.getLastSinDBP());
@@ -604,7 +602,6 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                                 recM2_HR.add(0.0);
                                 recM2_V2P_relTTP.add(0.0);
                                 recM2_P2V_relTTP.add(0.0);
-                                recM2_Stiffness.add(0.0);
                                 recM2_E.add(0.0);
                                 recM2_SBP.add(0.0);
                                 recM2_DBP.add(0.0);
@@ -1140,7 +1137,6 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         recM2_HR.clear();
         recM2_V2P_relTTP.clear();
         recM2_P2V_relTTP.clear();
-        recM2_Stiffness.clear();
         recM2_E.clear();
         recM2_SBP.clear();
         recM2_DBP.clear();
@@ -1592,7 +1588,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
 
         StringBuilder csvContent = new StringBuilder();
-        csvContent.append("経過時間_秒, A, HR, V2P_relTTP, P2V_relTTP, Stiffness, E, SBP, DBP\n");
+        csvContent.append("経過時間_秒, A, HR, V2P_relTTP, P2V_relTTP, E, SBP, DBP\n");
 
         int maxSize = recTrainingTs.size();
         for (int i = 0; i < maxSize; i++) {
@@ -1605,7 +1601,6 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(String.format(Locale.getDefault(), "%.4f", i < recM2_HR.size() ? recM2_HR.get(i) : 0.0)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", i < recM2_V2P_relTTP.size() ? recM2_V2P_relTTP.get(i) : 0.0)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", i < recM2_P2V_relTTP.size() ? recM2_P2V_relTTP.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_Stiffness.size() ? recM2_Stiffness.get(i) : 0.0)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", i < recM2_E.size() ? recM2_E.get(i) : 0.0)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.2f", i < recM2_SBP.size() ? recM2_SBP.get(i) : 0.0)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.2f", i < recM2_DBP.size() ? recM2_DBP.get(i) : 0.0))
@@ -1648,7 +1643,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         StringBuilder csvContent = new StringBuilder();
         csvContent.append("経過時間_秒, subject_id, ref_SBP, ref_DBP, ")
                 .append("M1_A, M1_HR, M1_V2P_relTTP, M1_P2V_relTTP, M1_SBP, M1_DBP, ")
-                .append("M2_A, M2_HR, M2_V2P_relTTP, M2_P2V_relTTP, M2_Stiffness, M2_E, M2_SBP, M2_DBP, ")
+                .append("M2_A, M2_HR, M2_V2P_relTTP, M2_P2V_relTTP, M2_E, M2_SBP, M2_DBP, ")
                 .append("M3_A, M3_HR, M3_Mean, M3_Phi, M3_SBP, M3_DBP\n");
 
         // 記録データを CSV に書き出し
@@ -1674,7 +1669,6 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(String.format(Locale.getDefault(), "%.4f", i < recM2_HR.size() ? recM2_HR.get(i) : 0.0)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", i < recM2_V2P_relTTP.size() ? recM2_V2P_relTTP.get(i) : 0.0)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", i < recM2_P2V_relTTP.size() ? recM2_P2V_relTTP.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_Stiffness.size() ? recM2_Stiffness.get(i) : 0.0)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", i < recM2_E.size() ? recM2_E.get(i) : 0.0)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.2f", i < recM2_SBP.size() ? recM2_SBP.get(i) : 0.0)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.2f", i < recM2_DBP.size() ? recM2_DBP.get(i) : 0.0)).append(", ")
@@ -1736,7 +1730,6 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         return isDetectionEnabled && currentISO >= 300;
     }
 }
-
 
 
 

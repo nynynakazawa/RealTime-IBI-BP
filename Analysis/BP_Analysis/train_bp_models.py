@@ -875,8 +875,8 @@ def main():
     # 各手法の特徴量定義
     # RealTimeBP: correctedGreenValueから直接推定
     realtimebp_features = ["M1_A", "M1_HR", "M1_V2P_relTTP", "M1_P2V_relTTP"]
-    # SinBP_D: Sin波との歪みから算出
-    sinbp_d_features = ["M2_A", "M2_HR", "M2_V2P_relTTP", "M2_P2V_relTTP", "M2_Stiffness", "M2_E"]
+    # SinBP_D: PPTX/Androidロジックに合わせて RTBP features + residual E
+    sinbp_d_features = ["M2_A", "M2_HR", "M2_V2P_relTTP", "M2_P2V_relTTP", "M2_E"]
     # SinBP_M: Sin波自体をモデルとして算出
     sinbp_m_features = ["M3_A", "M3_HR", "M3_Mean", "M3_Phi"]
 
@@ -1029,4 +1029,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -1,0 +1,59 @@
+\relax 
+\citation{Whelton2018,Sun2016}
+\citation{Sun2016,Verkruysse2008}
+\citation{Millasseau2006,Alian2014,McDuff2014}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{}\protected@file@percent }
+\citation{Sun2016,Alian2014,Finnegan2023,Fleischhauer2022}
+\citation{Millasseau2006,Allen2007,Hall2020}
+\citation{vanPutten2023}
+\citation{Pan2024}
+\citation{Huang2025}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Related Work}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Methods}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Overall Approach}{2}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Processing overview. The same preprocessed beat sequence is evaluated by the baseline RTBP model and the two asymmetric-sine-based estimators.}}{2}{}\protected@file@percent }
+\newlabel{fig:overview}{{1}{2}{}{figure.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Asymmetric Sine Wave Model}{2}{}\protected@file@percent }
+\newlabel{eq:model}{{1}{2}{}{equation.1}{}}
+\newlabel{eq:phase}{{2}{2}{}{equation.2}{}}
+\newlabel{eq:residual}{{3}{2}{}{equation.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Compared Estimators}{2}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Compared BP estimators}}{3}{}\protected@file@percent }
+\newlabel{tab:methods}{{1}{3}{}{table.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Trend-Oriented Target Definition}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Data Acquisition and Evaluation}{3}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Waveform evaluation}}{3}{}\protected@file@percent }
+\newlabel{tab:waveform}{{2}{3}{}{table.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Results}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Waveform-Level Effect of Model Fitting}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Blood Pressure Estimation Accuracy}{3}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Representative beats before and after asymmetric-sine fitting. The fitted waveform suppresses local fluctuation while preserving the coarse beat asymmetry.}}{4}{}\protected@file@percent }
+\newlabel{fig:waveform}{{2}{4}{}{figure.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Trend-Oriented Reanalysis}{4}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Window-length scan for centered SBP under recording-group-aware GroupKFold. sinBP(D) remains below RTBP at 10, 20, and 30~s. The 20~s setting is the shortest window that combines lower error with a positive mean SBP correlation.}}{4}{}\protected@file@percent }
+\newlabel{fig:trend_scan}{{3}{4}{}{figure.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Discussion}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Why Whole-Wave Fitting Helps at 30 fps}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Why the Residual Helps}{4}{}\protected@file@percent }
+\bibstyle{unsrt}
+\bibdata{references}
+\bibcite{Whelton2018}{1}
+\bibcite{Sun2016}{2}
+\bibcite{Verkruysse2008}{3}
+\bibcite{Millasseau2006}{4}
+\bibcite{Alian2014}{5}
+\bibcite{McDuff2014}{6}
+\bibcite{Finnegan2023}{7}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Blood pressure estimation results obtained from the stored five-fold time-series cross-validation outputs}}{5}{}\protected@file@percent }
+\newlabel{tab:bp_results}{{3}{5}{}{table.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Group-centered trend results under recording-group-aware GroupKFold with 20~s non-overlapping windows}}{5}{}\protected@file@percent }
+\newlabel{tab:trend_results}{{4}{5}{}{table.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Limitations and Journal-Extension Targets}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{5}{}\protected@file@percent }
+\bibcite{Fleischhauer2022}{8}
+\bibcite{Allen2007}{9}
+\bibcite{Hall2020}{10}
+\bibcite{vanPutten2023}{11}
+\bibcite{Pan2024}{12}
+\bibcite{Huang2025}{13}
+\gdef \@abspage@last{6}

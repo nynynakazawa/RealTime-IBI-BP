@@ -16,8 +16,8 @@ import java.util.stream.Collectors;
  * 1. PPG波形を非対称サイン波モデルで近似（収縮期1/3:拡張期2/3の時間比）
  * 2. 振幅A、周期IBI（実測peak-to-peak）を抽出
  * 3. 歪み指標Eで理想非対称サイン波形からの外れを評価
- * 4. BaseLogicからrelTTP（谷→山・山→谷）を取得して血管特性を反映
- * 5. 3段階のBP推定：ベース（A・HR）→血管特性補正（relTTP・Stiffness_sin）→歪み補正（E）
+ * 4. BaseLogicからRTBP特徴量（A・HR・relTTP）を取得
+ * 5. 線形回帰で RTBP features + residual E からBPを推定
  * 
  * 非対称サイン波モデル（理論的背景）：
  * - t=0でピーク、谷までが2/3T（拡張期）、谷から次のピークまでが1/3T（収縮期）
@@ -65,6 +65,7 @@ public class SinBPDistortion {
     private double currentIBI = 0; // IBI (ms)
     private double currentPhi = 0; // 位相
     private double currentE = 0; // 歪み指標
+    private double currentRegressionAmplitude = 0; // 回帰用の生波形振幅
 
     // BP推定結果
     private double lastSinSBP = 0;
@@ -85,27 +86,24 @@ public class SinBPDistortion {
     // フレームレート
     private int frameRate = 30;
 
-    // 固定係数（ベースBP推定）
+    // 固定係数（2026-03-18時点、PPTXロジック整合版）
     // 注意: 振幅AはLogic1で正規化された値（0-10範囲）を使用
     // 2025-11-22評価結果より最適化（SinBP_D係数）
-    // SBP: ALPHA0 + ALPHA1*A + ALPHA2*HR + ALPHA3*V2P_relTTP + ALPHA4*P2V_relTTP +
-    // ALPHA5*Stiffness + ALPHA6*E
-    private static final double ALPHA0 = 99.3511360236051; // intercept
-    private static final double ALPHA1 = 4.989260321877781; // M2_A
-    private static final double ALPHA2 = -0.19482526511800785; // M2_HR
-    private static final double ALPHA3 = 51.95973811367971; // M2_V2P_relTTP
-    private static final double ALPHA4 = -19.68904400101124; // M2_P2V_relTTP
-    private static final double ALPHA5 = -2.3957492479998086; // M2_Stiffness
-    private static final double ALPHA6 = 14.884213645043175; // M2_E
-    // DBP: BETA0 + BETA1*A + BETA2*HR + BETA3*V2P_relTTP + BETA4*P2V_relTTP +
-    // BETA5*Stiffness + BETA6*E
-    private static final double BETA0 = 57.538897736734256; // intercept
-    private static final double BETA1 = 5.1490896705576965; // M2_A
-    private static final double BETA2 = 0.03890465235013879; // M2_HR
-    private static final double BETA3 = 63.523982631747096; // M2_V2P_relTTP
-    private static final double BETA4 = -19.064504763175297; // M2_P2V_relTTP
-    private static final double BETA5 = -3.43793579610127; // M2_Stiffness
-    private static final double BETA6 = 15.198115881740367; // M2_E
+    // PPTX発表資料に合わせた SinBP(D) = RTBP features + E
+    // SBP: ALPHA0 + ALPHA1*A + ALPHA2*HR + ALPHA3*V2P_relTTP + ALPHA4*P2V_relTTP + ALPHA5*E
+    private static final double ALPHA0 = 84.35966783913528; // intercept
+    private static final double ALPHA1 = 1.4380416150092454; // raw amplitude (RTBP A)
+    private static final double ALPHA2 = -0.17496518103590775; // HR
+    private static final double ALPHA3 = 37.5562372225141; // V2P_relTTP
+    private static final double ALPHA4 = -23.202992904621805; // P2V_relTTP
+    private static final double ALPHA5 = 13.061600306485024; // residual E
+    // DBP: BETA0 + BETA1*A + BETA2*HR + BETA3*V2P_relTTP + BETA4*P2V_relTTP + BETA5*E
+    private static final double BETA0 = 31.1337382399846; // intercept
+    private static final double BETA1 = 2.6094510034965035; // raw amplitude (RTBP A)
+    private static final double BETA2 = 0.24212419864020945; // HR
+    private static final double BETA3 = 62.88226696234021; // V2P_relTTP
+    private static final double BETA4 = -19.577300435396946; // P2V_relTTP
+    private static final double BETA5 = 10.236851183332778; // residual E
 
     // 理想曲線データ（UI表示用）
     private double currentMean = 0;
@@ -408,7 +406,7 @@ public class SinBPDistortion {
                 hasIdealCurve, idealCurveStartTime, idealCurveEndTime));
 
         // その拍のBP推定
-        estimateBP(currentA, ibi, currentE);
+        estimateBP(ibi, currentE);
 
         // データを更新して次の拍に備える
         previousPeakTime = lastPeakTime;
@@ -618,7 +616,7 @@ public class SinBPDistortion {
      * BP推定
      * 注意: 振幅AはLogic1で正規化された値（0-10範囲）を使用
      */
-    private void estimateBP(double A, double ibi, double E) {
+    private void estimateBP(double ibi, double E) {
         // smoothedIBIからHRを計算（RealtimeBPと同様の方法）
         double hr = 0.0;
         if (logicRef != null && !logicRef.smoothedIbi.isEmpty()) {
@@ -632,24 +630,19 @@ public class SinBPDistortion {
             hr = 60000.0 / ibi; // フォールバック
         }
 
-        // BaseLogicから血管特性を取得（AIは除去、Stiffness_sinを優先）
+        // PPTXの説明に合わせて RTBP features + E を使用
         double valleyToPeakRelTTP = (logicRef != null) ? logicRef.averageValleyToPeakRelTTP : 0.0;
         double peakToValleyRelTTP = (logicRef != null) ? logicRef.averagePeakToValleyRelTTP : 0.0;
+        double regressionAmplitude = (logicRef != null) ? logicRef.averageValleyToPeakAmplitude : 0.0;
+        currentRegressionAmplitude = regressionAmplitude;
 
-        // 血管硬さ指標（歪み × 振幅の平方根）- SinBPDistortionの独自指標
-        double stiffness = E * Math.sqrt(A);
-
-        // 線形回帰式：SBP = ALPHA0 + ALPHA1*A + ALPHA2*HR + ALPHA3*V2P_relTTP +
-        // ALPHA4*P2V_relTTP + ALPHA5*Stiffness + ALPHA6*E
-        double sbpRefined = ALPHA0 + ALPHA1 * A + ALPHA2 * hr +
+        double sbpRefined = ALPHA0 + ALPHA1 * regressionAmplitude + ALPHA2 * hr +
                 ALPHA3 * valleyToPeakRelTTP + ALPHA4 * peakToValleyRelTTP +
-                ALPHA5 * stiffness + ALPHA6 * E;
+                ALPHA5 * E;
 
-        // 線形回帰式：DBP = BETA0 + BETA1*A + BETA2*HR + BETA3*V2P_relTTP + BETA4*P2V_relTTP
-        // + BETA5*Stiffness + BETA6*E
-        double dbpRefined = BETA0 + BETA1 * A + BETA2 * hr +
+        double dbpRefined = BETA0 + BETA1 * regressionAmplitude + BETA2 * hr +
                 BETA3 * valleyToPeakRelTTP + BETA4 * peakToValleyRelTTP +
-                BETA5 * stiffness + BETA6 * E;
+                BETA5 * E;
 
         // 制約適用
         if (sbpRefined < dbpRefined + 10) {
@@ -666,8 +659,8 @@ public class SinBPDistortion {
         }
 
         Log.d(TAG + "-Estimate", String.format(
-                "BP: SBP=%.1f, DBP=%.1f (V2P_relTTP=%.3f, P2V_relTTP=%.3f, stiffness=%.3f)",
-                sbpRefined, dbpRefined, valleyToPeakRelTTP, peakToValleyRelTTP, stiffness));
+                "BP: SBP=%.1f, DBP=%.1f (A=%.3f, V2P_relTTP=%.3f, P2V_relTTP=%.3f, E=%.3f)",
+                sbpRefined, dbpRefined, regressionAmplitude, valleyToPeakRelTTP, peakToValleyRelTTP, E));
 
         // 履歴更新と平均計算
         updateHistory(sbpRefined, dbpRefined);
@@ -945,6 +938,7 @@ public class SinBPDistortion {
         currentIBI = 0;
         currentPhi = 0;
         currentE = 0;
+        currentRegressionAmplitude = 0;
         lastSinSBP = 0;
         lastSinDBP = 0;
         lastSinSBPAvg = 0;
@@ -976,17 +970,16 @@ public class SinBPDistortion {
         return currentA;
     }
 
+    public double getCurrentRegressionAmplitude() {
+        return currentRegressionAmplitude;
+    }
+
     public double getCurrentIBI() {
         return currentIBI;
     }
 
     public double getCurrentDistortion() {
         return currentE;
-    }
-
-    public double getCurrentStiffness() {
-        // Stiffness_sin = E * sqrt(A)
-        return currentE * Math.sqrt(Math.max(currentA, 0.0));
     }
 
     public double getCurrentHR() {
