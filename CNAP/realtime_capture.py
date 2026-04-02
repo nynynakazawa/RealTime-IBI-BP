@@ -6,6 +6,7 @@ from collections import deque
 import csv
 import json
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 import shutil
 import statistics
@@ -14,6 +15,16 @@ import time
 from typing import Any
 
 from tusb_adapio import TUSBAdapio, TUSBAdapioError
+
+
+DEFAULT_ACTIVITY_CHANNEL = "2:wave"
+DEFAULT_SAMPLE_RATE_HZ = 100.0
+DEFAULT_ACTIVITY_WINDOW_S = 8.0
+DEFAULT_ACTIVITY_MIN_STD_RAW = 3.0
+DEFAULT_ACTIVITY_MIN_RANGE_RAW = 8.0
+DEFAULT_MIN_BEAT_INTERVAL_S = 0.4
+DEFAULT_MAX_BEAT_INTERVAL_S = 2.0
+DEFAULT_MAX_ALIGNMENT_OFFSET_S = 15.0
 
 
 @dataclass(frozen=True)
@@ -28,9 +39,7 @@ class ChannelSpec:
     def parse(cls, raw: str) -> "ChannelSpec":
         parts = raw.split(":")
         if not parts or len(parts) > 5:
-            raise ValueError(
-                "channel must be index[:label[:unit[:scale[:offset]]]]"
-            )
+            raise ValueError("channel must be index[:label[:unit[:scale[:offset]]]]")
         index = int(parts[0])
         label = parts[1] if len(parts) >= 2 and parts[1] else f"ch{index}"
         unit = parts[2] if len(parts) >= 3 and parts[2] else "count"
@@ -41,103 +50,56 @@ class ChannelSpec:
     def convert(self, raw_value: int) -> float:
         return raw_value * self.scale + self.offset
 
+    def raw_copy(self) -> "ChannelSpec":
+        return ChannelSpec(index=self.index, label=self.label)
 
-def default_channels(raw_channels: list[str]) -> list[ChannelSpec]:
-    if not raw_channels:
-        return [ChannelSpec(index=0, label="ch0")]
-    return [ChannelSpec.parse(value) for value in raw_channels]
+    def to_spec_string(self) -> str:
+        return f"{self.index}:{self.label}:{self.unit}:{self.scale}:{self.offset}"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Realtime capture for CNAP AUX via TUSB-ADAPIO.",
+        description=(
+            "CNAP AUX realtime logger. "
+            "Default: calibrated beat logger. "
+            "--proof: calibration proof capture or proof finalization."
+        ),
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    info_parser = subparsers.add_parser("info", help="Probe the device and read a few samples.")
-    info_parser.add_argument(
-        "--channel",
-        action="append",
-        default=[],
-        help="index[:label[:unit[:scale[:offset]]]]",
+    parser.add_argument(
+        "--proof",
+        action="store_true",
+        help=(
+            "Calibration proof mode. If a pending proof session and an official "
+            "waveform.csv are available, finalize calibration. Otherwise start a new proof capture."
+        ),
     )
-    info_parser.add_argument("--samples", type=int, default=5)
-    info_parser.add_argument("--interval", type=float, default=0.2)
-
-    capture_parser = subparsers.add_parser(
-        "capture",
-        help="Continuously poll one scan and write rows to CSV.",
+    parser.add_argument(
+        "--waveform-csv",
+        type=Path,
+        default=None,
+        help="Optional official CNAP waveform.csv used to finalize a pending proof session.",
     )
-    capture_parser.add_argument(
-        "--channel",
-        action="append",
-        default=[],
-        help="index[:label[:unit[:scale[:offset]]]]",
+    parser.add_argument(
+        "--activity-channel",
+        default="",
+        help=(
+            "Override activity channel. Proof mode defaults to 2:wave. "
+            "Normal mode defaults to the calibrated activity channel from calibration.json."
+        ),
     )
-    capture_parser.add_argument("--sample-rate-hz", type=float, default=100.0)
-    capture_parser.add_argument("--duration", type=float, default=0.0)
-    capture_parser.add_argument("--status-interval", type=float, default=1.0)
-    capture_parser.add_argument("--session-id", default="")
-    capture_parser.add_argument("--output", type=Path, default=None)
-    capture_parser.add_argument("--notes", default="")
-    capture_parser.add_argument("--waveform-label", default="")
-    capture_parser.add_argument("--waveform-window-s", type=float, default=8.0)
-    capture_parser.add_argument("--waveform-min-interval-s", type=float, default=0.4)
-    capture_parser.add_argument("--activity-min-std-raw", type=float, default=3.0)
-    capture_parser.add_argument("--activity-min-range-raw", type=float, default=8.0)
-    capture_parser.add_argument("--allow-inactive", action="store_true")
-    capture_parser.add_argument("--archive-root", type=Path, default=None)
-    capture_parser.add_argument("--no-archive", action="store_true")
-
-    beat_parser = subparsers.add_parser(
-        "beat",
-        help="Emit one CSV row per detected beat in CNAP-like format.",
-    )
-    beat_parser.add_argument("--activity-channel", required=True, help="index[:label[:unit[:scale[:offset]]]]")
-    beat_parser.add_argument("--sys-channel", default="")
-    beat_parser.add_argument("--mean-channel", default="")
-    beat_parser.add_argument("--dia-channel", default="")
-    beat_parser.add_argument("--hr-channel", default="")
-    beat_parser.add_argument("--sample-rate-hz", type=float, default=100.0)
-    beat_parser.add_argument("--duration", type=float, default=0.0)
-    beat_parser.add_argument("--status-interval", type=float, default=1.0)
-    beat_parser.add_argument("--session-id", default="")
-    beat_parser.add_argument("--output", type=Path, default=None)
-    beat_parser.add_argument("--notes", default="")
-    beat_parser.add_argument("--activity-window-s", type=float, default=8.0)
-    beat_parser.add_argument("--activity-min-std-raw", type=float, default=3.0)
-    beat_parser.add_argument("--activity-min-range-raw", type=float, default=8.0)
-    beat_parser.add_argument("--min-beat-interval-s", type=float, default=0.4)
-    beat_parser.add_argument("--max-beat-interval-s", type=float, default=2.0)
-    beat_parser.add_argument("--archive-root", type=Path, default=None)
-    beat_parser.add_argument("--no-archive", action="store_true")
-
-    buffered_parser = subparsers.add_parser(
-        "buffered",
-        help="Run one hardware-triggered acquisition and dump the buffer.",
-    )
-    buffered_parser.add_argument(
-        "--channel",
-        action="append",
-        default=[],
-        help="index[:label[:unit[:scale[:offset]]]]; first channel is used for output formatting.",
-    )
-    buffered_parser.add_argument(
-        "--mode",
-        choices=("digital", "analog-rising", "analog-falling"),
-        default="digital",
-    )
-    buffered_parser.add_argument("--end-channel", type=int, default=0)
-    buffered_parser.add_argument("--buffer-size", type=int, default=100)
-    buffered_parser.add_argument("--threshold", type=int, default=512)
-    buffered_parser.add_argument("--trigger-channel", type=int, default=0)
-    buffered_parser.add_argument("--status-interval", type=float, default=0.25)
-    buffered_parser.add_argument("--timeout", type=float, default=5.0)
-    buffered_parser.add_argument("--session-id", default="")
-    buffered_parser.add_argument("--output", type=Path, default=None)
-    buffered_parser.add_argument("--archive-root", type=Path, default=None)
-    buffered_parser.add_argument("--no-archive", action="store_true")
-
+    parser.add_argument("--session-id", default="")
+    parser.add_argument("--duration", type=float, default=0.0)
+    parser.add_argument("--status-interval", type=float, default=1.0)
+    parser.add_argument("--notes", default="")
+    parser.add_argument("--archive-root", type=Path, default=None)
+    parser.add_argument("--no-archive", action="store_true")
+    parser.add_argument("--config", type=Path, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--activity-window-s", type=float, default=DEFAULT_ACTIVITY_WINDOW_S)
+    parser.add_argument("--activity-min-std-raw", type=float, default=DEFAULT_ACTIVITY_MIN_STD_RAW)
+    parser.add_argument("--activity-min-range-raw", type=float, default=DEFAULT_ACTIVITY_MIN_RANGE_RAW)
+    parser.add_argument("--min-beat-interval-s", type=float, default=DEFAULT_MIN_BEAT_INTERVAL_S)
+    parser.add_argument("--max-beat-interval-s", type=float, default=DEFAULT_MAX_BEAT_INTERVAL_S)
+    parser.add_argument("--max-offset-s", type=float, default=DEFAULT_MAX_ALIGNMENT_OFFSET_S)
     return parser
 
 
@@ -149,198 +111,26 @@ def default_archive_root(root: Path) -> Path:
     return repo_root_from(root) / "Analysis" / "Data" / "pdp" / "realtime_aux"
 
 
-def ensure_output_path(root: Path, session_id: str, output: Path | None, suffix: str) -> Path:
-    if output is not None:
-        output = output.expanduser().resolve()
-    else:
-        output = root / "captures" / session_id / f"{session_id}_{suffix}.csv"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    return output
+def config_path_for(root: Path, explicit: Path | None) -> Path:
+    return explicit.expanduser().resolve() if explicit is not None else root / "calibration.json"
+
+
+def proof_state_path_for(root: Path) -> Path:
+    return root / "proof_state.json"
+
+
+def imports_root_for(root: Path) -> Path:
+    return root / "imports"
+
+
+def ensure_output_path(root: Path, session_id: str, suffix: str) -> Path:
+    path = root / "captures" / session_id / f"{session_id}_{suffix}.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def metadata_path_for(output_path: Path) -> Path:
     return output_path.with_suffix(".json")
-
-
-def metrics_path_for(output_path: Path) -> Path:
-    return output_path.with_name(output_path.stem + "_metrics.csv")
-
-
-def write_json(path: Path, payload: dict) -> None:
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
-
-
-def iso_now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
-
-
-def format_latest(specs: list[ChannelSpec], raw_values: list[int]) -> str:
-    parts = []
-    for spec, raw_value in zip(specs, raw_values):
-        converted = spec.convert(raw_value)
-        parts.append(
-            f"{spec.label}={converted:.3f} {spec.unit} (raw={raw_value})"
-        )
-    return ", ".join(parts)
-
-
-def parse_optional_channel(raw: str) -> ChannelSpec | None:
-    return ChannelSpec.parse(raw) if raw else None
-
-
-def activity_window_is_valid(
-    raw_values: list[int],
-    *,
-    min_std_raw: float,
-    min_range_raw: float,
-) -> bool:
-    if len(raw_values) < 8:
-        return False
-    std = statistics.pstdev(raw_values)
-    value_range = max(raw_values) - min(raw_values)
-    return std >= min_std_raw and value_range >= min_range_raw
-
-
-def estimate_wave_metrics(
-    values: list[float],
-    *,
-    sample_rate_hz: float,
-    min_interval_s: float,
-) -> dict | None:
-    if len(values) < max(8, int(sample_rate_hz * 2.5)):
-        return None
-
-    std = statistics.pstdev(values)
-    if std <= 0:
-        return None
-
-    mean_value = sum(values) / len(values)
-    threshold = mean_value + 0.35 * std
-    refractory_samples = max(1, int(sample_rate_hz * min_interval_s))
-
-    peaks: list[int] = []
-    index = 1
-    last_limit = len(values) - 1
-    while index < last_limit:
-        current = values[index]
-        if current >= threshold and current >= values[index - 1] and current >= values[index + 1]:
-            best_index = index
-            best_value = current
-            scan_limit = min(last_limit, index + refractory_samples)
-            for look_ahead in range(index + 1, scan_limit):
-                candidate = values[look_ahead]
-                if (
-                    candidate > best_value
-                    and candidate >= values[look_ahead - 1]
-                    and candidate >= values[look_ahead + 1]
-                ):
-                    best_index = look_ahead
-                    best_value = candidate
-            peaks.append(best_index)
-            index = best_index + refractory_samples
-            continue
-        index += 1
-
-    if len(peaks) < 2:
-        return None
-
-    intervals = [
-        (later - earlier) / sample_rate_hz
-        for earlier, later in zip(peaks, peaks[1:])
-        if later > earlier
-    ]
-    if not intervals:
-        return None
-
-    mean_interval = sum(intervals) / len(intervals)
-    bpm = 60.0 / mean_interval
-    if bpm < 30 or bpm > 220:
-        return None
-
-    troughs: list[float] = []
-    peak_values = [values[index] for index in peaks]
-    for earlier, later in zip(peaks, peaks[1:]):
-        troughs.append(min(values[earlier:later + 1]))
-
-    return {
-        "bpm": bpm,
-        "peak_like": sum(peak_values) / len(peak_values),
-        "trough_like": sum(troughs) / len(troughs) if troughs else min(values),
-    }
-
-
-def detect_stream_peak(
-    sample_history: deque[dict[str, Any]],
-    raw_history: deque[int],
-    *,
-    last_peak_sample_index: int | None,
-    min_interval_s: float,
-    sample_rate_hz: float,
-    min_std_raw: float,
-    min_range_raw: float,
-) -> dict[str, Any] | None:
-    if len(sample_history) < 3 or len(raw_history) < 3:
-        return None
-    if not activity_window_is_valid(
-        list(raw_history),
-        min_std_raw=min_std_raw,
-        min_range_raw=min_range_raw,
-    ):
-        return None
-
-    prev_prev = sample_history[-3]["activity_raw"]
-    prev = sample_history[-2]["activity_raw"]
-    current = sample_history[-1]["activity_raw"]
-
-    if not (prev >= prev_prev and prev > current):
-        return None
-
-    mean_value = statistics.fmean(raw_history)
-    std_value = statistics.pstdev(raw_history)
-    threshold = mean_value + 0.35 * std_value
-    peak_sample = sample_history[-2]
-    if prev < threshold:
-        return None
-
-    refractory_samples = max(1, int(sample_rate_hz * min_interval_s))
-    if (
-        last_peak_sample_index is not None
-        and peak_sample["sample_index"] - last_peak_sample_index < refractory_samples
-    ):
-        return None
-
-    return peak_sample
-
-
-def samples_for_interval(
-    sample_history: deque[dict[str, Any]],
-    *,
-    start_sample_index: int,
-    end_sample_index: int,
-) -> list[dict[str, Any]]:
-    return [
-        sample
-        for sample in sample_history
-        if start_sample_index <= sample["sample_index"] <= end_sample_index
-    ]
-
-
-def mean_value_for_spec(
-    spec: ChannelSpec | None,
-    interval_samples: list[dict[str, Any]],
-) -> float | None:
-    if spec is None or not interval_samples:
-        return None
-    values = [sample["converted_by_label"][spec.label] for sample in interval_samples]
-    if not values:
-        return None
-    return statistics.fmean(values)
-
-
-def format_optional_value(value: float | None) -> str:
-    if value is None:
-        return ""
-    return f"{value:.9f}"
 
 
 def archive_output_path(
@@ -365,118 +155,363 @@ def copy_if_present(source: Path, destination: Path | None) -> None:
     shutil.copy2(source, destination)
 
 
-def run_info(root: Path, args: argparse.Namespace) -> int:
-    specs = default_channels(args.channel)
-    with TUSBAdapio() as device:
-        summary = asdict(device.summary())
-        running, sampled_num = device.adc_get_status()
-        print(json.dumps(summary, indent=2, ensure_ascii=True))
-        print(f"status: running={running} sampled_num={sampled_num}")
-        for index in range(args.samples):
-            raw_values = device.read_scan([spec.index for spec in specs])
-            print(f"sample[{index}] {format_latest(specs, raw_values)}")
-            if index + 1 < args.samples and args.interval > 0:
-                time.sleep(args.interval)
-    return 0
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
 
-def run_capture(root: Path, args: argparse.Namespace) -> int:
-    if abs(args.sample_rate_hz - 100.0) > 1e-9:
-        raise ValueError("CNAP AUX capture is fixed at 100 Hz; use --sample-rate-hz 100")
+def read_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
 
-    specs = default_channels(args.channel)
+
+def iso_now() -> str:
+    return datetime.now().astimezone().isoformat(timespec="milliseconds")
+
+
+def iso_from_epoch_ns(epoch_ns: int) -> str:
+    return datetime.fromtimestamp(epoch_ns / 1_000_000_000.0).astimezone().isoformat(
+        timespec="milliseconds"
+    )
+
+
+def activity_window_is_valid(
+    raw_values: list[int],
+    *,
+    min_std_raw: float,
+    min_range_raw: float,
+) -> bool:
+    if len(raw_values) < 8:
+        return False
+    std_value = statistics.pstdev(raw_values)
+    range_value = max(raw_values) - min(raw_values)
+    return std_value >= min_std_raw and range_value >= min_range_raw
+
+
+def detect_stream_peak(
+    sample_history: deque[dict[str, Any]],
+    raw_history: deque[int],
+    *,
+    last_peak_sample_index: int | None,
+    min_interval_s: float,
+    sample_rate_hz: float,
+    min_std_raw: float,
+    min_range_raw: float,
+) -> dict[str, Any] | None:
+    if len(sample_history) < 3 or len(raw_history) < 3:
+        return None
+    if not activity_window_is_valid(
+        list(raw_history),
+        min_std_raw=min_std_raw,
+        min_range_raw=min_range_raw,
+    ):
+        return None
+
+    prev_prev = sample_history[-3]["activity_raw"]
+    prev = sample_history[-2]["activity_raw"]
+    current = sample_history[-1]["activity_raw"]
+    if not (prev >= prev_prev and prev > current):
+        return None
+
+    mean_value = statistics.fmean(raw_history)
+    std_value = statistics.pstdev(raw_history)
+    threshold = mean_value + 0.35 * std_value
+    peak_sample = sample_history[-2]
+    if prev < threshold:
+        return None
+
+    refractory_samples = max(1, int(sample_rate_hz * min_interval_s))
+    if (
+        last_peak_sample_index is not None
+        and peak_sample["sample_index"] - last_peak_sample_index < refractory_samples
+    ):
+        return None
+    return peak_sample
+
+
+def samples_for_interval(
+    sample_history: deque[dict[str, Any]],
+    *,
+    start_sample_index: int,
+    end_sample_index: int,
+) -> list[dict[str, Any]]:
+    return [
+        sample
+        for sample in sample_history
+        if start_sample_index <= sample["sample_index"] <= end_sample_index
+    ]
+
+
+def format_optional_value(value: float | None) -> str:
+    if value is None:
+        return ""
+    return f"{value:.9f}"
+
+
+def waiting_message(raw_history: deque[int]) -> str:
+    if raw_history:
+        std_value = statistics.pstdev(raw_history)
+        range_value = max(raw_history) - min(raw_history)
+        return f"waiting for active waveform (std={std_value:.2f}, range={range_value:.2f})"
+    return "waiting for active waveform"
+
+
+def load_proof_series(path: Path) -> list[float]:
+    with path.open("r", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        raise ValueError(f"no rows found in {path}")
+    if "Activity Raw" not in rows[0]:
+        raise KeyError(f"Activity Raw not found in {path}")
+    return [float(row["Activity Raw"]) for row in rows]
+
+
+def load_cnap_waveform(path: Path) -> list[float]:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        rows = list(csv.DictReader(handle, delimiter=";"))
+    if not rows:
+        raise ValueError(f"no rows found in {path}")
+    candidate_fields = ("Pressure [mmHg]", '"Pressure [mmHg]"')
+    pressure_field = next((field for field in candidate_fields if field in rows[0]), None)
+    if pressure_field is None:
+        raise KeyError(f"Pressure [mmHg] not found in {path}")
+    return [float(row[pressure_field]) for row in rows if row.get(pressure_field)]
+
+
+def zscore(values: list[float]) -> list[float]:
+    mean_value = statistics.fmean(values)
+    std_value = statistics.pstdev(values)
+    if std_value == 0:
+        return [0.0 for _ in values]
+    return [(value - mean_value) / std_value for value in values]
+
+
+def overlap_slices(
+    left: list[float],
+    right: list[float],
+    offset_samples: int,
+) -> tuple[list[float], list[float]]:
+    if offset_samples >= 0:
+        max_len = min(len(left) - offset_samples, len(right))
+        return left[offset_samples:offset_samples + max_len], right[:max_len]
+
+    shift = -offset_samples
+    max_len = min(len(left), len(right) - shift)
+    return left[:max_len], right[shift:shift + max_len]
+
+
+def correlation(left: list[float], right: list[float]) -> float:
+    if len(left) != len(right) or len(left) < 3:
+        return 0.0
+    mean_left = statistics.fmean(left)
+    mean_right = statistics.fmean(right)
+    centered_left = [value - mean_left for value in left]
+    centered_right = [value - mean_right for value in right]
+    denom_left = sum(value * value for value in centered_left)
+    denom_right = sum(value * value for value in centered_right)
+    if denom_left <= 0 or denom_right <= 0:
+        return 0.0
+    cov = sum(a * b for a, b in zip(centered_left, centered_right))
+    return cov / (denom_left * denom_right) ** 0.5
+
+
+def fit_linear(x_values: list[float], y_values: list[float]) -> dict[str, float]:
+    if len(x_values) != len(y_values) or len(x_values) < 3:
+        raise ValueError("need at least 3 paired samples for linear fit")
+    mean_x = statistics.fmean(x_values)
+    mean_y = statistics.fmean(y_values)
+    centered_x = [value - mean_x for value in x_values]
+    centered_y = [value - mean_y for value in y_values]
+    var_x = sum(value * value for value in centered_x)
+    var_y = sum(value * value for value in centered_y)
+    if var_x <= 0 or var_y <= 0:
+        raise ValueError("degenerate variance in calibration data")
+    cov = sum(a * b for a, b in zip(centered_x, centered_y))
+    scale = cov / var_x
+    offset = mean_y - scale * mean_x
+    predictions = [scale * value + offset for value in x_values]
+    mae = statistics.fmean(abs(pred - truth) for pred, truth in zip(predictions, y_values))
+    rmse = statistics.fmean((pred - truth) ** 2 for pred, truth in zip(predictions, y_values)) ** 0.5
+    corr_value = cov / (var_x * var_y) ** 0.5
+    return {
+        "scale": scale,
+        "offset": offset,
+        "corr": corr_value,
+        "mae": mae,
+        "rmse": rmse,
+    }
+
+
+def summarize_calibration(
+    aux_values: list[float],
+    cnap_values: list[float],
+    *,
+    sample_rate_hz: float,
+    max_offset_s: float,
+) -> dict[str, float]:
+    aux_norm = zscore(aux_values)
+    cnap_norm = zscore(cnap_values)
+    max_offset_samples = int(max_offset_s * sample_rate_hz)
+
+    best_offset_samples = 0
+    best_corr = None
+    best_aux_overlap: list[float] = []
+    best_cnap_overlap: list[float] = []
+
+    for offset_samples in range(-max_offset_samples, max_offset_samples + 1):
+        aux_overlap, cnap_overlap = overlap_slices(aux_norm, cnap_norm, offset_samples)
+        current_corr = correlation(aux_overlap, cnap_overlap)
+        if best_corr is None or current_corr > best_corr:
+            best_corr = current_corr
+            best_offset_samples = offset_samples
+            best_aux_overlap, best_cnap_overlap = overlap_slices(aux_values, cnap_values, offset_samples)
+
+    fit = fit_linear(best_aux_overlap, best_cnap_overlap)
+    fit.update(
+        {
+            "offset_samples": float(best_offset_samples),
+            "offset_seconds": best_offset_samples / sample_rate_hz,
+            "alignment_corr": best_corr if best_corr is not None else 0.0,
+            "paired_samples": float(len(best_aux_overlap)),
+        }
+    )
+    return fit
+
+
+def discover_waveform_csv(root: Path, explicit_path: Path | None) -> Path | None:
+    if explicit_path is not None:
+        return explicit_path.expanduser().resolve()
+
+    imports_root = imports_root_for(root)
+    if not imports_root.exists():
+        return None
+    candidates = [path for path in imports_root.rglob("*waveform.csv") if path.is_file()]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: candidate.stat().st_mtime_ns)
+
+
+def try_finalize_proof(root: Path, args: argparse.Namespace) -> bool:
+    state_path = proof_state_path_for(root)
+    if not state_path.exists():
+        return False
+
+    waveform_csv = discover_waveform_csv(root, args.waveform_csv)
+    if waveform_csv is None:
+        return False
+
+    state = read_json(state_path)
+    proof_csv = Path(state["proof_csv"]).expanduser().resolve()
+    if not proof_csv.exists():
+        raise FileNotFoundError(f"proof csv not found: {proof_csv}")
+
+    aux_values = load_proof_series(proof_csv)
+    cnap_values = load_cnap_waveform(waveform_csv)
+    summary = summarize_calibration(
+        aux_values,
+        cnap_values,
+        sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ,
+        max_offset_s=args.max_offset_s,
+    )
+
+    channel = ChannelSpec.parse(state["activity_channel_spec"])
+    calibrated_channel = ChannelSpec(
+        index=channel.index,
+        label=channel.label,
+        unit="mmHg",
+        scale=summary["scale"],
+        offset=summary["offset"],
+    )
+    config_path = config_path_for(root, args.config)
+    config = {
+        "created_at": iso_now(),
+        "proof_session_id": state["session_id"],
+        "proof_csv": str(proof_csv),
+        "waveform_csv": str(waveform_csv),
+        "activity_channel_spec": calibrated_channel.to_spec_string(),
+        "scale": summary["scale"],
+        "offset": summary["offset"],
+        "alignment_corr": summary["alignment_corr"],
+        "offset_seconds": summary["offset_seconds"],
+        "offset_samples": int(summary["offset_samples"]),
+        "corr": summary["corr"],
+        "mae": summary["mae"],
+        "rmse": summary["rmse"],
+        "paired_samples": int(summary["paired_samples"]),
+    }
+    write_json(config_path, config)
+    state_path.unlink(missing_ok=True)
+
+    print(f"[proof] calibration saved to {config_path}")
+    print(f"[proof] waveform_csv={waveform_csv}")
+    print(
+        f"[proof] activity_channel_spec={config['activity_channel_spec']} "
+        f"alignment_corr={config['alignment_corr']:.4f} rmse={config['rmse']:.4f}"
+    )
+    return True
+
+
+def active_elapsed_s(monotonic_ns: int, recording_start_mono_ns: int) -> float:
+    return (monotonic_ns - recording_start_mono_ns) / 1_000_000_000.0
+
+
+def run_proof_capture(root: Path, args: argparse.Namespace) -> int:
+    raw_activity_channel = ChannelSpec.parse(args.activity_channel or DEFAULT_ACTIVITY_CHANNEL).raw_copy()
     session_id = args.session_id or time.strftime("cnap_%Y%m%d_%H%M%S", time.localtime())
-    output_path = ensure_output_path(root, session_id, args.output, "poll")
+    output_path = ensure_output_path(root, session_id, "proof")
     meta_path = metadata_path_for(output_path)
-    archive_output = archive_output_path(root, session_id, "poll", args.archive_root, args.no_archive)
+    archive_output = archive_output_path(root, session_id, "proof", args.archive_root, args.no_archive)
     archive_meta = metadata_path_for(archive_output) if archive_output is not None else None
-    metrics_path = metrics_path_for(output_path)
-    archive_metrics = metrics_path_for(archive_output) if archive_output is not None else None
 
-    if args.sample_rate_hz <= 0:
-        raise ValueError("sample-rate-hz must be positive")
+    process_started_at = iso_now()
+    process_start_mono_ns = time.monotonic_ns()
+    history_limit = max(8, int(args.activity_window_s * DEFAULT_SAMPLE_RATE_HZ))
+    raw_history: deque[int] = deque(maxlen=history_limit)
+    recording_start_mono_ns: int | None = None
+    recording_started_at: str | None = None
+    row_count = 0
+    polled_count = 0
+    last_report = time.monotonic()
+    next_deadline = time.monotonic()
+    active_state = False
 
     fieldnames = [
-        "session_id",
-        "sample_index",
-        "wall_time_iso",
+        "開始時刻",
+        "記録開始時刻",
+        "現在時刻",
         "epoch_ns",
         "monotonic_ns",
-        "elapsed_s",
+        "sample_index",
+        "経過時間",
+        "Activity Label",
+        "Activity Unit",
+        "Activity Raw",
+        "Activity Value",
     ]
-    for spec in specs:
-        fieldnames.append(f"{spec.label}_raw")
-        fieldnames.append(spec.label)
-
-    waveform_spec = next(
-        (spec for spec in specs if spec.label == args.waveform_label),
-        None,
-    )
-    if args.waveform_label and waveform_spec is None:
-        raise ValueError(f"waveform-label not found among channels: {args.waveform_label}")
-    process_start_mono_ns = time.monotonic_ns()
-    process_started_at = iso_now()
-    recording_start_mono_ns: int | None = (
-        process_start_mono_ns if waveform_spec is None or args.allow_inactive else None
-    )
-    recording_started_at: str | None = (
-        process_started_at if waveform_spec is None or args.allow_inactive else None
-    )
-    polled_count = 0
-    row_count = 0
-    last_report = time.monotonic()
-    period_s = 1.0 / args.sample_rate_hz
-    next_deadline = time.monotonic()
-    latest_metrics: dict | None = None
-    waveform_values: deque[float] | None = None
-    waveform_raw_values: deque[int] | None = None
-    active_state = waveform_spec is None
-    if waveform_spec is not None:
-        waveform_values = deque(
-            maxlen=max(4, int(args.waveform_window_s * args.sample_rate_hz))
-        )
-        waveform_raw_values = deque(
-            maxlen=max(4, int(args.waveform_window_s * args.sample_rate_hz))
-        )
 
     with TUSBAdapio() as device:
         device_summary = asdict(device.summary())
         metadata = {
             "session_id": session_id,
+            "mode": "proof_capture",
             "process_started_at": process_started_at,
             "recording_started_at": recording_started_at,
-            "sample_rate_hz_requested": args.sample_rate_hz,
-            "capture_mode": "single-sample-poll",
-            "notes": args.notes,
-            "channels": [asdict(spec) for spec in specs],
-            "device": device_summary,
+            "sample_rate_hz": DEFAULT_SAMPLE_RATE_HZ,
+            "activity_channel": asdict(raw_activity_channel),
             "output_csv": str(output_path),
             "archive_output_csv": str(archive_output) if archive_output is not None else None,
+            "device": device_summary,
+            "notes": args.notes,
         }
         write_json(meta_path, metadata)
         if archive_meta is not None:
             write_json(archive_meta, metadata)
 
-        with (
-            output_path.open("w", newline="", encoding="utf-8") as handle,
-            metrics_path.open("w", newline="", encoding="utf-8") as metrics_handle,
-        ):
+        with output_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fieldnames)
             writer.writeheader()
-            metrics_writer = csv.DictWriter(
-                metrics_handle,
-                fieldnames=[
-                    "session_id",
-                    "elapsed_s",
-                    "sample_index",
-                    "effective_rate_hz",
-                    "waveform_label",
-                    "wave_bpm",
-                    "peak_like",
-                    "trough_like",
-                ],
+            print(
+                f"[proof] session started_at={process_started_at} "
+                f"activity_channel={raw_activity_channel.index}:{raw_activity_channel.label}"
             )
-            metrics_writer.writeheader()
 
             try:
                 while True:
@@ -486,214 +521,175 @@ def run_capture(root: Path, args: argparse.Namespace) -> int:
 
                     monotonic_ns = time.monotonic_ns()
                     epoch_ns = time.time_ns()
-                    raw_values = device.read_scan([spec.index for spec in specs])
-                    process_elapsed_s = (monotonic_ns - process_start_mono_ns) / 1_000_000_000.0
-                    wall_time_iso = time.strftime(
-                        "%Y-%m-%dT%H:%M:%S",
-                        time.localtime(epoch_ns / 1_000_000_000),
+                    raw_value = device.read_scan([raw_activity_channel.index])[0]
+                    wall_time_iso = iso_from_epoch_ns(epoch_ns)
+                    raw_history.append(raw_value)
+
+                    is_active = activity_window_is_valid(
+                        list(raw_history),
+                        min_std_raw=args.activity_min_std_raw,
+                        min_range_raw=args.activity_min_range_raw,
                     )
+                    if is_active and recording_start_mono_ns is None:
+                        recording_start_mono_ns = monotonic_ns
+                        recording_started_at = wall_time_iso
+                        print(f"[proof] active waveform detected; recording started at {recording_started_at}")
+                    if is_active != active_state:
+                        state_label = "active" if is_active else "inactive"
+                        print(f"[proof] waveform state -> {state_label}")
+                        active_state = is_active
 
-                    row = {
-                        "session_id": session_id,
-                        "sample_index": row_count,
-                        "wall_time_iso": wall_time_iso,
-                        "epoch_ns": epoch_ns,
-                        "monotonic_ns": monotonic_ns,
-                        "elapsed_s": "0.000000000",
-                    }
-                    current_waveform_raw: int | None = None
-                    current_waveform_converted: float | None = None
-                    for spec, raw_value in zip(specs, raw_values):
-                        converted = spec.convert(raw_value)
-                        row[f"{spec.label}_raw"] = raw_value
-                        row[spec.label] = f"{converted:.9f}"
-                        if waveform_values is not None and waveform_spec == spec:
-                            waveform_values.append(converted)
-                            waveform_raw_values.append(raw_value)
-                            current_waveform_raw = raw_value
-                            current_waveform_converted = converted
-
-                    if waveform_raw_values is not None:
-                        is_active = activity_window_is_valid(
-                            list(waveform_raw_values),
-                            min_std_raw=args.activity_min_std_raw,
-                            min_range_raw=args.activity_min_range_raw,
-                        )
-                        if is_active and recording_start_mono_ns is None:
-                            recording_start_mono_ns = monotonic_ns
-                            recording_started_at = wall_time_iso
-                            waveform_values.clear()
-                            waveform_raw_values.clear()
-                            if current_waveform_converted is not None and current_waveform_raw is not None:
-                                waveform_values.append(current_waveform_converted)
-                                waveform_raw_values.append(current_waveform_raw)
-                            latest_metrics = None
-                            print("[capture] active waveform detected; recording started")
-                        if is_active != active_state:
-                            state_label = "active" if is_active else "inactive"
-                            print(f"[capture] waveform state -> {state_label}")
-                            active_state = is_active
-                    else:
-                        is_active = True
-
-                    if is_active or args.allow_inactive:
-                        elapsed_s = (
-                            (monotonic_ns - recording_start_mono_ns) / 1_000_000_000.0
-                            if recording_start_mono_ns is not None
-                            else process_elapsed_s
-                        )
-                        row["elapsed_s"] = f"{elapsed_s:.9f}"
+                    if recording_start_mono_ns is not None and is_active:
+                        row = {
+                            "開始時刻": process_started_at,
+                            "記録開始時刻": recording_started_at,
+                            "現在時刻": wall_time_iso,
+                            "epoch_ns": epoch_ns,
+                            "monotonic_ns": monotonic_ns,
+                            "sample_index": row_count,
+                            "経過時間": f"{active_elapsed_s(monotonic_ns, recording_start_mono_ns):.9f}",
+                            "Activity Label": raw_activity_channel.label,
+                            "Activity Unit": raw_activity_channel.unit,
+                            "Activity Raw": raw_value,
+                            "Activity Value": f"{raw_activity_channel.convert(raw_value):.9f}",
+                        }
                         writer.writerow(row)
                         row_count += 1
-                    next_deadline += period_s
-                    polled_count += 1
 
-                    if polled_count % max(1, int(args.sample_rate_hz)) == 0:
+                    polled_count += 1
+                    next_deadline += 1.0 / DEFAULT_SAMPLE_RATE_HZ
+
+                    if polled_count % int(DEFAULT_SAMPLE_RATE_HZ) == 0:
                         handle.flush()
 
                     if args.status_interval > 0 and time.monotonic() - last_report >= args.status_interval:
-                        effective_rate = (
-                            row_count
-                            / max((monotonic_ns - recording_start_mono_ns) / 1_000_000_000.0, 1e-9)
-                            if row_count and recording_start_mono_ns is not None
-                            else 0.0
-                        )
-                        metrics_suffix = ""
-                        if waveform_values is not None and is_active and recording_start_mono_ns is not None:
-                            metrics = estimate_wave_metrics(
-                                list(waveform_values),
-                                sample_rate_hz=args.sample_rate_hz,
-                                min_interval_s=args.waveform_min_interval_s,
-                            )
-                            if metrics is not None:
-                                latest_metrics = metrics
-                                metrics_writer.writerow(
-                                    {
-                                        "session_id": session_id,
-                                        "elapsed_s": f"{elapsed_s:.9f}",
-                                        "sample_index": row_count,
-                                        "effective_rate_hz": f"{effective_rate:.9f}",
-                                        "waveform_label": waveform_spec.label,
-                                        "wave_bpm": f"{metrics['bpm']:.9f}",
-                                        "peak_like": f"{metrics['peak_like']:.9f}",
-                                        "trough_like": f"{metrics['trough_like']:.9f}",
-                                    }
-                                )
-                                metrics_suffix = (
-                                    f" wave_bpm={metrics['bpm']:.1f}"
-                                    f" peak_like={metrics['peak_like']:.3f} {waveform_spec.unit}"
-                                    f" trough_like={metrics['trough_like']:.3f} {waveform_spec.unit}"
-                                )
-                        if recording_start_mono_ns is None and not args.allow_inactive:
-                            if waveform_raw_values is not None and waveform_raw_values:
-                                std_raw = statistics.pstdev(waveform_raw_values)
-                                range_raw = max(waveform_raw_values) - min(waveform_raw_values)
-                                print(
-                                    f"[capture] waiting for active waveform "
-                                    f"(std={std_raw:.2f}, range={range_raw:.2f})"
-                                )
-                            else:
-                                print("[capture] waiting for active waveform")
-                        elif is_active or args.allow_inactive:
-                            elapsed_s = (
-                                (monotonic_ns - recording_start_mono_ns) / 1_000_000_000.0
-                                if recording_start_mono_ns is not None
-                                else process_elapsed_s
-                            )
-                            print(
-                                f"[capture] t={elapsed_s:.2f}s n={row_count} rate={effective_rate:.2f} Hz "
-                                f"{format_latest(specs, raw_values)}{metrics_suffix}"
-                            )
+                        if recording_start_mono_ns is None:
+                            print(f"[proof] {waiting_message(raw_history)}")
                         else:
-                            print("[capture] recording paused: waveform inactive")
+                            elapsed_s = active_elapsed_s(monotonic_ns, recording_start_mono_ns)
+                            print(
+                                f"[proof] t={elapsed_s:.2f}s n={row_count} "
+                                f"{raw_activity_channel.label}={raw_value:.3f} {raw_activity_channel.unit} "
+                                f"(raw={raw_value})"
+                            )
                         last_report = time.monotonic()
 
-                    if args.duration > 0 and process_elapsed_s >= args.duration:
-                        break
+                    if args.duration > 0:
+                        process_elapsed_s = (monotonic_ns - process_start_mono_ns) / 1_000_000_000.0
+                        if process_elapsed_s >= args.duration:
+                            break
             except KeyboardInterrupt:
-                print("[capture] interrupted by user", file=sys.stderr)
-            finally:
-                handle.flush()
-                metrics_handle.flush()
+                print("[proof] interrupted by user", file=sys.stderr)
 
     elapsed_s = (
-        (time.monotonic_ns() - recording_start_mono_ns) / 1_000_000_000.0
+        active_elapsed_s(time.monotonic_ns(), recording_start_mono_ns)
         if recording_start_mono_ns is not None
         else 0.0
     )
     metadata = {
         "session_id": session_id,
+        "mode": "proof_capture",
         "process_started_at": process_started_at,
         "recording_started_at": recording_started_at,
         "stopped_at": iso_now(),
-        "capture_mode": "single-sample-poll",
-        "sample_rate_hz_requested": args.sample_rate_hz,
+        "sample_rate_hz": DEFAULT_SAMPLE_RATE_HZ,
         "samples_polled": polled_count,
         "samples_captured": row_count,
         "elapsed_s": elapsed_s,
-        "effective_rate_hz": row_count / max(elapsed_s, 1e-9) if row_count else 0.0,
-        "channels": [asdict(spec) for spec in specs],
-        "device": device_summary,
+        "activity_channel": asdict(raw_activity_channel),
         "output_csv": str(output_path),
         "archive_output_csv": str(archive_output) if archive_output is not None else None,
+        "device": device_summary,
         "notes": args.notes,
-        "waveform_label": args.waveform_label,
-        "latest_wave_metrics": latest_metrics,
     }
     write_json(meta_path, metadata)
     if archive_output is not None:
         copy_if_present(output_path, archive_output)
         copy_if_present(meta_path, archive_meta)
-        copy_if_present(metrics_path, archive_metrics)
-    print(
-        f"[capture] wrote {row_count} rows to {output_path} "
-        f"(effective_rate={metadata['effective_rate_hz']:.2f} Hz)"
-    )
+
+    print(f"[proof] wrote {row_count} rows to {output_path}")
     if archive_output is not None:
-        print(f"[capture] mirrored CSV/JSON to {archive_output.parent}")
+        print(f"[proof] mirrored CSV/JSON to {archive_output.parent}")
+
+    if row_count > 0:
+        proof_state = {
+            "created_at": iso_now(),
+            "session_id": session_id,
+            "proof_csv": str(output_path),
+            "activity_channel_spec": raw_activity_channel.to_spec_string(),
+            "recording_started_at": recording_started_at,
+            "samples_captured": row_count,
+        }
+        state_path = proof_state_path_for(root)
+        write_json(state_path, proof_state)
+        imports_root = imports_root_for(root)
+        imports_root.mkdir(parents=True, exist_ok=True)
+        print(f"[proof] pending proof saved to {state_path}")
+        print(
+            f"[proof] copy the official CNAP waveform.csv into {imports_root} "
+            f"and then run `python realtime_capture.py --proof` again"
+        )
+    else:
+        proof_state_path_for(root).unlink(missing_ok=True)
+
     return 0
 
 
-def run_beat(root: Path, args: argparse.Namespace) -> int:
-    if abs(args.sample_rate_hz - 100.0) > 1e-9:
-        raise ValueError("CNAP beat mode is fixed at 100 Hz; use --sample-rate-hz 100")
+def resolve_activity_channel(root: Path, args: argparse.Namespace) -> tuple[ChannelSpec, dict[str, Any]]:
+    if args.activity_channel:
+        channel = ChannelSpec.parse(args.activity_channel)
+        return channel, {
+            "source": "command_line",
+            "activity_channel_spec": channel.to_spec_string(),
+        }
 
-    activity_spec = ChannelSpec.parse(args.activity_channel)
-    sys_spec = parse_optional_channel(args.sys_channel)
-    mean_spec = parse_optional_channel(args.mean_channel)
-    dia_spec = parse_optional_channel(args.dia_channel)
-    hr_spec = parse_optional_channel(args.hr_channel)
+    config_path = config_path_for(root, args.config)
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"calibration not found: {config_path}. Run `python realtime_capture.py --proof` first."
+        )
+    config = read_json(config_path)
+    if "activity_channel_spec" not in config:
+        raise KeyError(f"activity_channel_spec not found in {config_path}")
+    return ChannelSpec.parse(config["activity_channel_spec"]), config
 
-    specs: list[ChannelSpec] = [activity_spec]
-    for spec in (sys_spec, mean_spec, dia_spec, hr_spec):
-        if spec is not None and all(existing.label != spec.label for existing in specs):
-            specs.append(spec)
 
+def run_beat_logger(root: Path, args: argparse.Namespace) -> int:
+    activity_channel, calibration = resolve_activity_channel(root, args)
     session_id = args.session_id or time.strftime("cnap_%Y%m%d_%H%M%S", time.localtime())
-    output_path = ensure_output_path(root, session_id, args.output, "beats")
+    output_path = ensure_output_path(root, session_id, "beats")
     meta_path = metadata_path_for(output_path)
     archive_output = archive_output_path(root, session_id, "beats", args.archive_root, args.no_archive)
     archive_meta = metadata_path_for(archive_output) if archive_output is not None else None
 
+    started_at = iso_now()
     sample_history: deque[dict[str, Any]] = deque(
-        maxlen=max(8, int(args.activity_window_s * args.sample_rate_hz) + 4)
+        maxlen=max(8, int(args.activity_window_s * DEFAULT_SAMPLE_RATE_HZ) + 4)
     )
-    raw_history: deque[int] = deque(maxlen=max(8, int(args.activity_window_s * args.sample_rate_hz)))
+    raw_history: deque[int] = deque(maxlen=max(8, int(args.activity_window_s * DEFAULT_SAMPLE_RATE_HZ)))
+    recording_start_mono_ns: int | None = None
+    recording_started_at: str | None = None
     last_peak_sample_index: int | None = None
     last_peak_elapsed_s: float | None = None
     beat_count = 0
     sample_count = 0
     last_report = time.monotonic()
-    active_state = False
-    started_at = iso_now()
-    start_mono_ns = time.monotonic_ns()
-    period_s = 1.0 / args.sample_rate_hz
     next_deadline = time.monotonic()
+    active_state = False
+    process_start_mono_ns = time.monotonic_ns()
 
     fieldnames = [
-        "経過時間",
+        "開始時刻",
+        "記録開始時刻",
         "現在時刻",
+        "epoch_ns",
+        "monotonic_ns",
+        "経過時間",
         "計測回数",
+        "Activity Label",
+        "Activity Unit",
+        "Activity Raw",
+        "Activity Value",
         "Beat Sys [mmHg]",
         "Beat Mean [mmHg]",
         "Beat Dia [mmHg]",
@@ -704,22 +700,16 @@ def run_beat(root: Path, args: argparse.Namespace) -> int:
         device_summary = asdict(device.summary())
         metadata = {
             "session_id": session_id,
+            "mode": "beat_logger",
             "started_at": started_at,
-            "capture_mode": "beat",
-            "sample_rate_hz": args.sample_rate_hz,
-            "activity_channel": asdict(activity_spec),
-            "sys_channel": asdict(sys_spec) if sys_spec is not None else None,
-            "mean_channel": asdict(mean_spec) if mean_spec is not None else None,
-            "dia_channel": asdict(dia_spec) if dia_spec is not None else None,
-            "hr_channel": asdict(hr_spec) if hr_spec is not None else None,
-            "device": device_summary,
+            "recording_started_at": recording_started_at,
+            "sample_rate_hz": DEFAULT_SAMPLE_RATE_HZ,
+            "activity_channel": asdict(activity_channel),
+            "calibration": calibration,
             "output_csv": str(output_path),
             "archive_output_csv": str(archive_output) if archive_output is not None else None,
+            "device": device_summary,
             "notes": args.notes,
-            "activity_min_std_raw": args.activity_min_std_raw,
-            "activity_min_range_raw": args.activity_min_range_raw,
-            "min_beat_interval_s": args.min_beat_interval_s,
-            "max_beat_interval_s": args.max_beat_interval_s,
         }
         write_json(meta_path, metadata)
         if archive_meta is not None:
@@ -728,52 +718,84 @@ def run_beat(root: Path, args: argparse.Namespace) -> int:
         with output_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fieldnames)
             writer.writeheader()
+            print(
+                f"[beat] session started_at={started_at} "
+                f"activity_channel={activity_channel.index}:{activity_channel.label} "
+                f"unit={activity_channel.unit}"
+            )
 
             try:
                 while True:
                     now = time.monotonic()
-                    if sample_history and now < next_deadline:
+                    if sample_count > 0 and now < next_deadline:
                         time.sleep(next_deadline - now)
 
                     monotonic_ns = time.monotonic_ns()
                     epoch_ns = time.time_ns()
-                    raw_values = device.read_scan([spec.index for spec in specs])
-                    elapsed_s = (monotonic_ns - start_mono_ns) / 1_000_000_000.0
+                    raw_value = device.read_scan([activity_channel.index])[0]
+                    converted_value = activity_channel.convert(raw_value)
+                    wall_time_iso = iso_from_epoch_ns(epoch_ns)
 
-                    raw_by_label = {spec.label: raw for spec, raw in zip(specs, raw_values)}
-                    converted_by_label = {
-                        spec.label: spec.convert(raw)
-                        for spec, raw in zip(specs, raw_values)
-                    }
-
-                    activity_raw = raw_by_label[activity_spec.label]
                     sample_history.append(
                         {
                             "sample_index": sample_count,
-                            "elapsed_s": elapsed_s,
-                            "wall_time_iso": time.strftime(
-                                "%Y-%m-%dT%H:%M:%S",
-                                time.localtime(epoch_ns / 1_000_000_000),
+                            "elapsed_s": (
+                                active_elapsed_s(monotonic_ns, recording_start_mono_ns)
+                                if recording_start_mono_ns is not None
+                                else 0.0
                             ),
-                            "activity_raw": activity_raw,
-                            "raw_by_label": raw_by_label,
-                            "converted_by_label": converted_by_label,
+                            "wall_time_iso": wall_time_iso,
+                            "epoch_ns": epoch_ns,
+                            "monotonic_ns": monotonic_ns,
+                            "activity_raw": raw_value,
+                            "activity_value": converted_value,
                         }
                     )
-                    raw_history.append(activity_raw)
-                    next_deadline += period_s
-                    sample_count += 1
+                    raw_history.append(raw_value)
+
+                    is_active = activity_window_is_valid(
+                        list(raw_history),
+                        min_std_raw=args.activity_min_std_raw,
+                        min_range_raw=args.activity_min_range_raw,
+                    )
+                    if is_active and recording_start_mono_ns is None:
+                        recording_start_mono_ns = monotonic_ns
+                        recording_started_at = wall_time_iso
+                        sample_history.clear()
+                        raw_history.clear()
+                        sample_history.append(
+                            {
+                                "sample_index": sample_count,
+                                "elapsed_s": 0.0,
+                                "wall_time_iso": wall_time_iso,
+                                "epoch_ns": epoch_ns,
+                                "monotonic_ns": monotonic_ns,
+                                "activity_raw": raw_value,
+                                "activity_value": converted_value,
+                            }
+                        )
+                        raw_history.append(raw_value)
+                        last_peak_sample_index = None
+                        last_peak_elapsed_s = None
+                        beat_count = 0
+                        print(f"[beat] active waveform detected; recording started at {recording_started_at}")
+                    if is_active != active_state:
+                        state_label = "active" if is_active else "inactive"
+                        print(f"[beat] waveform state -> {state_label}")
+                        active_state = is_active
+
+                    if recording_start_mono_ns is not None:
+                        sample_history[-1]["elapsed_s"] = active_elapsed_s(monotonic_ns, recording_start_mono_ns)
 
                     peak_sample = detect_stream_peak(
                         sample_history,
                         raw_history,
                         last_peak_sample_index=last_peak_sample_index,
                         min_interval_s=args.min_beat_interval_s,
-                        sample_rate_hz=args.sample_rate_hz,
+                        sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ,
                         min_std_raw=args.activity_min_std_raw,
                         min_range_raw=args.activity_min_range_raw,
                     )
-
                     if peak_sample is not None:
                         if last_peak_elapsed_s is not None:
                             interval_s = peak_sample["elapsed_s"] - last_peak_elapsed_s
@@ -783,93 +805,84 @@ def run_beat(root: Path, args: argparse.Namespace) -> int:
                                     start_sample_index=last_peak_sample_index,
                                     end_sample_index=peak_sample["sample_index"],
                                 )
-                                activity_values = [
-                                    sample["converted_by_label"][activity_spec.label]
-                                    for sample in interval_samples
-                                ]
-                                derived_sys = max(activity_values) if activity_values else None
-                                derived_mean = (
-                                    statistics.fmean(activity_values) if activity_values else None
-                                )
-                                derived_dia = min(activity_values) if activity_values else None
-                                derived_hr = 60.0 / interval_s if interval_s > 0 else None
+                                interval_values = [sample["activity_value"] for sample in interval_samples]
                                 beat_count += 1
-                                sys_value = mean_value_for_spec(sys_spec, interval_samples)
-                                mean_value = mean_value_for_spec(mean_spec, interval_samples)
-                                dia_value = mean_value_for_spec(dia_spec, interval_samples)
-                                hr_value = mean_value_for_spec(hr_spec, interval_samples)
-
-                                writer.writerow(
-                                    {
-                                        "経過時間": f"{peak_sample['elapsed_s']:.9f}",
-                                        "現在時刻": peak_sample["wall_time_iso"],
-                                        "計測回数": beat_count,
-                                        "Beat Sys [mmHg]": format_optional_value(
-                                            sys_value if sys_value is not None else derived_sys
-                                        ),
-                                        "Beat Mean [mmHg]": format_optional_value(
-                                            mean_value if mean_value is not None else derived_mean
-                                        ),
-                                        "Beat Dia [mmHg]": format_optional_value(
-                                            dia_value if dia_value is not None else derived_dia
-                                        ),
-                                        "Beat HR [bpm]": format_optional_value(
-                                            hr_value if hr_value is not None else derived_hr
-                                        ),
-                                    }
-                                )
+                                sys_value = max(interval_values) if interval_values else None
+                                mean_value = statistics.fmean(interval_values) if interval_values else None
+                                dia_value = min(interval_values) if interval_values else None
+                                hr_value = 60.0 / interval_s if interval_s > 0 else None
+                                row = {
+                                    "開始時刻": started_at,
+                                    "記録開始時刻": recording_started_at,
+                                    "現在時刻": peak_sample["wall_time_iso"],
+                                    "epoch_ns": peak_sample["epoch_ns"],
+                                    "monotonic_ns": peak_sample["monotonic_ns"],
+                                    "経過時間": f"{peak_sample['elapsed_s']:.9f}",
+                                    "計測回数": beat_count,
+                                    "Activity Label": activity_channel.label,
+                                    "Activity Unit": activity_channel.unit,
+                                    "Activity Raw": peak_sample["activity_raw"],
+                                    "Activity Value": f"{peak_sample['activity_value']:.9f}",
+                                    "Beat Sys [mmHg]": format_optional_value(sys_value),
+                                    "Beat Mean [mmHg]": format_optional_value(mean_value),
+                                    "Beat Dia [mmHg]": format_optional_value(dia_value),
+                                    "Beat HR [bpm]": format_optional_value(hr_value),
+                                }
+                                writer.writerow(row)
                                 handle.flush()
-
+                                print(
+                                    f"[beat] start={started_at} now={peak_sample['wall_time_iso']} "
+                                    f"t={peak_sample['elapsed_s']:.2f}s #{beat_count} "
+                                    f"{activity_channel.label}={peak_sample['activity_value']:.3f} {activity_channel.unit} "
+                                    f"(raw={peak_sample['activity_raw']}) "
+                                    f"Sys={row['Beat Sys [mmHg]']} "
+                                    f"Mean={row['Beat Mean [mmHg]']} "
+                                    f"Dia={row['Beat Dia [mmHg]']} "
+                                    f"HR={row['Beat HR [bpm]']}"
+                                )
                         last_peak_sample_index = peak_sample["sample_index"]
                         last_peak_elapsed_s = peak_sample["elapsed_s"]
 
+                    sample_count += 1
+                    next_deadline += 1.0 / DEFAULT_SAMPLE_RATE_HZ
+
                     if args.status_interval > 0 and time.monotonic() - last_report >= args.status_interval:
-                        is_active = activity_window_is_valid(
-                            list(raw_history),
-                            min_std_raw=args.activity_min_std_raw,
-                            min_range_raw=args.activity_min_range_raw,
-                        )
-                        if is_active != active_state:
-                            state_label = "active" if is_active else "inactive"
-                            print(f"[beat] waveform state -> {state_label}")
-                            active_state = is_active
-                        if is_active:
+                        if recording_start_mono_ns is None:
+                            print(f"[beat] {waiting_message(raw_history)}")
+                        else:
+                            elapsed_s = active_elapsed_s(monotonic_ns, recording_start_mono_ns)
                             print(
                                 f"[beat] t={elapsed_s:.2f}s beats={beat_count} "
-                                f"{format_latest(specs, raw_values)}"
+                                f"{activity_channel.label}={converted_value:.3f} {activity_channel.unit} "
+                                f"(raw={raw_value})"
                             )
-                        elif raw_history:
-                            std_raw = statistics.pstdev(raw_history)
-                            range_raw = max(raw_history) - min(raw_history)
-                            print(
-                                f"[beat] waiting for active waveform "
-                                f"(std={std_raw:.2f}, range={range_raw:.2f})"
-                            )
-                        else:
-                            print("[beat] waiting for active waveform")
                         last_report = time.monotonic()
 
-                    if args.duration > 0 and elapsed_s >= args.duration:
-                        break
+                    if args.duration > 0:
+                        process_elapsed_s = (
+                            active_elapsed_s(monotonic_ns, recording_start_mono_ns)
+                            if recording_start_mono_ns is not None
+                            else (monotonic_ns - process_start_mono_ns) / 1_000_000_000.0
+                        )
+                        if process_elapsed_s >= args.duration:
+                            break
             except KeyboardInterrupt:
                 print("[beat] interrupted by user", file=sys.stderr)
 
     metadata = {
         "session_id": session_id,
+        "mode": "beat_logger",
         "started_at": started_at,
+        "recording_started_at": recording_started_at,
         "stopped_at": iso_now(),
-        "capture_mode": "beat",
-        "sample_rate_hz": args.sample_rate_hz,
+        "sample_rate_hz": DEFAULT_SAMPLE_RATE_HZ,
         "samples_polled": sample_count,
         "beats_written": beat_count,
-        "activity_channel": asdict(activity_spec),
-        "sys_channel": asdict(sys_spec) if sys_spec is not None else None,
-        "mean_channel": asdict(mean_spec) if mean_spec is not None else None,
-        "dia_channel": asdict(dia_spec) if dia_spec is not None else None,
-        "hr_channel": asdict(hr_spec) if hr_spec is not None else None,
-        "device": device_summary,
+        "activity_channel": asdict(activity_channel),
+        "calibration": calibration,
         "output_csv": str(output_path),
         "archive_output_csv": str(archive_output) if archive_output is not None else None,
+        "device": device_summary,
         "notes": args.notes,
     }
     write_json(meta_path, metadata)
@@ -883,111 +896,28 @@ def run_beat(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-def run_buffered(root: Path, args: argparse.Namespace) -> int:
-    specs = default_channels(args.channel)
-    primary_spec = specs[0]
-    session_id = args.session_id or time.strftime("cnap_%Y%m%d_%H%M%S", time.localtime())
-    output_path = ensure_output_path(root, session_id, args.output, "buffered")
-    meta_path = metadata_path_for(output_path)
-    archive_output = archive_output_path(root, session_id, "buffered", args.archive_root, args.no_archive)
-    archive_meta = metadata_path_for(archive_output) if archive_output is not None else None
-    started_at = iso_now()
-
-    with TUSBAdapio() as device:
-        if args.mode == "digital":
-            device.adc_digital_trigger(args.end_channel, args.buffer_size)
-        else:
-            device.adc_analog_trigger(
-                args.end_channel,
-                args.buffer_size,
-                args.threshold,
-                args.trigger_channel,
-                falling_edge=args.mode == "analog-falling",
-            )
-
-        start_wait = time.monotonic()
-        last_report = start_wait
-        final_running = 1
-        final_sampled_num = 0
-        while time.monotonic() - start_wait <= args.timeout:
-            running, sampled_num = device.adc_get_status()
-            final_running = running
-            final_sampled_num = sampled_num
-            now = time.monotonic()
-            if args.status_interval > 0 and now - last_report >= args.status_interval:
-                print(f"[buffered] running={running} sampled_num={sampled_num}")
-                last_report = now
-            if not running and sampled_num >= args.buffer_size:
-                break
-            time.sleep(0.01)
-
-        sample_count = min(final_sampled_num, args.buffer_size)
-        if sample_count <= 0:
-            raise RuntimeError("buffered capture finished with zero samples")
-
-        values = device.adc_get_data(sample_count)
-        metadata = {
-            "session_id": session_id,
-            "started_at": started_at,
-            "stopped_at": iso_now(),
-            "capture_mode": args.mode,
-            "end_channel": args.end_channel,
-            "buffer_size_requested": args.buffer_size,
-            "buffer_size_read": sample_count,
-            "threshold": args.threshold,
-            "trigger_channel": args.trigger_channel,
-            "device": asdict(device.summary()),
-            "primary_channel": asdict(primary_spec),
-            "output_csv": str(output_path),
-            "archive_output_csv": str(archive_output) if archive_output is not None else None,
-            "note": "For end-channel > 0 the returned values are device-order samples. Interleave is not decoded yet.",
-        }
-        write_json(meta_path, metadata)
-        if archive_meta is not None:
-            write_json(archive_meta, metadata)
-
-    with output_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=["session_id", "sample_index", f"{primary_spec.label}_raw", primary_spec.label],
-        )
-        writer.writeheader()
-        for sample_index, raw_value in enumerate(values):
-            writer.writerow(
-                {
-                    "session_id": session_id,
-                    "sample_index": sample_index,
-                    f"{primary_spec.label}_raw": raw_value,
-                    primary_spec.label: f"{primary_spec.convert(raw_value):.9f}",
-                }
-            )
-
-    if archive_output is not None:
-        copy_if_present(output_path, archive_output)
-        copy_if_present(meta_path, archive_meta)
-
-    print(f"[buffered] wrote {sample_count} samples to {output_path}")
-    if archive_output is not None:
-        print(f"[buffered] mirrored CSV/JSON to {archive_output.parent}")
-    return 0
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parent
 
     try:
-        if args.command == "info":
-            return run_info(root, args)
-        if args.command == "capture":
-            return run_capture(root, args)
-        if args.command == "beat":
-            return run_beat(root, args)
-        if args.command == "buffered":
-            return run_buffered(root, args)
-        parser.error(f"unsupported command: {args.command}")
-        return 2
+        if args.proof:
+            state_path = proof_state_path_for(root)
+            if try_finalize_proof(root, args):
+                return 0
+            if args.waveform_csv is not None and not state_path.exists():
+                raise FileNotFoundError(
+                    f"pending proof not found: {state_path}. "
+                    f"Run `python realtime_capture.py --proof` first."
+                )
+            if state_path.exists():
+                raise RuntimeError(
+                    f"pending proof exists: {state_path}. "
+                    f"Copy the official waveform.csv into {imports_root_for(root)} and rerun `python realtime_capture.py --proof`."
+                )
+            return run_proof_capture(root, args)
+        return run_beat_logger(root, args)
     except TUSBAdapioError as exc:
         print(f"USB error: {exc}", file=sys.stderr)
         return 1
