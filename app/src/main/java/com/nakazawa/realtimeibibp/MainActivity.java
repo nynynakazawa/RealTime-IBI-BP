@@ -494,12 +494,15 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void stopRecordingAndPersist() {
-        if (!isRecording) {
-            Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist skipped: isRecording=false sessionId=" + currentSessionId);
+        boolean hasRecordedData = analyzer != null && analyzer.hasRecordedTrainingData();
+        if (!isRecording && !hasRecordedData) {
+            Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist skipped: isRecording=false and no recorded data sessionId=" + currentSessionId);
             return;
         }
-        Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist begin sessionId=" + currentSessionId);
-        stopRecording();
+        Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist begin sessionId=" + currentSessionId + " hasRecordedData=" + hasRecordedData);
+        if (isRecording) {
+            stopRecording();
+        }
         saveRawDataToCsv();
         saveRTBPToCsv();
         saveSinBPMToCsv();

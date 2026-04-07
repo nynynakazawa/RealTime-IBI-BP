@@ -72,6 +72,20 @@ public class RealtimeBP {
     private double lastValleyToPeakRelTTP; // 谷→山のrelTTP
     private double lastPeakToValleyRelTTP; // 山→谷のrelTTP
     private double lastAmplitude; // 振幅（A）
+    private double lastInputIbiMs;
+    private double lastSmoothedIbiMs;
+    private int lastUsedSmoothedIbi;
+    private double lastUsedAmplitude;
+    private double lastUsedHr;
+    private double lastUsedValleyToPeakRelTTP;
+    private double lastUsedPeakToValleyRelTTP;
+    private double lastRawSbp;
+    private double lastRawDbp;
+    private int lastClampApplied;
+    private int lastOutputValid;
+    private int lastFeatureClampApplied;
+    private String lastFeatureClampReason = "init";
+    private String lastRejectReason = "init";
 
     // --- 回帰係数（2025-11-22評価結果より最適化） ---
     // SBP: C0 + C1*A + C2*HR + C3*V2P_relTTP + C4*P2V_relTTP
@@ -88,6 +102,26 @@ public class RealtimeBP {
     private static final double D2 = 0.14232918573186615;   // M1_HR
     private static final double D3 = 53.34911907085872;    // M1_V2P_relTTP
     private static final double D4 = -27.23680556466717;    // M1_P2V_relTTP
+
+    // prepared_training_data.csv の 1-99 percentile で支持域を定義。
+    // 線形係数の外挿を避け、実機で異常特徴量が入ったときの暴走を抑える。
+    private static final double A_SUPPORT_MIN = 0.838976;
+    private static final double A_SUPPORT_MAX = 9.636604;
+    private static final double HR_SUPPORT_MIN = 59.436808;
+    private static final double HR_SUPPORT_MAX = 108.624444;
+    private static final double V2P_SUPPORT_MIN = -0.928772;
+    private static final double V2P_SUPPORT_MAX = -0.355472;
+    private static final double P2V_SUPPORT_MIN = -0.859316;
+    private static final double P2V_SUPPORT_MAX = -0.272260;
+
+    public static double[] getSbpCoefficients() {
+        return new double[] { C0, C1, C2, C3, C4 };
+    }
+
+    public static double[] getDbpCoefficients() {
+        return new double[] { D0, D1, D2, D3, D4 };
+    }
+
     /**
      * BaseLogicからのコールバック用メソッド
      * @param correctedGreenValue 正規化済み PPG 振幅 (0–100%)
@@ -96,6 +130,8 @@ public class RealtimeBP {
     public void update(double correctedGreenValue, double smoothedIbiMs) {
         // ISOチェック
         if (currentISO < 300) {
+            lastOutputValid = 0;
+            lastRejectReason = "low_iso";
             Log.d("RealtimeBP-ISO", "Blood pressure estimation skipped: ISO=" + currentISO);
             return;
         }
@@ -117,6 +153,7 @@ public class RealtimeBP {
 
         Log.d("RealtimeBP-Estimate", "=== estimateAndNotify START ===");
         Log.d("RealtimeBP-Estimate", "Input: ibiMs=" + ibiMs);
+        lastInputIbiMs = ibiMs;
 
         // BaseLogicから最新の値を取得
         double valleyToPeakRelTTP = (logicRef != null) ? logicRef.averageValleyToPeakRelTTP : 0.0;
@@ -139,11 +176,17 @@ public class RealtimeBP {
             double lastSmoothedIbi = logicRef.getLastSmoothedIbi();
             if (lastSmoothedIbi > 0) {
                 hr = 60000.0 / lastSmoothedIbi; // 最新のsmoothedBpm
+                lastSmoothedIbiMs = lastSmoothedIbi;
+                lastUsedSmoothedIbi = 1;
             } else {
                 hr = 60000.0 / ibiMs; // フォールバック
+                lastSmoothedIbiMs = 0.0;
+                lastUsedSmoothedIbi = 0;
             }
         } else {
             hr = 60000.0 / ibiMs; // フォールバック
+            lastSmoothedIbiMs = 0.0;
+            lastUsedSmoothedIbi = 0;
         }
         
         // 有効なHR値を保存（ISO < 300の時に使用）
@@ -151,20 +194,47 @@ public class RealtimeBP {
             lastValidHr = hr;
         }
 
+        StringBuilder featureClampReason = new StringBuilder();
+        double usedAmplitude = clampFeature("A", amplitude, A_SUPPORT_MIN, A_SUPPORT_MAX, featureClampReason);
+        double usedHr = clampFeature("HR", hr, HR_SUPPORT_MIN, HR_SUPPORT_MAX, featureClampReason);
+        double usedValleyToPeakRelTTP = clampFeature(
+                "V2P_relTTP", valleyToPeakRelTTP, V2P_SUPPORT_MIN, V2P_SUPPORT_MAX, featureClampReason);
+        double usedPeakToValleyRelTTP = clampFeature(
+                "P2V_relTTP", peakToValleyRelTTP, P2V_SUPPORT_MIN, P2V_SUPPORT_MAX, featureClampReason);
+        lastUsedAmplitude = usedAmplitude;
+        lastUsedHr = usedHr;
+        lastUsedValleyToPeakRelTTP = usedValleyToPeakRelTTP;
+        lastUsedPeakToValleyRelTTP = usedPeakToValleyRelTTP;
+        lastFeatureClampApplied = featureClampReason.length() > 0 ? 1 : 0;
+        lastFeatureClampReason = featureClampReason.length() > 0 ? featureClampReason.toString() : "ok";
+
         // 回帰式による血圧推定: SBP = C0 + C1*A + C2*HR + C3*V2P_relTTP + C4*P2V_relTTP
-        double sbp = C0 + C1 * amplitude + C2 * hr
-                + C3 * valleyToPeakRelTTP + C4 * peakToValleyRelTTP;
+        double sbp = C0 + C1 * usedAmplitude + C2 * usedHr
+                + C3 * usedValleyToPeakRelTTP + C4 * usedPeakToValleyRelTTP;
         // DBP = D0 + D1*A + D2*HR + D3*V2P_relTTP + D4*P2V_relTTP
-        double dbp = D0 + D1 * amplitude + D2 * hr
-                + D3 * valleyToPeakRelTTP + D4 * peakToValleyRelTTP;
+        double dbp = D0 + D1 * usedAmplitude + D2 * usedHr
+                + D3 * usedValleyToPeakRelTTP + D4 * usedPeakToValleyRelTTP;
+        lastRawSbp = sbp;
+        lastRawDbp = dbp;
 
         Log.d("RealtimeBP-Estimate", String.format(
-                "RawBP: SBP=%.2f, DBP=%.2f A=%.3f, HR=%.2f, VtoP_relTTP=%.3f, PtoV_relTTP=%.3f",
-                sbp, dbp, amplitude, hr, valleyToPeakRelTTP, peakToValleyRelTTP));
+                Locale.US,
+                "RawBP: SBP=%.2f, DBP=%.2f A=%.3f->%.3f, HR=%.2f->%.2f, VtoP_relTTP=%.3f->%.3f, PtoV_relTTP=%.3f->%.3f clamp=%s",
+                sbp, dbp,
+                amplitude, usedAmplitude,
+                hr, usedHr,
+                valleyToPeakRelTTP, usedValleyToPeakRelTTP,
+                peakToValleyRelTTP, usedPeakToValleyRelTTP,
+                lastFeatureClampReason));
 
         // 範囲制限
-        sbp = clamp(sbp, 60, 200);
-        dbp = clamp(dbp, 40, 150);
+        double clampedSbp = clamp(sbp, 60, 200);
+        double clampedDbp = clamp(dbp, 40, 150);
+        lastClampApplied = (Math.abs(clampedSbp - sbp) > 1e-9 || Math.abs(clampedDbp - dbp) > 1e-9) ? 1 : 0;
+        sbp = clampedSbp;
+        dbp = clampedDbp;
+        lastOutputValid = 1;
+        lastRejectReason = "ok";
 
         // --- 保存と平均計算 ---
         lastSbp = sbp;
@@ -225,6 +295,20 @@ public class RealtimeBP {
         lastValleyToPeakRelTTP = 0.0;
         lastPeakToValleyRelTTP = 0.0;
         lastAmplitude = 0.0;
+        lastInputIbiMs = 0.0;
+        lastSmoothedIbiMs = 0.0;
+        lastUsedSmoothedIbi = 0;
+        lastUsedAmplitude = 0.0;
+        lastUsedHr = 0.0;
+        lastUsedValleyToPeakRelTTP = 0.0;
+        lastUsedPeakToValleyRelTTP = 0.0;
+        lastRawSbp = 0.0;
+        lastRawDbp = 0.0;
+        lastClampApplied = 0;
+        lastOutputValid = 0;
+        lastFeatureClampApplied = 0;
+        lastFeatureClampReason = "reset";
+        lastRejectReason = "reset";
         
         // タイムスタンプをリセット
         lastUpdateTime = 0;
@@ -294,6 +378,74 @@ public class RealtimeBP {
 
     public double getLastPeakToValleyRelTTP() {
         return lastPeakToValleyRelTTP;
+    }
+
+    public double getLastInputIbiMs() {
+        return lastInputIbiMs;
+    }
+
+    public double getLastSmoothedIbiMs() {
+        return lastSmoothedIbiMs;
+    }
+
+    public int getLastUsedSmoothedIbi() {
+        return lastUsedSmoothedIbi;
+    }
+
+    public double getLastUsedAmplitude() {
+        return lastUsedAmplitude;
+    }
+
+    public double getLastUsedHr() {
+        return lastUsedHr;
+    }
+
+    public double getLastUsedValleyToPeakRelTTP() {
+        return lastUsedValleyToPeakRelTTP;
+    }
+
+    public double getLastUsedPeakToValleyRelTTP() {
+        return lastUsedPeakToValleyRelTTP;
+    }
+
+    public double getLastRawSbp() {
+        return lastRawSbp;
+    }
+
+    public double getLastRawDbp() {
+        return lastRawDbp;
+    }
+
+    public int getLastClampApplied() {
+        return lastClampApplied;
+    }
+
+    public int getLastOutputValid() {
+        return lastOutputValid;
+    }
+
+    public int getLastFeatureClampApplied() {
+        return lastFeatureClampApplied;
+    }
+
+    public String getLastFeatureClampReason() {
+        return lastFeatureClampReason;
+    }
+
+    public String getLastRejectReason() {
+        return lastRejectReason;
+    }
+
+    private static double clampFeature(String label, double value, double lo, double hi, StringBuilder reason) {
+        double clamped = clamp(value, lo, hi);
+        if (Math.abs(clamped - value) > 1e-9) {
+            if (reason.length() > 0) {
+                reason.append("|");
+            }
+            reason.append(label).append(":")
+                    .append(String.format(Locale.US, "%.4f->%.4f", value, clamped));
+        }
+        return clamped;
     }
 
     /**

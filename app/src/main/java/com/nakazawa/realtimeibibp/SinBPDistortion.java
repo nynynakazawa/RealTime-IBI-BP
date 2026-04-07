@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 /**
@@ -66,6 +67,32 @@ public class SinBPDistortion {
     private double currentPhi = 0; // 位相
     private double currentE = 0; // 歪み指標
     private double currentRegressionAmplitude = 0; // 回帰用の生波形振幅
+    private double currentFitAComponent = 0;
+    private double currentFitBComponent = 0;
+    private double currentSinPhi = 0;
+    private double currentCosPhi = 1;
+    private int currentBeatSampleCount = 0;
+    private double currentBeatMin = 0;
+    private double currentBeatMax = 0;
+    private double currentBeatRange = 0;
+    private double currentBeatStd = 0;
+    private double currentRawSbp = 0;
+    private double currentRawDbp = 0;
+    private double currentConstrainedSbp = 0;
+    private double currentConstrainedDbp = 0;
+    private int currentConstraintApplied = 0;
+    private int currentClampApplied = 0;
+    private int currentOutputValid = 0;
+    private int currentUsedSmoothedIbi = 0;
+    private double currentSmoothedIbiMs = 0;
+    private double currentUsedRegressionAmplitude = 0;
+    private double currentUsedHR = 0;
+    private double currentUsedValleyToPeakRelTTP = 0;
+    private double currentUsedPeakToValleyRelTTP = 0;
+    private double currentUsedDistortion = 0;
+    private int currentFeatureClampApplied = 0;
+    private String currentFeatureClampReason = "init";
+    private String currentRejectReason = "init";
 
     // BP推定結果
     private double lastSinSBP = 0;
@@ -104,6 +131,28 @@ public class SinBPDistortion {
     private static final double BETA3 = 62.88226696234021; // V2P_relTTP
     private static final double BETA4 = -19.577300435396946; // P2V_relTTP
     private static final double BETA5 = 10.236851183332778; // residual E
+
+    // prepared_training_data.csv から求めた支持域。
+    // A / HR / relTTP は 1-99 percentile、E は残差スパイクの影響を抑えるため 5-95 percentile。
+    private static final double A_SUPPORT_MIN = 1.396092;
+    private static final double A_SUPPORT_MAX = 5.098340;
+    private static final double HR_SUPPORT_MIN = 49.652532;
+    private static final double HR_SUPPORT_MAX = 105.523184;
+    private static final double V2P_SUPPORT_MIN = -0.928772;
+    private static final double V2P_SUPPORT_MAX = -0.270672;
+    private static final double P2V_SUPPORT_MIN = -0.859316;
+    private static final double P2V_SUPPORT_MAX = -0.272260;
+    private static final double E_SUPPORT_MIN = 2.741920;
+    private static final double E_SUPPORT_MAX = 4.491780;
+
+    public static double[] getSbpCoefficients() {
+        return new double[] { ALPHA0, ALPHA1, ALPHA2, ALPHA3, ALPHA4, ALPHA5 };
+    }
+
+    public static double[] getDbpCoefficients() {
+        return new double[] { BETA0, BETA1, BETA2, BETA3, BETA4, BETA5 };
+    }
+
     // 理想曲線データ（UI表示用）
     private double currentMean = 0;
     private double currentAmplitude = 0;
@@ -341,6 +390,23 @@ public class SinBPDistortion {
      * - ... を永遠に続ける
      */
     private void processPeak(double peakValue, long peakTime) {
+        currentRejectReason = "ok";
+        currentOutputValid = 0;
+        currentConstraintApplied = 0;
+        currentClampApplied = 0;
+        currentSmoothedIbiMs = 0;
+        currentUsedSmoothedIbi = 0;
+        currentUsedRegressionAmplitude = 0;
+        currentUsedHR = 0;
+        currentUsedValleyToPeakRelTTP = 0;
+        currentUsedPeakToValleyRelTTP = 0;
+        currentUsedDistortion = 0;
+        currentFeatureClampApplied = 0;
+        currentFeatureClampReason = "ok";
+        currentRawSbp = 0;
+        currentRawDbp = 0;
+        currentConstrainedSbp = 0;
+        currentConstrainedDbp = 0;
         Log.d(TAG + "-ProcessPeak", String.format(
                 "processPeak() called: peakValue=%.2f, peakTime=%d, lastPeakTime=%d, previousPeakTime=%d",
                 peakValue, peakTime, lastPeakTime, previousPeakTime));
@@ -351,6 +417,7 @@ public class SinBPDistortion {
             lastPeakTime = peakTime;
             previousPeakTime = peakTime;
             previousPeakValue = peakValue;
+            currentRejectReason = "initial_peak";
             Log.d(TAG + "-ProcessPeak", "First peak detected - recording only");
             return;
         }
@@ -368,6 +435,7 @@ public class SinBPDistortion {
 
         if (beatSamples == null || beatSamples.isEmpty()) {
             // データを更新して次の拍に備える
+            currentRejectReason = "empty_beat_samples";
             previousPeakTime = lastPeakTime;
             previousPeakValue = lastPeakValue;
             lastPeakValue = peakValue;
@@ -375,7 +443,11 @@ public class SinBPDistortion {
             return;
         }
 
-        if (!SignalProcessingUtils.isBeatWindowStable(beatSamples, ibi, frameRate)) {
+        updateBeatWindowMetrics(beatSamples);
+
+        String beatWindowReason = SignalProcessingUtils.getBeatWindowStabilityReason(beatSamples, ibi, frameRate);
+        if (!"ok".equals(beatWindowReason)) {
+            currentRejectReason = beatWindowReason;
             previousPeakTime = lastPeakTime;
             previousPeakValue = lastPeakValue;
             lastPeakValue = peakValue;
@@ -396,7 +468,9 @@ public class SinBPDistortion {
         fitSineWave(beatSamples, ibi);
 
         // 異常値チェック
-        if (!SignalProcessingUtils.isValidBeat(ibi, currentA, lastValidIBI)) {
+        String invalidBeatReason = SignalProcessingUtils.getInvalidBeatReason(ibi, currentA, lastValidIBI);
+        if (!"ok".equals(invalidBeatReason)) {
+            currentRejectReason = invalidBeatReason;
             // データを更新して次の拍に備える
             previousPeakTime = lastPeakTime;
             previousPeakValue = lastPeakValue;
@@ -467,6 +541,8 @@ public class SinBPDistortion {
         // 正規化
         a = a * 2.0 / N;
         b = b * 2.0 / N;
+        currentFitAComponent = a;
+        currentFitBComponent = b;
 
         // 振幅計算
         // 注意: beatSamplesは正規化後の値（0-10範囲）なので、振幅Aも正規化後の範囲内
@@ -477,6 +553,9 @@ public class SinBPDistortion {
             Log.w(TAG, "Amplitude too small: " + currentA);
             currentA = 0;
             currentPhi = 0;
+            currentSinPhi = 0;
+            currentCosPhi = 1;
+            currentRejectReason = "zero_amplitude";
             return;
         }
 
@@ -487,6 +566,8 @@ public class SinBPDistortion {
         if (currentPhi < 0) {
             currentPhi += 2 * Math.PI;
         }
+        currentSinPhi = Math.sin(currentPhi);
+        currentCosPhi = Math.cos(currentPhi);
 
         currentIBI = ibi;
 
@@ -630,6 +711,8 @@ public class SinBPDistortion {
             double lastSmoothedIbi = logicRef.getLastSmoothedIbi();
             if (lastSmoothedIbi > 0) {
                 hr = 60000.0 / lastSmoothedIbi; // smoothedIBIから計算
+                currentSmoothedIbiMs = lastSmoothedIbi;
+                currentUsedSmoothedIbi = 1;
             } else {
                 hr = 60000.0 / ibi; // フォールバック
             }
@@ -643,30 +726,69 @@ public class SinBPDistortion {
         double regressionAmplitude = (logicRef != null) ? logicRef.averageValleyToPeakAmplitude : 0.0;
         currentRegressionAmplitude = regressionAmplitude;
 
-        double sbpRefined = ALPHA0 + ALPHA1 * regressionAmplitude + ALPHA2 * hr +
-                ALPHA3 * valleyToPeakRelTTP + ALPHA4 * peakToValleyRelTTP +
-                ALPHA5 * E;
+        StringBuilder featureClampReason = new StringBuilder();
+        double usedRegressionAmplitude = clampFeature(
+                "A", regressionAmplitude, A_SUPPORT_MIN, A_SUPPORT_MAX, featureClampReason);
+        double usedHr = clampFeature("HR", hr, HR_SUPPORT_MIN, HR_SUPPORT_MAX, featureClampReason);
+        double usedValleyToPeakRelTTP = clampFeature(
+                "V2P_relTTP", valleyToPeakRelTTP, V2P_SUPPORT_MIN, V2P_SUPPORT_MAX, featureClampReason);
+        double usedPeakToValleyRelTTP = clampFeature(
+                "P2V_relTTP", peakToValleyRelTTP, P2V_SUPPORT_MIN, P2V_SUPPORT_MAX, featureClampReason);
+        double usedE = clampFeature("E", E, E_SUPPORT_MIN, E_SUPPORT_MAX, featureClampReason);
+        currentUsedRegressionAmplitude = usedRegressionAmplitude;
+        currentUsedHR = usedHr;
+        currentUsedValleyToPeakRelTTP = usedValleyToPeakRelTTP;
+        currentUsedPeakToValleyRelTTP = usedPeakToValleyRelTTP;
+        currentUsedDistortion = usedE;
+        currentFeatureClampApplied = featureClampReason.length() > 0 ? 1 : 0;
+        currentFeatureClampReason = featureClampReason.length() > 0 ? featureClampReason.toString() : "ok";
 
-        double dbpRefined = BETA0 + BETA1 * regressionAmplitude + BETA2 * hr +
-                BETA3 * valleyToPeakRelTTP + BETA4 * peakToValleyRelTTP +
-                BETA5 * E;
+        double sbpRefined = ALPHA0 + ALPHA1 * usedRegressionAmplitude + ALPHA2 * usedHr +
+                ALPHA3 * usedValleyToPeakRelTTP + ALPHA4 * usedPeakToValleyRelTTP +
+                ALPHA5 * usedE;
+
+        double dbpRefined = BETA0 + BETA1 * usedRegressionAmplitude + BETA2 * usedHr +
+                BETA3 * usedValleyToPeakRelTTP + BETA4 * usedPeakToValleyRelTTP +
+                BETA5 * usedE;
+        currentRawSbp = sbpRefined;
+        currentRawDbp = dbpRefined;
 
         // 制約適用
+        currentConstraintApplied = 0;
         if (sbpRefined < dbpRefined + 20) {
             sbpRefined = dbpRefined + 20;
+            currentConstraintApplied = 1;
         }
-        sbpRefined = SignalProcessingUtils.clamp(sbpRefined, 60, 200);
-        dbpRefined = SignalProcessingUtils.clamp(dbpRefined, 40, 150);
+        currentConstrainedSbp = sbpRefined;
+        currentConstrainedDbp = dbpRefined;
+        double clampedSbp = SignalProcessingUtils.clamp(sbpRefined, 60, 200);
+        double clampedDbp = SignalProcessingUtils.clamp(dbpRefined, 40, 150);
+        currentClampApplied = (Math.abs(clampedSbp - sbpRefined) > 1e-9 || Math.abs(clampedDbp - dbpRefined) > 1e-9) ? 1 : 0;
+        sbpRefined = clampedSbp;
+        dbpRefined = clampedDbp;
+        currentConstrainedSbp = sbpRefined;
+        currentConstrainedDbp = dbpRefined;
 
         // 生理学的妥当性チェック
-        if (!SignalProcessingUtils.isValidBP(sbpRefined, dbpRefined)) {
+        String invalidBpReason = SignalProcessingUtils.getInvalidBPReason(sbpRefined, dbpRefined);
+        if (!"ok".equals(invalidBpReason)) {
+            currentRejectReason = invalidBpReason;
             Log.w(TAG, String.format("Invalid BP: SBP=%.1f, DBP=%.1f", sbpRefined, dbpRefined));
             return;
         }
+        currentOutputValid = 1;
+        currentRejectReason = "ok";
 
         Log.d(TAG + "-Estimate", String.format(
-                "BP: SBP=%.1f, DBP=%.1f (A=%.3f, V2P_relTTP=%.3f, P2V_relTTP=%.3f, E=%.3f)",
-                sbpRefined, dbpRefined, regressionAmplitude, valleyToPeakRelTTP, peakToValleyRelTTP, E));
+                Locale.US,
+                "BP: SBP=%.1f, DBP=%.1f (A=%.3f->%.3f, HR=%.1f->%.1f, V2P=%.3f->%.3f, P2V=%.3f->%.3f, E=%.3f->%.3f, clamp=%s)",
+                sbpRefined, dbpRefined,
+                regressionAmplitude, usedRegressionAmplitude,
+                hr, usedHr,
+                valleyToPeakRelTTP, usedValleyToPeakRelTTP,
+                peakToValleyRelTTP, usedPeakToValleyRelTTP,
+                E, usedE,
+                currentFeatureClampReason));
 
         // 履歴更新と平均計算
         updateHistory(sbpRefined, dbpRefined);
@@ -945,6 +1067,32 @@ public class SinBPDistortion {
         currentPhi = 0;
         currentE = 0;
         currentRegressionAmplitude = 0;
+        currentFitAComponent = 0;
+        currentFitBComponent = 0;
+        currentSinPhi = 0;
+        currentCosPhi = 1;
+        currentBeatSampleCount = 0;
+        currentBeatMin = 0;
+        currentBeatMax = 0;
+        currentBeatRange = 0;
+        currentBeatStd = 0;
+        currentRawSbp = 0;
+        currentRawDbp = 0;
+        currentConstrainedSbp = 0;
+        currentConstrainedDbp = 0;
+        currentConstraintApplied = 0;
+        currentClampApplied = 0;
+        currentOutputValid = 0;
+        currentUsedSmoothedIbi = 0;
+        currentSmoothedIbiMs = 0;
+        currentUsedRegressionAmplitude = 0;
+        currentUsedHR = 0;
+        currentUsedValleyToPeakRelTTP = 0;
+        currentUsedPeakToValleyRelTTP = 0;
+        currentUsedDistortion = 0;
+        currentFeatureClampApplied = 0;
+        currentFeatureClampReason = "reset";
+        currentRejectReason = "reset";
         lastSinSBP = 0;
         lastSinDBP = 0;
         lastSinSBPAvg = 0;
@@ -952,6 +1100,27 @@ public class SinBPDistortion {
         lastValidIBI = 0;
 
         Log.d(TAG, "SinBPDistortion reset with 1-beat delay and dynamic ratio");
+    }
+
+    private void updateBeatWindowMetrics(List<Double> beatSamples) {
+        currentBeatSampleCount = beatSamples.size();
+        if (beatSamples.isEmpty()) {
+            currentBeatMin = 0;
+            currentBeatMax = 0;
+            currentBeatRange = 0;
+            currentBeatStd = 0;
+            return;
+        }
+        currentBeatMin = beatSamples.stream().mapToDouble(Double::doubleValue).min().orElse(0.0);
+        currentBeatMax = beatSamples.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+        currentBeatRange = currentBeatMax - currentBeatMin;
+        double mean = beatSamples.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+        double variance = 0.0;
+        for (double sample : beatSamples) {
+            double delta = sample - mean;
+            variance += delta * delta;
+        }
+        currentBeatStd = Math.sqrt(variance / beatSamples.size());
     }
 
     // Getter methods
@@ -989,16 +1158,7 @@ public class SinBPDistortion {
     }
 
     public double getCurrentHR() {
-        if (currentIBI > 0) {
-            return 60000.0 / currentIBI;
-        }
-        if (logicRef != null && !logicRef.smoothedIbi.isEmpty()) {
-            double lastSmoothedIbi = logicRef.getLastSmoothedIbi();
-            if (lastSmoothedIbi > 0) {
-                return 60000.0 / lastSmoothedIbi;
-            }
-        }
-        return 0.0;
+        return currentUsedHR;
     }
 
     public double getCurrentValleyToPeakRelTTP() {
@@ -1007,5 +1167,129 @@ public class SinBPDistortion {
 
     public double getCurrentPeakToValleyRelTTP() {
         return (logicRef != null) ? logicRef.averagePeakToValleyRelTTP : 0.0;
+    }
+
+    public double getCurrentUsedRegressionAmplitude() {
+        return currentUsedRegressionAmplitude;
+    }
+
+    public double getCurrentUsedValleyToPeakRelTTP() {
+        return currentUsedValleyToPeakRelTTP;
+    }
+
+    public double getCurrentUsedPeakToValleyRelTTP() {
+        return currentUsedPeakToValleyRelTTP;
+    }
+
+    public double getCurrentUsedDistortion() {
+        return currentUsedDistortion;
+    }
+
+    public double getCurrentPhi() {
+        return currentPhi;
+    }
+
+    public double getCurrentSinPhi() {
+        return currentSinPhi;
+    }
+
+    public double getCurrentCosPhi() {
+        return currentCosPhi;
+    }
+
+    public double getCurrentFitAComponent() {
+        return currentFitAComponent;
+    }
+
+    public double getCurrentFitBComponent() {
+        return currentFitBComponent;
+    }
+
+    public int getCurrentBeatWindowSampleCount() {
+        return currentBeatSampleCount;
+    }
+
+    public double getCurrentBeatMin() {
+        return currentBeatMin;
+    }
+
+    public double getCurrentBeatMax() {
+        return currentBeatMax;
+    }
+
+    public double getCurrentBeatRange() {
+        return currentBeatRange;
+    }
+
+    public double getCurrentBeatStd() {
+        return currentBeatStd;
+    }
+
+    public double getCurrentSystoleRatio() {
+        return currentSystoleRatio;
+    }
+
+    public double getCurrentDiastoleRatio() {
+        return currentDiastoleRatio;
+    }
+
+    public double getCurrentRawSbp() {
+        return currentRawSbp;
+    }
+
+    public double getCurrentRawDbp() {
+        return currentRawDbp;
+    }
+
+    public double getCurrentConstrainedSbp() {
+        return currentConstrainedSbp;
+    }
+
+    public double getCurrentConstrainedDbp() {
+        return currentConstrainedDbp;
+    }
+
+    public int getCurrentConstraintApplied() {
+        return currentConstraintApplied;
+    }
+
+    public int getCurrentClampApplied() {
+        return currentClampApplied;
+    }
+
+    public int getCurrentOutputValid() {
+        return currentOutputValid;
+    }
+
+    public int getCurrentFeatureClampApplied() {
+        return currentFeatureClampApplied;
+    }
+
+    public int getCurrentUsedSmoothedIbi() {
+        return currentUsedSmoothedIbi;
+    }
+
+    public double getCurrentSmoothedIbiMs() {
+        return currentSmoothedIbiMs;
+    }
+
+    public String getCurrentRejectReason() {
+        return currentRejectReason;
+    }
+
+    public String getCurrentFeatureClampReason() {
+        return currentFeatureClampReason;
+    }
+
+    private static double clampFeature(String label, double value, double lo, double hi, StringBuilder reason) {
+        double clamped = SignalProcessingUtils.clamp(value, lo, hi);
+        if (Math.abs(clamped - value) > 1e-9) {
+            if (reason.length() > 0) {
+                reason.append("|");
+            }
+            reason.append(label).append(":")
+                    .append(String.format(Locale.US, "%.4f->%.4f", value, clamped));
+        }
+        return clamped;
     }
 }

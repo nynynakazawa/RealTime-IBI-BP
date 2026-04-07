@@ -167,17 +167,21 @@ public class SignalProcessingUtils {
      * @return 有効な拍ならtrue
      */
     public static boolean isValidBeat(double ibi, double amplitude, double lastValidIBI) {
+        return "ok".equals(getInvalidBeatReason(ibi, amplitude, lastValidIBI));
+    }
+
+    public static String getInvalidBeatReason(double ibi, double amplitude, double lastValidIBI) {
         // IBI範囲チェック（40-200 bpm相当）
         if (ibi < 300 || ibi > 1500) {
             Log.w(TAG, String.format("Invalid IBI: %.1f ms", ibi));
-            return false;
+            return "invalid_ibi";
         }
 
         // 振幅範囲チェック（correctedGreenValueのスケールに合わせて調整）
         // correctedGreenValueは0-100程度、サイン波振幅は1-20程度が正常範囲
         if (amplitude < 0.5 || amplitude > 50) {
             Log.w(TAG, String.format("Invalid amplitude: %.2f (expected: 0.5-50)", amplitude));
-            return false;
+            return "invalid_amplitude";
         }
 
         // 前回の拍と比較（急激な変化を除外）
@@ -185,16 +189,20 @@ public class SignalProcessingUtils {
             double ibiChange = Math.abs(ibi - lastValidIBI) / lastValidIBI;
             if (ibiChange > 0.3) { // 30%以上の変化は異常
                 Log.w(TAG, String.format("IBI change too rapid: %.1f%%", ibiChange * 100));
-                return false;
+                return "rapid_ibi_change";
             }
         }
 
-        return true;
+        return "ok";
     }
 
     public static boolean isBeatWindowStable(List<Double> beatSamples, double ibi, int frameRate) {
+        return "ok".equals(getBeatWindowStabilityReason(beatSamples, ibi, frameRate));
+    }
+
+    public static String getBeatWindowStabilityReason(List<Double> beatSamples, double ibi, int frameRate) {
         if (beatSamples == null || beatSamples.size() < 8 || ibi <= 0 || frameRate <= 0) {
-            return false;
+            return "insufficient_window";
         }
 
         double expectedSamples = ibi * frameRate / 1000.0;
@@ -203,7 +211,7 @@ public class SignalProcessingUtils {
             Log.w(TAG, String.format(
                     "Unstable beat window: sampleCount=%d expected=%.1f ibi=%.1f fps=%d",
                     beatSamples.size(), expectedSamples, ibi, frameRate));
-            return false;
+            return "sample_count_out_of_range";
         }
 
         double min = Collections.min(beatSamples);
@@ -211,7 +219,7 @@ public class SignalProcessingUtils {
         double range = max - min;
         if (range < 0.35) {
             Log.w(TAG, String.format("Beat window range too small: %.3f", range));
-            return false;
+            return "range_too_small";
         }
 
         double mean = beatSamples.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
@@ -223,9 +231,9 @@ public class SignalProcessingUtils {
         double std = Math.sqrt(variance / beatSamples.size());
         if (std < 0.08) {
             Log.w(TAG, String.format("Beat window std too small: %.3f", std));
-            return false;
+            return "std_too_small";
         }
-        return true;
+        return "ok";
     }
 
     /**
@@ -236,20 +244,24 @@ public class SignalProcessingUtils {
      * @return 有効ならtrue
      */
     public static boolean isValidBP(double sbp, double dbp) {
+        return "ok".equals(getInvalidBPReason(sbp, dbp));
+    }
+
+    public static String getInvalidBPReason(double sbp, double dbp) {
         // 範囲チェック
         if (sbp < 60 || sbp > 200)
-            return false;
+            return "sbp_out_of_range";
         if (dbp < 40 || dbp > 150)
-            return false;
+            return "dbp_out_of_range";
         if (sbp <= dbp)
-            return false;
+            return "sbp_not_above_dbp";
 
         // 脈圧チェック（20-100 mmHg）
         double pp = sbp - dbp;
         if (pp < 20 || pp > 100)
-            return false;
+            return "pulse_pressure_out_of_range";
 
-        return true;
+        return "ok";
     }
 
     /**

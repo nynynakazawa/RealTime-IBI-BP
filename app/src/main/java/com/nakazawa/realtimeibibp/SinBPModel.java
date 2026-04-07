@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 /**
@@ -18,13 +19,14 @@ import java.util.stream.Collectors;
  * 3. rPPGの情報は使用せず、Sin波モデルのみに基づく推定
  * 
  * 線形回帰式：
- * SBP = α0 + α1*A + α2*HR + α3*Mean + α4*Phi
- * DBP = β0 + β1*A + β2*HR + β3*Mean + β4*Phi
+ * SBP = α0 + α1*A + α2*HR + α3*Mean + α4*sin(Phi) + α5*cos(Phi)
+ * DBP = β0 + β1*A + β2*HR + β3*Mean + β4*sin(Phi) + β5*cos(Phi)
  * 
  * 参考：一般的なPPGベースのBP推定研究
  * - 振幅と心拍数は血圧と強い相関がある
  * - 平均値（DC成分）も血圧推定に有効
  * - 位相情報は血管特性を反映
+ * - ただし位相は円周量なので、回帰には Phi そのものではなく sin/cos 展開を用いる
  */
 public class SinBPModel {
     private static final String TAG = "SinBPModel";
@@ -60,6 +62,33 @@ public class SinBPModel {
     private double currentIBI = 0; // IBI (ms)
     private double currentPhi = 0; // 位相
     private double currentMean = 0; // 平均値
+    private double currentFitAComponent = 0;
+    private double currentFitBComponent = 0;
+    private double currentSinPhi = 0;
+    private double currentCosPhi = 1;
+    private double currentFitRMSE = 0;
+    private int currentBeatSampleCount = 0;
+    private double currentBeatMin = 0;
+    private double currentBeatMax = 0;
+    private double currentBeatRange = 0;
+    private double currentBeatStd = 0;
+    private double currentRawSbp = 0;
+    private double currentRawDbp = 0;
+    private double currentConstrainedSbp = 0;
+    private double currentConstrainedDbp = 0;
+    private int currentConstraintApplied = 0;
+    private int currentClampApplied = 0;
+    private int currentOutputValid = 0;
+    private int currentUsedSmoothedIbi = 0;
+    private double currentSmoothedIbiMs = 0;
+    private double currentUsedA = 0;
+    private double currentUsedHR = 0;
+    private double currentUsedMean = 0;
+    private double currentUsedSinPhi = 0;
+    private double currentUsedCosPhi = 1;
+    private int currentFeatureClampApplied = 0;
+    private String currentFeatureClampReason = "init";
+    private String currentRejectReason = "init";
 
     // BP推定結果
     private double lastSinSBP = 0;
@@ -82,20 +111,43 @@ public class SinBPModel {
 
     // 線形回帰係数（Sin波パラメータのみを使用）
     // 注意: 振幅Aと平均値MeanはLogic1で正規化された値（0-10範囲）を使用
-    // 2025-11-22評価結果より最適化（SinBP_M係数）
-    // SBP = ALPHA0 + ALPHA1*A + ALPHA2*HR + ALPHA3*Mean + ALPHA4*Phi
-    private static final double ALPHA0 = 71.03692006596621; // intercept
-    private static final double ALPHA1 = 9.119930658703085; // M3_A
-    private static final double ALPHA2 = -0.2148949678218121; // M3_HR
-    private static final double ALPHA3 = -0.0920224889164238; // M3_Mean
-    private static final double ALPHA4 = 11.793308948663666; // M3_Phi
+    // 2026-04-07: 位相Phiの円周性に合わせて sin/cos 表現へ再学習
+    // SBP = ALPHA0 + ALPHA1*A + ALPHA2*HR + ALPHA3*Mean + ALPHA4*sinPhi + ALPHA5*cosPhi
+    private static final double ALPHA0 = 122.69218037029376; // intercept
+    private static final double ALPHA1 = 4.309119671976174; // M3_A
+    private static final double ALPHA2 = -0.24476462220196565; // M3_HR
+    private static final double ALPHA3 = -0.6078533562531622; // M3_Mean
+    private static final double ALPHA4 = -10.14313210087717; // M3_sinPhi
+    private static final double ALPHA5 = -19.90886182442149; // M3_cosPhi
 
-    // DBP = BETA0 + BETA1*A + BETA2*HR + BETA3*Mean + BETA4*Phi
-    private static final double BETA0 = 21.680322032107288; // intercept
-    private static final double BETA1 = 6.568615116225804; // M3_A
-    private static final double BETA2 = 9.294430469883875e-05; // M3_HR
-    private static final double BETA3 = -0.3937788369343091; // M3_Mean
-    private static final double BETA4 = 15.691979325320622; // M3_Phi
+    // DBP = BETA0 + BETA1*A + BETA2*HR + BETA3*Mean + BETA4*sinPhi + BETA5*cosPhi
+    private static final double BETA0 = 55.325295727832724; // intercept
+    private static final double BETA1 = 2.5353874259304723; // M3_A
+    private static final double BETA2 = 0.15574837938491537; // M3_HR
+    private static final double BETA3 = -0.7460749390504687; // M3_Mean
+    private static final double BETA4 = -4.481564396278337; // M3_sinPhi
+    private static final double BETA5 = -20.885323412664174; // M3_cosPhi
+
+    // prepared_training_data.csv 由来の 1-99 percentile 支持域。
+    private static final double A_SUPPORT_MIN = 1.407856;
+    private static final double A_SUPPORT_MAX = 5.120968;
+    private static final double HR_SUPPORT_MIN = 49.652532;
+    private static final double HR_SUPPORT_MAX = 104.529600;
+    private static final double MEAN_SUPPORT_MIN = 2.545452;
+    private static final double MEAN_SUPPORT_MAX = 7.678100;
+    private static final double SIN_PHI_SUPPORT_MIN = -0.409478;
+    private static final double SIN_PHI_SUPPORT_MAX = 0.999557;
+    private static final double COS_PHI_SUPPORT_MIN = -0.975257;
+    private static final double COS_PHI_SUPPORT_MAX = 0.899444;
+
+    public static double[] getSbpCoefficients() {
+        return new double[] { ALPHA0, ALPHA1, ALPHA2, ALPHA3, ALPHA4, ALPHA5 };
+    }
+
+    public static double[] getDbpCoefficients() {
+        return new double[] { BETA0, BETA1, BETA2, BETA3, BETA4, BETA5 };
+    }
+
     // リスナー
     public interface SinBPModelListener {
         void onSinBPModelUpdated(double sinSbp, double sinDbp,
@@ -204,12 +256,30 @@ public class SinBPModel {
      * ピーク検出時の処理（1拍遅延方式）
      */
     private void processPeak(double peakValue, long peakTime) {
+        currentRejectReason = "ok";
+        currentOutputValid = 0;
+        currentConstraintApplied = 0;
+        currentClampApplied = 0;
+        currentSmoothedIbiMs = 0;
+        currentUsedSmoothedIbi = 0;
+        currentUsedA = 0;
+        currentUsedHR = 0;
+        currentUsedMean = 0;
+        currentUsedSinPhi = 0;
+        currentUsedCosPhi = 1;
+        currentFeatureClampApplied = 0;
+        currentFeatureClampReason = "ok";
+        currentRawSbp = 0;
+        currentRawDbp = 0;
+        currentConstrainedSbp = 0;
+        currentConstrainedDbp = 0;
         // 初回のピークは記録のみ
         if (lastPeakTime == 0) {
             lastPeakValue = peakValue;
             lastPeakTime = peakTime;
             previousPeakTime = peakTime;
             previousPeakValue = peakValue;
+            currentRejectReason = "initial_peak";
             return;
         }
 
@@ -223,6 +293,7 @@ public class SinBPModel {
 
         if (beatSamples == null || beatSamples.isEmpty()) {
             // データを更新して次の拍に備える
+            currentRejectReason = "empty_beat_samples";
             previousPeakTime = lastPeakTime;
             previousPeakValue = lastPeakValue;
             lastPeakValue = peakValue;
@@ -230,7 +301,11 @@ public class SinBPModel {
             return;
         }
 
-        if (!SignalProcessingUtils.isBeatWindowStable(beatSamples, ibi, frameRate)) {
+        updateBeatWindowMetrics(beatSamples);
+
+        String beatWindowReason = SignalProcessingUtils.getBeatWindowStabilityReason(beatSamples, ibi, frameRate);
+        if (!"ok".equals(beatWindowReason)) {
+            currentRejectReason = beatWindowReason;
             previousPeakTime = lastPeakTime;
             previousPeakValue = lastPeakValue;
             lastPeakValue = peakValue;
@@ -251,7 +326,9 @@ public class SinBPModel {
         extractSinParameters(beatSamples, ibi);
 
         // 異常値チェック
-        if (!SignalProcessingUtils.isValidBeat(ibi, currentA, lastValidIBI)) {
+        String invalidBeatReason = SignalProcessingUtils.getInvalidBeatReason(ibi, currentA, lastValidIBI);
+        if (!"ok".equals(invalidBeatReason)) {
+            currentRejectReason = invalidBeatReason;
             // データを更新して次の拍に備える
             previousPeakTime = lastPeakTime;
             previousPeakValue = lastPeakValue;
@@ -300,6 +377,7 @@ public class SinBPModel {
      */
     private void extractSinParameters(List<Double> beatSamples, double ibi) {
         if (beatSamples == null || beatSamples.isEmpty()) {
+            currentRejectReason = "empty_beat_samples";
             return;
         }
 
@@ -326,6 +404,8 @@ public class SinBPModel {
         // 正規化
         a = a * 2.0 / N;
         b = b * 2.0 / N;
+        currentFitAComponent = a;
+        currentFitBComponent = b;
 
         // 振幅計算
         // 注意: beatSamplesは正規化後の値（0-10範囲）なので、振幅Aも正規化後の範囲内
@@ -336,6 +416,10 @@ public class SinBPModel {
             Log.w(TAG, "Amplitude too small: " + currentA);
             currentA = 0;
             currentPhi = 0;
+            currentSinPhi = 0;
+            currentCosPhi = 1;
+            currentFitRMSE = 0;
+            currentRejectReason = "zero_amplitude";
             return;
         }
 
@@ -346,8 +430,11 @@ public class SinBPModel {
         if (currentPhi < 0) {
             currentPhi += 2 * Math.PI;
         }
+        currentSinPhi = Math.sin(currentPhi);
+        currentCosPhi = Math.cos(currentPhi);
 
         currentIBI = ibi;
+        currentFitRMSE = computeFitRMSE(beatSamples, currentMean, a, b);
 
         Log.d(TAG + "-Extract", String.format("Extracted: A=%.3f, Mean=%.2f, Phi=%.3f rad (%.1f deg)",
                 currentA, currentMean, currentPhi, Math.toDegrees(currentPhi)));
@@ -363,6 +450,8 @@ public class SinBPModel {
             double lastSmoothedIbi = logicRef.getLastSmoothedIbi();
             if (lastSmoothedIbi > 0) {
                 hr = 60000.0 / lastSmoothedIbi; // smoothedIBIから計算
+                currentSmoothedIbiMs = lastSmoothedIbi;
+                currentUsedSmoothedIbi = 1;
             } else {
                 hr = 60000.0 / currentIBI; // フォールバック
             }
@@ -370,31 +459,70 @@ public class SinBPModel {
             hr = 60000.0 / currentIBI; // フォールバック
         }
 
-        // 線形回帰式：SBP = α0 + α1*A + α2*HR + α3*Mean + α4*Phi
-        double sbp = ALPHA0 + ALPHA1 * currentA + ALPHA2 * hr +
-                ALPHA3 * currentMean + ALPHA4 * currentPhi;
+        StringBuilder featureClampReason = new StringBuilder();
+        double usedA = clampFeature("A", currentA, A_SUPPORT_MIN, A_SUPPORT_MAX, featureClampReason);
+        double usedHr = clampFeature("HR", hr, HR_SUPPORT_MIN, HR_SUPPORT_MAX, featureClampReason);
+        double usedMean = clampFeature("Mean", currentMean, MEAN_SUPPORT_MIN, MEAN_SUPPORT_MAX, featureClampReason);
+        double usedSinPhi = clampFeature(
+                "sinPhi", currentSinPhi, SIN_PHI_SUPPORT_MIN, SIN_PHI_SUPPORT_MAX, featureClampReason);
+        double usedCosPhi = clampFeature(
+                "cosPhi", currentCosPhi, COS_PHI_SUPPORT_MIN, COS_PHI_SUPPORT_MAX, featureClampReason);
+        currentUsedA = usedA;
+        currentUsedHR = usedHr;
+        currentUsedMean = usedMean;
+        currentUsedSinPhi = usedSinPhi;
+        currentUsedCosPhi = usedCosPhi;
+        currentFeatureClampApplied = featureClampReason.length() > 0 ? 1 : 0;
+        currentFeatureClampReason = featureClampReason.length() > 0 ? featureClampReason.toString() : "ok";
 
-        // 線形回帰式：DBP = β0 + β1*A + β2*HR + β3*Mean + β4*Phi
-        double dbp = BETA0 + BETA1 * currentA + BETA2 * hr +
-                BETA3 * currentMean + BETA4 * currentPhi;
+        // Treat phase as a circular variable. Using sin/cos avoids the artificial
+        // discontinuity between Phi ~= 0 and Phi ~= 2π.
+        double sbp = ALPHA0 + ALPHA1 * usedA + ALPHA2 * usedHr +
+                ALPHA3 * usedMean + ALPHA4 * usedSinPhi + ALPHA5 * usedCosPhi;
+
+        // 線形回帰式：DBP = β0 + β1*A + β2*HR + β3*Mean + β4*sinPhi + β5*cosPhi
+        double dbp = BETA0 + BETA1 * usedA + BETA2 * usedHr +
+                BETA3 * usedMean + BETA4 * usedSinPhi + BETA5 * usedCosPhi;
+        currentRawSbp = sbp;
+        currentRawDbp = dbp;
 
         // 制約適用
-        if (sbp < dbp + 10) {
-            sbp = dbp + 10;
+        currentConstraintApplied = 0;
+        if (sbp < dbp + 20) {
+            sbp = dbp + 20;
+            currentConstraintApplied = 1;
         }
+        currentConstrainedSbp = sbp;
+        currentConstrainedDbp = dbp;
 
-        sbp = SignalProcessingUtils.clamp(sbp, 60, 200);
-        dbp = SignalProcessingUtils.clamp(dbp, 40, 150);
+        double clampedSbp = SignalProcessingUtils.clamp(sbp, 60, 200);
+        double clampedDbp = SignalProcessingUtils.clamp(dbp, 40, 150);
+        currentClampApplied = (Math.abs(clampedSbp - sbp) > 1e-9 || Math.abs(clampedDbp - dbp) > 1e-9) ? 1 : 0;
+        sbp = clampedSbp;
+        dbp = clampedDbp;
 
         // 生理学的妥当性チェック
-        if (!SignalProcessingUtils.isValidBP(sbp, dbp)) {
+        String invalidBpReason = SignalProcessingUtils.getInvalidBPReason(sbp, dbp);
+        if (!"ok".equals(invalidBpReason)) {
+            currentRejectReason = invalidBpReason;
             Log.w(TAG, String.format("Invalid BP: SBP=%.1f, DBP=%.1f", sbp, dbp));
             return;
         }
+        currentConstrainedSbp = sbp;
+        currentConstrainedDbp = dbp;
+        currentOutputValid = 1;
+        currentRejectReason = "ok";
 
         Log.d(TAG + "-Estimate", String.format(
-                "BP from Model: SBP=%.1f, DBP=%.1f (A=%.2f, HR=%.1f, Mean=%.2f, Phi=%.3f)",
-                sbp, dbp, currentA, hr, currentMean, currentPhi));
+                Locale.US,
+                "BP from Model: SBP=%.1f, DBP=%.1f (A=%.2f->%.2f, HR=%.1f->%.1f, Mean=%.2f->%.2f, sinPhi=%.3f->%.3f, cosPhi=%.3f->%.3f, clamp=%s)",
+                sbp, dbp,
+                currentA, usedA,
+                hr, usedHr,
+                currentMean, usedMean,
+                currentSinPhi, usedSinPhi,
+                currentCosPhi, usedCosPhi,
+                currentFeatureClampReason));
 
         // 履歴更新と平均計算
         updateHistory(sbp, dbp);
@@ -472,8 +600,71 @@ public class SinBPModel {
         lastSinSBPAvg = 0;
         lastSinDBPAvg = 0;
         lastValidIBI = 0;
+        currentFitAComponent = 0;
+        currentFitBComponent = 0;
+        currentSinPhi = 0;
+        currentCosPhi = 1;
+        currentFitRMSE = 0;
+        currentBeatSampleCount = 0;
+        currentBeatMin = 0;
+        currentBeatMax = 0;
+        currentBeatRange = 0;
+        currentBeatStd = 0;
+        currentRawSbp = 0;
+        currentRawDbp = 0;
+        currentConstrainedSbp = 0;
+        currentConstrainedDbp = 0;
+        currentConstraintApplied = 0;
+        currentClampApplied = 0;
+        currentOutputValid = 0;
+        currentUsedSmoothedIbi = 0;
+        currentSmoothedIbiMs = 0;
+        currentUsedA = 0;
+        currentUsedHR = 0;
+        currentUsedMean = 0;
+        currentUsedSinPhi = 0;
+        currentUsedCosPhi = 1;
+        currentFeatureClampApplied = 0;
+        currentFeatureClampReason = "reset";
+        currentRejectReason = "reset";
 
         Log.d(TAG, "SinBPModel reset");
+    }
+
+    private void updateBeatWindowMetrics(List<Double> beatSamples) {
+        currentBeatSampleCount = beatSamples.size();
+        if (beatSamples.isEmpty()) {
+            currentBeatMin = 0;
+            currentBeatMax = 0;
+            currentBeatRange = 0;
+            currentBeatStd = 0;
+            return;
+        }
+        currentBeatMin = beatSamples.stream().mapToDouble(Double::doubleValue).min().orElse(0.0);
+        currentBeatMax = beatSamples.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+        currentBeatRange = currentBeatMax - currentBeatMin;
+        double mean = beatSamples.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+        double variance = 0.0;
+        for (double sample : beatSamples) {
+            double delta = sample - mean;
+            variance += delta * delta;
+        }
+        currentBeatStd = Math.sqrt(variance / beatSamples.size());
+    }
+
+    private double computeFitRMSE(List<Double> beatSamples, double mean, double a, double b) {
+        if (beatSamples == null || beatSamples.isEmpty()) {
+            return 0.0;
+        }
+        double sumSquaredError = 0.0;
+        int N = beatSamples.size();
+        for (int n = 0; n < N; n++) {
+            double angle = 2 * Math.PI * n / N;
+            double fitted = mean + a * Math.sin(angle) + b * Math.cos(angle);
+            double error = beatSamples.get(n) - fitted;
+            sumSquaredError += error * error;
+        }
+        return Math.sqrt(sumSquaredError / N);
     }
 
     // Getter methods
@@ -511,15 +702,130 @@ public class SinBPModel {
     }
 
     public double getCurrentHR() {
-        if (currentIBI > 0) {
-            return 60000.0 / currentIBI;
-        }
-        if (logicRef != null && !logicRef.smoothedIbi.isEmpty()) {
-            double lastSmoothedIbi = logicRef.getLastSmoothedIbi();
-            if (lastSmoothedIbi > 0) {
-                return 60000.0 / lastSmoothedIbi;
+        return currentUsedHR;
+    }
+
+    public double getCurrentUsedAmplitude() {
+        return currentUsedA;
+    }
+
+    public double getCurrentUsedMean() {
+        return currentUsedMean;
+    }
+
+    public double getCurrentFitAComponent() {
+        return currentFitAComponent;
+    }
+
+    public double getCurrentFitBComponent() {
+        return currentFitBComponent;
+    }
+
+    public double getCurrentSinPhi() {
+        return currentSinPhi;
+    }
+
+    public double getCurrentCosPhi() {
+        return currentCosPhi;
+    }
+
+    public double getCurrentUsedSinPhi() {
+        return currentUsedSinPhi;
+    }
+
+    public double getCurrentUsedCosPhi() {
+        return currentUsedCosPhi;
+    }
+
+    public double getCurrentFitRMSE() {
+        return currentFitRMSE;
+    }
+
+    public int getCurrentBeatSampleCount() {
+        return currentBeatSampleCount;
+    }
+
+    public double getCurrentBeatMin() {
+        return currentBeatMin;
+    }
+
+    public double getCurrentBeatMax() {
+        return currentBeatMax;
+    }
+
+    public double getCurrentBeatRange() {
+        return currentBeatRange;
+    }
+
+    public double getCurrentBeatStd() {
+        return currentBeatStd;
+    }
+
+    public double getCurrentSystoleRatio() {
+        return currentSystoleRatio;
+    }
+
+    public double getCurrentDiastoleRatio() {
+        return currentDiastoleRatio;
+    }
+
+    public double getCurrentRawSbp() {
+        return currentRawSbp;
+    }
+
+    public double getCurrentRawDbp() {
+        return currentRawDbp;
+    }
+
+    public double getCurrentConstrainedSbp() {
+        return currentConstrainedSbp;
+    }
+
+    public double getCurrentConstrainedDbp() {
+        return currentConstrainedDbp;
+    }
+
+    public int getCurrentConstraintApplied() {
+        return currentConstraintApplied;
+    }
+
+    public int getCurrentClampApplied() {
+        return currentClampApplied;
+    }
+
+    public int getCurrentOutputValid() {
+        return currentOutputValid;
+    }
+
+    public int getCurrentFeatureClampApplied() {
+        return currentFeatureClampApplied;
+    }
+
+    public int getCurrentUsedSmoothedIbi() {
+        return currentUsedSmoothedIbi;
+    }
+
+    public double getCurrentSmoothedIbiMs() {
+        return currentSmoothedIbiMs;
+    }
+
+    public String getCurrentRejectReason() {
+        return currentRejectReason;
+    }
+
+    public String getCurrentFeatureClampReason() {
+        return currentFeatureClampReason;
+    }
+
+    private static double clampFeature(String label, double value, double lo, double hi, StringBuilder reason) {
+        double clamped = SignalProcessingUtils.clamp(value, lo, hi);
+        if (Math.abs(clamped - value) > 1e-9) {
+            if (reason.length() > 0) {
+                reason.append("|");
             }
+            reason.append(label).append(":")
+                    .append(String.format(Locale.US, "%.4f->%.4f", value, clamped));
         }
-        return 0.0;
+        return clamped;
     }
 }

@@ -715,7 +715,12 @@ public abstract class BaseLogic implements LogicProcessor {
             // タイムスタンプ比較を削除し、配列順序で処理
             double amplitude = Math.abs(latestPeak.value - latestValley.value);
             double timeDiff = Math.abs(latestPeak.timestamp - latestValley.timestamp);
-            double relTTP = Math.min(0.95, timeDiff / ibiMs);
+            // The regression coefficients for RTBP / SinBP(D) were trained on a
+            // backward-looking time axis: the detected peak/valley pair lives in
+            // the recent window, so relTTP was stored as a negative fraction of
+            // the current IBI. Using the absolute positive ratio flips the sign
+            // of the timing terms and can inflate M1/M2 substantially.
+            double relTTP = -Math.min(0.95, timeDiff / ibiMs);
             
             averageValleyToPeakRelTTP = relTTP;
             averageValleyToPeakAmplitude = amplitude;
@@ -734,7 +739,9 @@ public abstract class BaseLogic implements LogicProcessor {
             // タイムスタンプ比較を削除し、配列順序で処理
             double amplitude = Math.abs(latestPeak.value - latestValley.value);
             double timeDiff = Math.abs(latestValley.timestamp - latestPeak.timestamp);
-            double relTTP = Math.min(0.95, timeDiff / ibiMs);
+            // Keep the same signed convention as V2P so the live feature space
+            // matches the training data used to derive the published coefficients.
+            double relTTP = -Math.min(0.95, timeDiff / ibiMs);
             
             averagePeakToValleyRelTTP = relTTP;
             averagePeakToValleyAmplitude = amplitude;
