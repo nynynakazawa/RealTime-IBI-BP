@@ -7,6 +7,7 @@ import csv
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime
+import os
 from pathlib import Path
 import shutil
 import statistics
@@ -14,13 +15,12 @@ import sys
 import time
 from typing import Any
 
-from tusb_adapio import TUSBAdapio, TUSBAdapioError
-
 
 DEFAULT_SAMPLE_RATE_HZ = 100.0
 DEFAULT_ACTIVITY_WINDOW_S = 8.0
 DEFAULT_ACTIVITY_MIN_STD_RAW = 3.0
 DEFAULT_ACTIVITY_MIN_RANGE_RAW = 8.0
+DEFAULT_INACTIVE_HOLD_S = 1.5
 DEFAULT_MIN_BEAT_INTERVAL_S = 0.4
 DEFAULT_MAX_BEAT_INTERVAL_S = 2.0
 
@@ -31,6 +31,9 @@ DEFAULT_CO_INDEX = 0
 BP_SCALE_MMHG_PER_COUNT = 500.0 / 1023.0
 CO_SCALE_LPM_PER_COUNT = 99.0 / 1023.0
 CO_OFFSET_LPM = 1.0
+
+TUSBAdapio = None
+TUSBAdapioError = RuntimeError
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,42 @@ class ChannelSpec:
 
     def convert(self, raw_value: int) -> float:
         return raw_value * self.scale + self.offset
+
+
+def maybe_reexec_into_venv() -> None:
+    root = Path(__file__).resolve().parent
+    venv_python = root / ".venv" / "bin" / "python"
+    if os.environ.get("CNAP_REALTIME_BOOTSTRAPPED") == "1":
+        return
+    if not venv_python.exists():
+        return
+    if Path(sys.executable).resolve() == venv_python.resolve():
+        return
+    env = os.environ.copy()
+    env["CNAP_REALTIME_BOOTSTRAPPED"] = "1"
+    os.execve(
+        str(venv_python),
+        [str(venv_python), str(Path(__file__).resolve()), *sys.argv[1:]],
+        env,
+    )
+
+
+def ensure_tusb_runtime() -> None:
+    global TUSBAdapio, TUSBAdapioError
+    if TUSBAdapio is not None:
+        return
+    try:
+        from tusb_adapio import TUSBAdapio as _TUSBAdapio, TUSBAdapioError as _TUSBAdapioError
+    except ModuleNotFoundError as exc:
+        if exc.name == "usb":
+            maybe_reexec_into_venv()
+            raise RuntimeError(
+                "pyusb is not installed for this Python. "
+                "Run `python3 -m venv .venv && . .venv/bin/activate && python -m pip install -r requirements.txt`."
+            ) from exc
+        raise
+    TUSBAdapio = _TUSBAdapio
+    TUSBAdapioError = _TUSBAdapioError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--activity-window-s", type=float, default=DEFAULT_ACTIVITY_WINDOW_S)
     parser.add_argument("--activity-min-std-raw", type=float, default=DEFAULT_ACTIVITY_MIN_STD_RAW)
     parser.add_argument("--activity-min-range-raw", type=float, default=DEFAULT_ACTIVITY_MIN_RANGE_RAW)
+    parser.add_argument("--inactive-hold-s", type=float, default=DEFAULT_INACTIVE_HOLD_S)
     parser.add_argument("--min-beat-interval-s", type=float, default=DEFAULT_MIN_BEAT_INTERVAL_S)
     parser.add_argument("--max-beat-interval-s", type=float, default=DEFAULT_MAX_BEAT_INTERVAL_S)
     return parser
@@ -238,7 +278,20 @@ def default_channels(args: argparse.Namespace) -> tuple[ChannelSpec, ChannelSpec
     return bp_wave_channel, map_channel, co_channel
 
 
-def run_logger(root: Path, args: argparse.Namespace) -> int:
+def probe_device() -> TUSBAdapio:
+    ensure_tusb_runtime()
+    device = TUSBAdapio()
+    device.open()
+    summary = device.summary()
+    print(
+        "[startup] AD converter detected: "
+        f"product={summary.product} manufacturer={summary.manufacturer} "
+        f"serial={summary.serial_number} bus={summary.bus} address={summary.address}"
+    )
+    return device
+
+
+def run_logger(root: Path, args: argparse.Namespace, device: TUSBAdapio) -> int:
     bp_wave_channel, map_channel, co_channel = default_channels(args)
     session_id = args.session_id or time.strftime("cnap_%Y%m%d_%H%M%S", time.localtime())
     output_path = ensure_output_path(root, session_id, "beats")
@@ -253,6 +306,7 @@ def run_logger(root: Path, args: argparse.Namespace) -> int:
     raw_history: deque[int] = deque(maxlen=max(8, int(args.activity_window_s * DEFAULT_SAMPLE_RATE_HZ)))
     recording_start_mono_ns: int | None = None
     recording_started_at: str | None = None
+    inactive_candidate_start_ns: int | None = None
     last_peak_sample_index: int | None = None
     last_peak_elapsed_s: float | None = None
     beat_count = 0
@@ -282,69 +336,96 @@ def run_logger(root: Path, args: argparse.Namespace) -> int:
         "Beat HR [bpm]",
     ]
 
-    with TUSBAdapio() as device:
-        device_summary = asdict(device.summary())
-        metadata = {
-            "session_id": session_id,
-            "mode": "beat_logger",
-            "started_at": started_at,
-            "recording_started_at": recording_started_at,
-            "sample_rate_hz": DEFAULT_SAMPLE_RATE_HZ,
-            "bp_wave_channel": asdict(bp_wave_channel),
-            "map_channel": asdict(map_channel),
-            "co_channel": asdict(co_channel),
-            "conversion_assumptions": {
-                "analog_out_reference": "-5V to 5V",
-                "divider_ratio": "10k / (10k + 10k) = 1/2",
-                "bp_wave_and_map_formula": "mmHg = 500 * raw / 1023",
-                "co_formula": "L/min = 1 + 99 * raw / 1023",
-            },
-            "output_csv": str(output_path),
-            "archive_output_csv": str(archive_output) if archive_output is not None else None,
-            "device": device_summary,
-            "notes": args.notes,
-        }
-        write_json(meta_path, metadata)
-        if archive_meta is not None:
-            write_json(archive_meta, metadata)
+    device_summary = asdict(device.summary())
+    metadata = {
+        "session_id": session_id,
+        "mode": "beat_logger",
+        "started_at": started_at,
+        "recording_started_at": recording_started_at,
+        "sample_rate_hz": DEFAULT_SAMPLE_RATE_HZ,
+        "bp_wave_channel": asdict(bp_wave_channel),
+        "map_channel": asdict(map_channel),
+        "co_channel": asdict(co_channel),
+        "conversion_assumptions": {
+            "analog_out_reference": "-5V to 5V",
+            "divider_ratio": "10k / (10k + 10k) = 1/2",
+            "bp_wave_and_map_formula": "mmHg = 500 * raw / 1023",
+            "co_formula": "L/min = 1 + 99 * raw / 1023",
+        },
+        "output_csv": str(output_path),
+        "archive_output_csv": str(archive_output) if archive_output is not None else None,
+        "device": device_summary,
+        "notes": args.notes,
+    }
+    write_json(meta_path, metadata)
+    if archive_meta is not None:
+        write_json(archive_meta, metadata)
 
-        with output_path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=fieldnames)
-            writer.writeheader()
-            print(
-                f"[beat] session started_at={started_at} "
-                f"bp_wave=ch{bp_wave_channel.index} map=ch{map_channel.index} co=ch{co_channel.index}"
-            )
-            print(
-                "[beat] formulas: "
-                "BP/MAP[mmHg] = 500 * raw / 1023, "
-                "CO[L/min] = 1 + 99 * raw / 1023"
-            )
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        print(
+            f"[beat] session started_at={started_at} "
+            f"bp_wave=ch{bp_wave_channel.index} map=ch{map_channel.index} co=ch{co_channel.index}"
+        )
+        print(
+            "[beat] formulas: "
+            "BP/MAP[mmHg] = 500 * raw / 1023, "
+            "CO[L/min] = 1 + 99 * raw / 1023"
+        )
 
-            try:
-                while True:
-                    now = time.monotonic()
-                    if sample_count > 0 and now < next_deadline:
-                        time.sleep(next_deadline - now)
+        try:
+            while True:
+                now = time.monotonic()
+                if sample_count > 0 and now < next_deadline:
+                    time.sleep(next_deadline - now)
 
-                    monotonic_ns = time.monotonic_ns()
-                    epoch_ns = time.time_ns()
-                    bp_raw, map_raw, co_raw = device.read_scan(
-                        [bp_wave_channel.index, map_channel.index, co_channel.index]
-                    )
-                    bp_value = bp_wave_channel.convert(bp_raw)
-                    map_value = map_channel.convert(map_raw)
-                    co_value = co_channel.convert(co_raw)
-                    wall_time_iso = iso_from_epoch_ns(epoch_ns)
+                monotonic_ns = time.monotonic_ns()
+                epoch_ns = time.time_ns()
+                bp_raw, map_raw, co_raw = device.read_scan(
+                    [bp_wave_channel.index, map_channel.index, co_channel.index]
+                )
+                bp_value = bp_wave_channel.convert(bp_raw)
+                map_value = map_channel.convert(map_raw)
+                co_value = co_channel.convert(co_raw)
+                wall_time_iso = iso_from_epoch_ns(epoch_ns)
 
+                sample_history.append(
+                    {
+                        "sample_index": sample_count,
+                        "elapsed_s": (
+                            active_elapsed_s(monotonic_ns, recording_start_mono_ns)
+                            if recording_start_mono_ns is not None
+                            else 0.0
+                        ),
+                        "wall_time_iso": wall_time_iso,
+                        "epoch_ns": epoch_ns,
+                        "monotonic_ns": monotonic_ns,
+                        "bp_raw": bp_raw,
+                        "bp_value": bp_value,
+                        "map_raw": map_raw,
+                        "map_value": map_value,
+                        "co_raw": co_raw,
+                        "co_value": co_value,
+                    }
+                )
+                raw_history.append(bp_raw)
+
+                is_active = activity_window_is_valid(
+                    list(raw_history),
+                    min_std_raw=args.activity_min_std_raw,
+                    min_range_raw=args.activity_min_range_raw,
+                )
+                if is_active and recording_start_mono_ns is None:
+                    recording_start_mono_ns = monotonic_ns
+                    recording_started_at = wall_time_iso
+                    inactive_candidate_start_ns = None
+                    sample_history.clear()
+                    raw_history.clear()
                     sample_history.append(
                         {
                             "sample_index": sample_count,
-                            "elapsed_s": (
-                                active_elapsed_s(monotonic_ns, recording_start_mono_ns)
-                                if recording_start_mono_ns is not None
-                                else 0.0
-                            ),
+                            "elapsed_s": 0.0,
                             "wall_time_iso": wall_time_iso,
                             "epoch_ns": epoch_ns,
                             "monotonic_ns": monotonic_ns,
@@ -357,15 +438,18 @@ def run_logger(root: Path, args: argparse.Namespace) -> int:
                         }
                     )
                     raw_history.append(bp_raw)
-
-                    is_active = activity_window_is_valid(
-                        list(raw_history),
-                        min_std_raw=args.activity_min_std_raw,
-                        min_range_raw=args.activity_min_range_raw,
-                    )
-                    if is_active and recording_start_mono_ns is None:
-                        recording_start_mono_ns = monotonic_ns
-                        recording_started_at = wall_time_iso
+                    last_peak_sample_index = None
+                    last_peak_elapsed_s = None
+                    beat_count = 0
+                    print(f"[beat] active waveform detected; recording started at {recording_started_at}")
+                if recording_start_mono_ns is not None:
+                    if is_active:
+                        inactive_candidate_start_ns = None
+                    elif inactive_candidate_start_ns is None:
+                        inactive_candidate_start_ns = monotonic_ns
+                    elif (monotonic_ns - inactive_candidate_start_ns) / 1_000_000_000.0 >= args.inactive_hold_s:
+                        recording_start_mono_ns = None
+                        inactive_candidate_start_ns = None
                         sample_history.clear()
                         raw_history.clear()
                         sample_history.append(
@@ -386,117 +470,116 @@ def run_logger(root: Path, args: argparse.Namespace) -> int:
                         raw_history.append(bp_raw)
                         last_peak_sample_index = None
                         last_peak_elapsed_s = None
-                        beat_count = 0
-                        print(f"[beat] active waveform detected; recording started at {recording_started_at}")
-                    if is_active != active_state:
-                        state_label = "active" if is_active else "inactive"
-                        print(f"[beat] waveform state -> {state_label}")
-                        active_state = is_active
+                        print("[beat] waveform became inactive; waiting for active waveform")
+                if is_active != active_state:
+                    state_label = "active" if is_active else "inactive"
+                    print(f"[beat] waveform state -> {state_label}")
+                    active_state = is_active
 
-                    if recording_start_mono_ns is not None:
-                        sample_history[-1]["elapsed_s"] = active_elapsed_s(monotonic_ns, recording_start_mono_ns)
+                if recording_start_mono_ns is not None:
+                    sample_history[-1]["elapsed_s"] = active_elapsed_s(monotonic_ns, recording_start_mono_ns)
 
-                    peak_sample = detect_stream_peak(
-                        sample_history,
-                        raw_history,
-                        last_peak_sample_index=last_peak_sample_index,
-                        min_interval_s=args.min_beat_interval_s,
-                        sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ,
-                        min_std_raw=args.activity_min_std_raw,
-                        min_range_raw=args.activity_min_range_raw,
-                    )
-                    if peak_sample is not None:
-                        if last_peak_elapsed_s is not None:
-                            interval_s = peak_sample["elapsed_s"] - last_peak_elapsed_s
-                            if args.min_beat_interval_s <= interval_s <= args.max_beat_interval_s:
-                                interval_samples = samples_for_interval(
-                                    sample_history,
-                                    start_sample_index=last_peak_sample_index,
-                                    end_sample_index=peak_sample["sample_index"],
-                                )
-                                bp_interval_values = [sample["bp_value"] for sample in interval_samples]
-                                map_interval_values = [sample["map_value"] for sample in interval_samples]
-                                co_interval_values = [sample["co_value"] for sample in interval_samples]
-                                map_interval_raw = [sample["map_raw"] for sample in interval_samples]
-                                co_interval_raw = [sample["co_raw"] for sample in interval_samples]
-
-                                if bp_interval_values:
-                                    beat_count += 1
-                                    sys_value = max(bp_interval_values)
-                                    mean_value = statistics.fmean(bp_interval_values)
-                                    dia_value = min(bp_interval_values)
-                                    hr_value = 60.0 / interval_s if interval_s > 0 else None
-                                    map_value_for_row = (
-                                        statistics.fmean(map_interval_values) if map_interval_values else None
-                                    )
-                                    co_value_for_row = (
-                                        statistics.fmean(co_interval_values) if co_interval_values else None
-                                    )
-                                    row = {
-                                        "開始時刻": started_at,
-                                        "記録開始時刻": recording_started_at,
-                                        "現在時刻": peak_sample["wall_time_iso"],
-                                        "epoch_ns": peak_sample["epoch_ns"],
-                                        "monotonic_ns": peak_sample["monotonic_ns"],
-                                        "経過時間": f"{peak_sample['elapsed_s']:.9f}",
-                                        "計測回数": beat_count,
-                                        "BP waveform Raw": peak_sample["bp_raw"],
-                                        "BP waveform [mmHg]": f"{peak_sample['bp_value']:.9f}",
-                                        "MAP Raw": format_optional_int(
-                                            statistics.fmean(map_interval_raw) if map_interval_raw else None
-                                        ),
-                                        "MAP [mmHg]": format_optional_value(map_value_for_row),
-                                        "CO Raw": format_optional_int(
-                                            statistics.fmean(co_interval_raw) if co_interval_raw else None
-                                        ),
-                                        "CO [L/min]": format_optional_value(co_value_for_row),
-                                        "Beat Sys [mmHg]": format_optional_value(sys_value),
-                                        "Beat Mean [mmHg]": format_optional_value(mean_value),
-                                        "Beat Dia [mmHg]": format_optional_value(dia_value),
-                                        "Beat HR [bpm]": format_optional_value(hr_value),
-                                    }
-                                    writer.writerow(row)
-                                    handle.flush()
-                                    print(
-                                        f"[beat] start={started_at} now={peak_sample['wall_time_iso']} "
-                                        f"t={peak_sample['elapsed_s']:.2f}s #{beat_count} "
-                                        f"BP={peak_sample['bp_value']:.3f} mmHg "
-                                        f"MAP={row['MAP [mmHg]']} mmHg "
-                                        f"CO={row['CO [L/min]']} L/min "
-                                        f"Sys={row['Beat Sys [mmHg]']} "
-                                        f"Mean={row['Beat Mean [mmHg]']} "
-                                        f"Dia={row['Beat Dia [mmHg]']} "
-                                        f"HR={row['Beat HR [bpm]']}"
-                                    )
-                        last_peak_sample_index = peak_sample["sample_index"]
-                        last_peak_elapsed_s = peak_sample["elapsed_s"]
-
-                    sample_count += 1
-                    next_deadline += 1.0 / DEFAULT_SAMPLE_RATE_HZ
-
-                    if args.status_interval > 0 and time.monotonic() - last_report >= args.status_interval:
-                        if recording_start_mono_ns is None:
-                            print(f"[beat] {waiting_message(raw_history)}")
-                        else:
-                            elapsed_s = active_elapsed_s(monotonic_ns, recording_start_mono_ns)
-                            print(
-                                f"[beat] t={elapsed_s:.2f}s beats={beat_count} "
-                                f"BP={bp_value:.3f} mmHg (raw={bp_raw}) "
-                                f"MAP={map_value:.3f} mmHg (raw={map_raw}) "
-                                f"CO={co_value:.3f} L/min (raw={co_raw})"
+                peak_sample = detect_stream_peak(
+                    sample_history,
+                    raw_history,
+                    last_peak_sample_index=last_peak_sample_index,
+                    min_interval_s=args.min_beat_interval_s,
+                    sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ,
+                    min_std_raw=args.activity_min_std_raw,
+                    min_range_raw=args.activity_min_range_raw,
+                )
+                if peak_sample is not None:
+                    if last_peak_elapsed_s is not None:
+                        interval_s = peak_sample["elapsed_s"] - last_peak_elapsed_s
+                        if args.min_beat_interval_s <= interval_s <= args.max_beat_interval_s:
+                            interval_samples = samples_for_interval(
+                                sample_history,
+                                start_sample_index=last_peak_sample_index,
+                                end_sample_index=peak_sample["sample_index"],
                             )
-                        last_report = time.monotonic()
+                            bp_interval_values = [sample["bp_value"] for sample in interval_samples]
+                            map_interval_values = [sample["map_value"] for sample in interval_samples]
+                            co_interval_values = [sample["co_value"] for sample in interval_samples]
+                            map_interval_raw = [sample["map_raw"] for sample in interval_samples]
+                            co_interval_raw = [sample["co_raw"] for sample in interval_samples]
 
-                    if args.duration > 0:
-                        process_elapsed_s = (
-                            active_elapsed_s(monotonic_ns, recording_start_mono_ns)
-                            if recording_start_mono_ns is not None
-                            else (monotonic_ns - process_start_mono_ns) / 1_000_000_000.0
+                            if bp_interval_values:
+                                beat_count += 1
+                                sys_value = max(bp_interval_values)
+                                mean_value = statistics.fmean(bp_interval_values)
+                                dia_value = min(bp_interval_values)
+                                hr_value = 60.0 / interval_s if interval_s > 0 else None
+                                map_value_for_row = (
+                                    statistics.fmean(map_interval_values) if map_interval_values else None
+                                )
+                                co_value_for_row = (
+                                    statistics.fmean(co_interval_values) if co_interval_values else None
+                                )
+                                row = {
+                                    "開始時刻": started_at,
+                                    "記録開始時刻": recording_started_at,
+                                    "現在時刻": peak_sample["wall_time_iso"],
+                                    "epoch_ns": peak_sample["epoch_ns"],
+                                    "monotonic_ns": peak_sample["monotonic_ns"],
+                                    "経過時間": f"{peak_sample['elapsed_s']:.9f}",
+                                    "計測回数": beat_count,
+                                    "BP waveform Raw": peak_sample["bp_raw"],
+                                    "BP waveform [mmHg]": f"{peak_sample['bp_value']:.9f}",
+                                    "MAP Raw": format_optional_int(
+                                        statistics.fmean(map_interval_raw) if map_interval_raw else None
+                                    ),
+                                    "MAP [mmHg]": format_optional_value(map_value_for_row),
+                                    "CO Raw": format_optional_int(
+                                        statistics.fmean(co_interval_raw) if co_interval_raw else None
+                                    ),
+                                    "CO [L/min]": format_optional_value(co_value_for_row),
+                                    "Beat Sys [mmHg]": format_optional_value(sys_value),
+                                    "Beat Mean [mmHg]": format_optional_value(mean_value),
+                                    "Beat Dia [mmHg]": format_optional_value(dia_value),
+                                    "Beat HR [bpm]": format_optional_value(hr_value),
+                                }
+                                writer.writerow(row)
+                                handle.flush()
+                                print(
+                                    f"[beat] start={started_at} now={peak_sample['wall_time_iso']} "
+                                    f"t={peak_sample['elapsed_s']:.2f}s #{beat_count} "
+                                    f"BP={peak_sample['bp_value']:.3f} mmHg "
+                                    f"MAP={row['MAP [mmHg]']} mmHg "
+                                    f"CO={row['CO [L/min]']} L/min "
+                                    f"Sys={row['Beat Sys [mmHg]']} "
+                                    f"Mean={row['Beat Mean [mmHg]']} "
+                                    f"Dia={row['Beat Dia [mmHg]']} "
+                                    f"HR={row['Beat HR [bpm]']}"
+                                )
+                    last_peak_sample_index = peak_sample["sample_index"]
+                    last_peak_elapsed_s = peak_sample["elapsed_s"]
+
+                sample_count += 1
+                next_deadline += 1.0 / DEFAULT_SAMPLE_RATE_HZ
+
+                if args.status_interval > 0 and time.monotonic() - last_report >= args.status_interval:
+                    if recording_start_mono_ns is None:
+                        print(f"[beat] {waiting_message(raw_history)}")
+                    else:
+                        elapsed_s = active_elapsed_s(monotonic_ns, recording_start_mono_ns)
+                        print(
+                            f"[beat] t={elapsed_s:.2f}s beats={beat_count} "
+                            f"BP={bp_value:.3f} mmHg (raw={bp_raw}) "
+                            f"MAP={map_value:.3f} mmHg (raw={map_raw}) "
+                            f"CO={co_value:.3f} L/min (raw={co_raw})"
                         )
-                        if process_elapsed_s >= args.duration:
-                            break
-            except KeyboardInterrupt:
-                print("[beat] interrupted by user", file=sys.stderr)
+                    last_report = time.monotonic()
+
+                if args.duration > 0:
+                    process_elapsed_s = (
+                        active_elapsed_s(monotonic_ns, recording_start_mono_ns)
+                        if recording_start_mono_ns is not None
+                        else (monotonic_ns - process_start_mono_ns) / 1_000_000_000.0
+                    )
+                    if process_elapsed_s >= args.duration:
+                        break
+        except KeyboardInterrupt:
+            print("[beat] interrupted by user", file=sys.stderr)
 
     metadata = {
         "session_id": session_id,
@@ -531,14 +614,20 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parent
 
+    device: TUSBAdapio | None = None
     try:
-        return run_logger(root, args)
+        ensure_tusb_runtime()
+        device = probe_device()
+        return run_logger(root, args, device)
     except TUSBAdapioError as exc:
-        print(f"USB error: {exc}", file=sys.stderr)
+        print(f"[startup] AD converter not detected: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if device is not None:
+            device.close()
 
 
 if __name__ == "__main__":
