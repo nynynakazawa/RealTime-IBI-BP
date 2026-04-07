@@ -1,9 +1,6 @@
 .venv/
 __pycache__/
 captures/
-imports/
 vendor/
 *.lzh
 *.pyc
-calibration.json
-proof_state.json
