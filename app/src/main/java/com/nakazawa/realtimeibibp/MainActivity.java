@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.*;
 import android.provider.Settings;
+import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.*;
@@ -27,6 +28,18 @@ import android.os.Looper;
 
 public class MainActivity extends AppCompatActivity
         implements ModeSelectionFragment.OnModeSelectedListener {
+    public static final String ACTION_START_AUTOMATED_SESSION =
+            "com.nakazawa.realtimeibibp.action.START_AUTOMATED_SESSION";
+    public static final String ACTION_STOP_AUTOMATED_SESSION =
+            "com.nakazawa.realtimeibibp.action.STOP_AUTOMATED_SESSION";
+    public static final String EXTRA_SESSION_ID = "session_id";
+    public static final String EXTRA_SUBJECT_ID = "subject_id";
+    public static final String EXTRA_SESSION_NUMBER = "session_number";
+    public static final String EXTRA_MODE = "mode";
+    public static final String EXTRA_AUTOMATED = "automated";
+    private static final String APP_VERSION = "1.0";
+    private static final String COEFFICIENT_VERSION = "2025-11-22";
+    private static final String AUTOMATION_LOG_TAG = "RealtimeAutomation";
 
     // ===== 定数 =====
     private static final int REQUEST_WRITE_STORAGE = 112, CAMERA_PERMISSION_REQUEST_CODE = 101;
@@ -65,6 +78,12 @@ public class MainActivity extends AppCompatActivity
 
     private ExecutorService rlExecutor;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private CountDownTimer activeCountDownTimer;
+    private String currentOutputBaseName = "";
+    private String currentSessionId = "";
+    private String currentSubjectId = "";
+    private int currentSessionNumber = 0;
+    private boolean isAutomatedSession = false;
     
     // ===== 画面輝度制御 =====
     private void setMaxBrightness() {
@@ -126,6 +145,7 @@ public class MainActivity extends AppCompatActivity
         handler = new Handler();
         analyzer.startRecording();
         analyzer.stopRecording();
+        handleAutomationIntent(getIntent());
     }
 
     // ===== UI初期化 =====
@@ -363,6 +383,13 @@ public class MainActivity extends AppCompatActivity
         setMaxBrightness();
     }
 
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleAutomationIntent(intent);
+    }
+
     // ===== onActivityResult =====
 //    @Override protected void onActivityResult(int req, int res, Intent data) {
 //        super.onActivityResult(req, res, data);
@@ -397,9 +424,14 @@ public class MainActivity extends AppCompatActivity
 
     // ===== Recording / Training =====
     private void startRecording() {
+        if (isRecording) {
+            return;
+        }
+        String subject = editTextName.getText().toString().trim();
+        String baseName = buildManualBaseName(subject);
+        prepareSession(baseName, subject, 0, mode, false);
         isRecording = true;
         analyzer.startRecording();
-        
         // mode-1または初期状態（mode = -1）の場合は1分、それ以外は5分
         int recordingMinutes = (mode == MODE_1 || mode == -1) ? 1 : 5;
         int recordingMillis = recordingMinutes * 60 * 1000;
@@ -407,7 +439,7 @@ public class MainActivity extends AppCompatActivity
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
 
         // カウントダウンタイマー＋ポップアップ表示
-        new CountDownTimer(recordingMillis, 1000) {
+        activeCountDownTimer = new CountDownTimer(recordingMillis, 1000) {
             AlertDialog timerDialog;
 
             @Override
@@ -429,22 +461,19 @@ public class MainActivity extends AppCompatActivity
             @Override
             public void onFinish() {
                 if (timerDialog != null) timerDialog.dismiss();
-
-                // 停止＆CSV保存（5種類のファイル + BP_Analysis用統合ファイル）
-                stopRecording();
-                saveRawDataToCsv();
-                saveRTBPToCsv();
-                saveSinBPMToCsv();
-                saveSinBPDToCsv();
-                saveWaveDataToCsv();
-                saveTrainingDataToCsv(); // BP_Analysis用の統合ファイル
+                stopRecordingAndPersist();
                 Toast.makeText(MainActivity.this,
                         "記録を終了しました", Toast.LENGTH_SHORT).show();
             }
-        }.start();
+        };
+        activeCountDownTimer.start();
     }
 
     private void stopRecording() {
+        if (activeCountDownTimer != null) {
+            activeCountDownTimer.cancel();
+            activeCountDownTimer = null;
+        }
         if ((mode >= MODE_3 && mode <= MODE_8) && midiHapticPlayer != null) {
             midiHapticPlayer.stop();
         }
@@ -462,6 +491,88 @@ public class MainActivity extends AppCompatActivity
         isRecording = false;
         Toast.makeText(this, "Stop recording", Toast.LENGTH_SHORT).show();
         analyzer.stopRecording();
+    }
+
+    private void stopRecordingAndPersist() {
+        if (!isRecording) {
+            Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist skipped: isRecording=false sessionId=" + currentSessionId);
+            return;
+        }
+        Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist begin sessionId=" + currentSessionId);
+        stopRecording();
+        saveRawDataToCsv();
+        saveRTBPToCsv();
+        saveSinBPMToCsv();
+        saveSinBPDToCsv();
+        saveWaveDataToCsv();
+        saveTrainingDataToCsv();
+        Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist completed sessionId=" + currentSessionId);
+    }
+
+    private void handleAutomationIntent(Intent intent) {
+        if (intent == null || intent.getAction() == null) {
+            return;
+        }
+        String action = intent.getAction();
+        Log.i(AUTOMATION_LOG_TAG, "handleAutomationIntent action=" + action + " sessionId=" + intent.getStringExtra(EXTRA_SESSION_ID));
+        if (ACTION_START_AUTOMATED_SESSION.equals(action)) {
+            String sessionId = intent.getStringExtra(EXTRA_SESSION_ID);
+            String subjectId = intent.getStringExtra(EXTRA_SUBJECT_ID);
+            int sessionNumber = intent.getIntExtra(EXTRA_SESSION_NUMBER, 0);
+            int requestedMode = intent.getIntExtra(EXTRA_MODE, MODE_1);
+            startAutomatedSession(sessionId, subjectId, sessionNumber, requestedMode);
+        } else if (ACTION_STOP_AUTOMATED_SESSION.equals(action)) {
+            stopRecordingAndPersist();
+        }
+    }
+
+    private void startAutomatedSession(String sessionId, String subjectId, int sessionNumber, int requestedMode) {
+        String normalizedSessionId = normalizeSessionId(sessionId);
+        String normalizedSubjectId = (subjectId == null || subjectId.trim().isEmpty())
+                ? normalizedSessionId
+                : subjectId.trim();
+        Log.i(AUTOMATION_LOG_TAG, "startAutomatedSession sessionId=" + normalizedSessionId + " mode=" + requestedMode);
+        if (isRecording) {
+            stopRecordingAndPersist();
+        }
+        mode = requestedMode;
+        setMode(requestedMode);
+        isAutomatedSession = true;
+        editTextName.setText(normalizedSubjectId);
+        prepareSession(normalizedSessionId, normalizedSubjectId, sessionNumber, requestedMode, true);
+        analyzer.startRecording();
+        isRecording = true;
+        Toast.makeText(this, "自動計測を開始しました: " + normalizedSessionId, Toast.LENGTH_SHORT).show();
+    }
+
+    private void prepareSession(String baseName, String subjectId, int sessionNumber, int selectedMode, boolean automated) {
+        currentOutputBaseName = baseName;
+        currentSessionId = baseName;
+        currentSubjectId = subjectId != null ? subjectId : "";
+        currentSessionNumber = sessionNumber;
+        isAutomatedSession = automated;
+        analyzer.configureSession(
+                currentSessionId,
+                currentSubjectId,
+                currentSessionNumber,
+                selectedMode,
+                APP_VERSION,
+                COEFFICIENT_VERSION,
+                currentOutputBaseName
+        );
+    }
+
+    private String buildManualBaseName(String subject) {
+        String base = (subject == null || subject.isEmpty()) ? "session" : subject;
+        String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+        return base + "_m" + mode + "_" + ts;
+    }
+
+    private String normalizeSessionId(String sessionId) {
+        if (sessionId == null || sessionId.trim().isEmpty()) {
+            return new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+        }
+        return sessionId.trim().replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
     // ===== Mode選択コールバック =====
@@ -545,33 +656,23 @@ public class MainActivity extends AppCompatActivity
 
     // ===== CSV保存 =====
     public void saveRawDataToCsv() {
-        String ts = new SimpleDateFormat("_HH_mm_ss",
-                Locale.getDefault()).format(new Date());
-        String name = editTextName.getText().toString() + mode + ts;
+        String name = currentOutputBaseName.isEmpty() ? buildManualBaseName(editTextName.getText().toString().trim()) : currentOutputBaseName;
         analyzer.saveRawDataToCsv(name, mode == MODE_1 || mode == -1);
     }
     public void saveRTBPToCsv() {
-        String ts = new SimpleDateFormat("_HH_mm_ss",
-                Locale.getDefault()).format(new Date());
-        String name = editTextName.getText().toString() + mode + ts;
+        String name = currentOutputBaseName.isEmpty() ? buildManualBaseName(editTextName.getText().toString().trim()) : currentOutputBaseName;
         analyzer.saveRTBPToCsv(name, mode == MODE_1 || mode == -1);
     }
     public void saveSinBPMToCsv() {
-        String ts = new SimpleDateFormat("_HH_mm_ss",
-                Locale.getDefault()).format(new Date());
-        String name = editTextName.getText().toString() + mode + ts;
+        String name = currentOutputBaseName.isEmpty() ? buildManualBaseName(editTextName.getText().toString().trim()) : currentOutputBaseName;
         analyzer.saveSinBPMToCsv(name, mode == MODE_1 || mode == -1);
     }
     public void saveSinBPDToCsv() {
-        String ts = new SimpleDateFormat("_HH_mm_ss",
-                Locale.getDefault()).format(new Date());
-        String name = editTextName.getText().toString() + mode + ts;
+        String name = currentOutputBaseName.isEmpty() ? buildManualBaseName(editTextName.getText().toString().trim()) : currentOutputBaseName;
         analyzer.saveSinBPDToCsv(name, mode == MODE_1 || mode == -1);
     }
     public void saveWaveDataToCsv() {
-        String ts = new SimpleDateFormat("_HH_mm_ss",
-                Locale.getDefault()).format(new Date());
-        String name = editTextName.getText().toString() + mode + ts;
+        String name = currentOutputBaseName.isEmpty() ? buildManualBaseName(editTextName.getText().toString().trim()) : currentOutputBaseName;
         analyzer.saveWaveDataToCsv(name, mode == MODE_1 || mode == -1);
     }
     
@@ -591,9 +692,7 @@ public class MainActivity extends AppCompatActivity
                 + mode + ts);
     }
     public void saveTrainingDataToCsv() {
-        String ts = new SimpleDateFormat("_HH_mm_ss",
-                Locale.getDefault()).format(new Date());
-        String name = editTextName.getText().toString() + mode + ts;
+        String name = currentOutputBaseName.isEmpty() ? buildManualBaseName(editTextName.getText().toString().trim()) : currentOutputBaseName;
         analyzer.saveTrainingDataToCsv(name, mode == MODE_1 || mode == -1);
     }
 

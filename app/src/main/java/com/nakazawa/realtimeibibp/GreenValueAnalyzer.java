@@ -41,8 +41,11 @@ import java.util.Locale;
 import android.graphics.Color;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.TotalCaptureResult;
+import org.json.JSONObject;
 
 public class GreenValueAnalyzer implements LifecycleObserver {
+    private static final String REALTIME_LOG_TAG = "RealtimeSession";
+    private static final int DEFAULT_FPS = 30;
 
     // ===== UI =====
     private final Context ctx;
@@ -107,12 +110,33 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private final List<Double> recM3_Phi = new ArrayList<>();
     private final List<Double> recM3_SBP = new ArrayList<>();
     private final List<Double> recM3_DBP = new ArrayList<>();
+    private final List<Integer> recBeatIndex = new ArrayList<>();
+    private final List<Integer> recModeIndex = new ArrayList<>();
+    private final List<Integer> recIso = new ArrayList<>();
+    private final List<Long> recExposureTime = new ArrayList<>();
+    private final List<Integer> recWhiteBalanceMode = new ArrayList<>();
+    private final List<Double> recFocusDistance = new ArrayList<>();
+    private final List<Double> recFNumber = new ArrayList<>();
+    private final List<Double> recAperture = new ArrayList<>();
+    private final List<Double> recSensorSensitivity = new ArrayList<>();
+    private final List<Double> recColorTemperature = new ArrayList<>();
+    private final List<Integer> recFps = new ArrayList<>();
+    private final List<Integer> recIsValidBeat = new ArrayList<>();
+    private final List<Integer> recArtifactFlag = new ArrayList<>();
 
     // ===== 状態 =====
     private boolean camOpen;
     private double  IBI;
     private boolean isRecordingActive = false;
     private long recordingStartTime = 0; // 記録開始時点（ミリ秒）
+    private int beatCounter = 0;
+    private String sessionId = "";
+    private String subjectId = "";
+    private int sessionNumber = 0;
+    private int activeMode = -1;
+    private String appVersion = "";
+    private String coefficientVersion = "";
+    private String outputBaseName = "";
 
     // ISO管理
     private int currentISO = 600; // デフォルト値
@@ -127,6 +151,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private long currentExposureTime = 0;
     private int currentWhiteBalanceMode = 0;
     private float currentFocusDistance = 0.0f;
+    private float currentColorTemperature = 0.0f;
+    private float currentAperture = 0.0f;
+    private float currentSensorSensitivity = 0.0f;
     
     // カメラ関連
     private ProcessCameraProvider cameraProvider;
@@ -185,6 +212,23 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private CameraInfoCallback cameraInfoCallback;
     public void setCameraInfoCallback(CameraInfoCallback callback) {
         this.cameraInfoCallback = callback;
+    }
+
+    public void configureSession(
+            String sessionId,
+            String subjectId,
+            int sessionNumber,
+            int mode,
+            String appVersion,
+            String coefficientVersion,
+            String outputBaseName) {
+        this.sessionId = sessionId != null ? sessionId : "";
+        this.subjectId = subjectId != null ? subjectId : "";
+        this.sessionNumber = sessionNumber;
+        this.activeMode = mode;
+        this.appVersion = appVersion != null ? appVersion : "";
+        this.coefficientVersion = coefficientVersion != null ? coefficientVersion : "";
+        this.outputBaseName = outputBaseName != null ? outputBaseName : "";
     }
 
     // ===== コンストラクタ =====
@@ -356,6 +400,14 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 long exposureTimeValue = (exposure != null) ? exposure : 0;
                 int wbModeValue = (wbMode != null) ? wbMode : 0;
                 float focusValue = (focus != null) ? focus : 0.0f;
+                currentFNumber = fNumberValue;
+                currentISO = isoValue;
+                currentExposureTime = exposureTimeValue;
+                currentWhiteBalanceMode = wbModeValue;
+                currentFocusDistance = focusValue;
+                currentAperture = fNumberValue;
+                currentSensorSensitivity = isoValue;
+                currentColorTemperature = 0.0f;
 
                                  // コールバックでUIに反映
                  if (cameraInfoCallback != null) {
@@ -570,6 +622,20 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                         
                         if (isNewBeat) {
                             recTrainingTs.add(currentTimestamp);
+                            beatCounter += 1;
+                            recBeatIndex.add(beatCounter);
+                            recModeIndex.add(activeMode);
+                            recIso.add(currentISO);
+                            recExposureTime.add(currentExposureTime);
+                            recWhiteBalanceMode.add(currentWhiteBalanceMode);
+                            recFocusDistance.add((double) currentFocusDistance);
+                            recFNumber.add((double) currentFNumber);
+                            recAperture.add((double) currentAperture);
+                            recSensorSensitivity.add((double) currentSensorSensitivity);
+                            recColorTemperature.add((double) currentColorTemperature);
+                            recFps.add(DEFAULT_FPS);
+                            recIsValidBeat.add(isDetectionValid() ? 1 : 0);
+                            recArtifactFlag.add(0);
                             
                             // Method1 (RealtimeBP) 特徴量
                             if (bpEstimator != null) {
@@ -623,6 +689,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                                 recM3_SBP.add(0.0);
                                 recM3_DBP.add(0.0);
                             }
+
+                            emitRealtimeBeatLog(currentTimestamp, beatCounter);
                         }
 
                         lp.calculateSmoothedValueRealTime(
@@ -1103,6 +1171,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         clearRecordedData(); // 新しい記録を開始する前に、以前のデータをクリア
         recordingStartTime = System.currentTimeMillis(); // 記録開始時点を記録
         isRecordingActive = true;
+        beatCounter = 0;
     }
 
     public void stopRecording()  {
@@ -1146,6 +1215,73 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         recM3_Phi.clear();
         recM3_SBP.clear();
         recM3_DBP.clear();
+        recBeatIndex.clear();
+        recModeIndex.clear();
+        recIso.clear();
+        recExposureTime.clear();
+        recWhiteBalanceMode.clear();
+        recFocusDistance.clear();
+        recFNumber.clear();
+        recAperture.clear();
+        recSensorSensitivity.clear();
+        recColorTemperature.clear();
+        recFps.clear();
+        recIsValidBeat.clear();
+        recArtifactFlag.clear();
+    }
+
+    private void emitRealtimeBeatLog(long timestampMs, int beatIndex) {
+        try {
+            JSONObject root = new JSONObject();
+            root.put("event", "bp_beat");
+            root.put("session_id", sessionId);
+            root.put("subject_id", subjectId);
+            root.put("session_number", sessionNumber);
+            root.put("mode", activeMode);
+            root.put("beat_index", beatIndex);
+            root.put("timestamp_ms", timestampMs);
+            root.put("elapsed_time_s", recordingStartTime > 0 ? (timestampMs - recordingStartTime) / 1000.0 : 0.0);
+            root.put("is_valid_beat", isDetectionValid());
+            root.put("app_version", appVersion);
+            root.put("coefficient_version", coefficientVersion);
+
+            JSONObject camera = new JSONObject();
+            camera.put("iso", currentISO);
+            camera.put("exposure_time_ns", currentExposureTime);
+            camera.put("white_balance_mode", currentWhiteBalanceMode);
+            camera.put("focus_distance", currentFocusDistance);
+            camera.put("f_number", currentFNumber);
+            camera.put("aperture", currentAperture);
+            camera.put("sensor_sensitivity", currentSensorSensitivity);
+            camera.put("color_temperature", currentColorTemperature);
+            camera.put("fps", DEFAULT_FPS);
+            root.put("camera", camera);
+
+            JSONObject rtbp = new JSONObject();
+            rtbp.put("sbp", bpEstimator != null ? bpEstimator.getLastSbp() : 0.0);
+            rtbp.put("dbp", bpEstimator != null ? bpEstimator.getLastDbp() : 0.0);
+            rtbp.put("sbp_avg", bpEstimator != null ? bpEstimator.getLastSbpAvg() : 0.0);
+            rtbp.put("dbp_avg", bpEstimator != null ? bpEstimator.getLastDbpAvg() : 0.0);
+            root.put("rtbp", rtbp);
+
+            JSONObject sinD = new JSONObject();
+            sinD.put("sbp", sinBPDistortion != null ? sinBPDistortion.getLastSinSBP() : 0.0);
+            sinD.put("dbp", sinBPDistortion != null ? sinBPDistortion.getLastSinDBP() : 0.0);
+            sinD.put("sbp_avg", sinBPDistortion != null ? sinBPDistortion.getLastSinSBPAvg() : 0.0);
+            sinD.put("dbp_avg", sinBPDistortion != null ? sinBPDistortion.getLastSinDBPAvg() : 0.0);
+            root.put("sinbp_d", sinD);
+
+            JSONObject sinM = new JSONObject();
+            sinM.put("sbp", sinBPModel != null ? sinBPModel.getLastSinSBP() : 0.0);
+            sinM.put("dbp", sinBPModel != null ? sinBPModel.getLastSinDBP() : 0.0);
+            sinM.put("sbp_avg", sinBPModel != null ? sinBPModel.getLastSinSBPAvg() : 0.0);
+            sinM.put("dbp_avg", sinBPModel != null ? sinBPModel.getLastSinDBPAvg() : 0.0);
+            root.put("sinbp_m", sinM);
+
+            Log.i(REALTIME_LOG_TAG, root.toString());
+        } catch (Exception e) {
+            Log.e(REALTIME_LOG_TAG, "Failed to emit beat log", e);
+        }
     }
 
     // ===== CSV保存 =====
@@ -1641,7 +1777,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
 
         StringBuilder csvContent = new StringBuilder();
-        csvContent.append("経過時間_秒, subject_id, ref_SBP, ref_DBP, ")
+        csvContent.append("session_id, subject_id, session_number, mode, beat_index, timestamp, timestamp_ms, wall_time_iso, 経過時間_秒, app_version, coefficient_version, ISO, exposure_time_ns, white_balance_mode, focus_distance, f_number, aperture, sensor_sensitivity, color_temperature, fps, is_valid_beat, artifact_flag, ref_SBP, ref_DBP, ")
                 .append("M1_A, M1_HR, M1_V2P_relTTP, M1_P2V_relTTP, M1_SBP, M1_DBP, ")
                 .append("M2_A, M2_HR, M2_V2P_relTTP, M2_P2V_relTTP, M2_E, M2_SBP, M2_DBP, ")
                 .append("M3_A, M3_HR, M3_Mean, M3_Phi, M3_SBP, M3_DBP\n");
@@ -1652,9 +1788,31 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             // 開始時点からの経過時間（秒）を計算
             double elapsedSeconds = (recordingStartTime > 0) ? 
                 (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
-            
-            csvContent.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
-                    .append("subject_placeholder").append(", ")  // subject_id (後で追加)
+            long timestampMs = recTrainingTs.get(i);
+            String wallTimeIso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.getDefault())
+                    .format(new Date(timestampMs));
+            csvContent.append(sessionId).append(", ")
+                    .append(subjectId).append(", ")
+                    .append(sessionNumber).append(", ")
+                    .append(i < recModeIndex.size() ? recModeIndex.get(i) : activeMode).append(", ")
+                    .append(i < recBeatIndex.size() ? recBeatIndex.get(i) : (i + 1)).append(", ")
+                    .append(timestampMs).append(", ")
+                    .append(timestampMs).append(", ")
+                    .append(wallTimeIso).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
+                    .append(appVersion).append(", ")
+                    .append(coefficientVersion).append(", ")
+                    .append(i < recIso.size() ? recIso.get(i) : currentISO).append(", ")
+                    .append(i < recExposureTime.size() ? recExposureTime.get(i) : currentExposureTime).append(", ")
+                    .append(i < recWhiteBalanceMode.size() ? recWhiteBalanceMode.get(i) : currentWhiteBalanceMode).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recFocusDistance.size() ? recFocusDistance.get(i) : (double) currentFocusDistance)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recFNumber.size() ? recFNumber.get(i) : (double) currentFNumber)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recAperture.size() ? recAperture.get(i) : (double) currentAperture)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recSensorSensitivity.size() ? recSensorSensitivity.get(i) : (double) currentSensorSensitivity)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recColorTemperature.size() ? recColorTemperature.get(i) : (double) currentColorTemperature)).append(", ")
+                    .append(i < recFps.size() ? recFps.get(i) : DEFAULT_FPS).append(", ")
+                    .append(i < recIsValidBeat.size() ? recIsValidBeat.get(i) : 1).append(", ")
+                    .append(i < recArtifactFlag.size() ? recArtifactFlag.get(i) : 0).append(", ")
                     .append("").append(", ")  // ref_SBP (連続血圧計の参照値、後で追加)
                     .append("").append(", ")  // ref_DBP (連続血圧計の参照値、後で追加)
                     // Method1 (RealTimeBP)
@@ -1730,8 +1888,6 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         return isDetectionEnabled && currentISO >= 300;
     }
 }
-
-
 
 
 
