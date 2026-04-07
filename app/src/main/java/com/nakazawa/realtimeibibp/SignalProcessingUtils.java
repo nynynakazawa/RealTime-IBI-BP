@@ -192,6 +192,42 @@ public class SignalProcessingUtils {
         return true;
     }
 
+    public static boolean isBeatWindowStable(List<Double> beatSamples, double ibi, int frameRate) {
+        if (beatSamples == null || beatSamples.size() < 8 || ibi <= 0 || frameRate <= 0) {
+            return false;
+        }
+
+        double expectedSamples = ibi * frameRate / 1000.0;
+        if (beatSamples.size() < Math.max(6.0, expectedSamples * 0.30) ||
+                beatSamples.size() > Math.max(16.0, expectedSamples * 2.5)) {
+            Log.w(TAG, String.format(
+                    "Unstable beat window: sampleCount=%d expected=%.1f ibi=%.1f fps=%d",
+                    beatSamples.size(), expectedSamples, ibi, frameRate));
+            return false;
+        }
+
+        double min = Collections.min(beatSamples);
+        double max = Collections.max(beatSamples);
+        double range = max - min;
+        if (range < 0.35) {
+            Log.w(TAG, String.format("Beat window range too small: %.3f", range));
+            return false;
+        }
+
+        double mean = beatSamples.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+        double variance = 0.0;
+        for (double sample : beatSamples) {
+            double delta = sample - mean;
+            variance += delta * delta;
+        }
+        double std = Math.sqrt(variance / beatSamples.size());
+        if (std < 0.08) {
+            Log.w(TAG, String.format("Beat window std too small: %.3f", std));
+            return false;
+        }
+        return true;
+    }
+
     /**
      * BP値の生理学的妥当性チェック
      * 

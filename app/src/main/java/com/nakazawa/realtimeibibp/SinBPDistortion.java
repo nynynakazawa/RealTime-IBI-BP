@@ -104,7 +104,6 @@ public class SinBPDistortion {
     private static final double BETA3 = 62.88226696234021; // V2P_relTTP
     private static final double BETA4 = -19.577300435396946; // P2V_relTTP
     private static final double BETA5 = 10.236851183332778; // residual E
-
     // 理想曲線データ（UI表示用）
     private double currentMean = 0;
     private double currentAmplitude = 0;
@@ -369,6 +368,14 @@ public class SinBPDistortion {
 
         if (beatSamples == null || beatSamples.isEmpty()) {
             // データを更新して次の拍に備える
+            previousPeakTime = lastPeakTime;
+            previousPeakValue = lastPeakValue;
+            lastPeakValue = peakValue;
+            lastPeakTime = peakTime;
+            return;
+        }
+
+        if (!SignalProcessingUtils.isBeatWindowStable(beatSamples, ibi, frameRate)) {
             previousPeakTime = lastPeakTime;
             previousPeakValue = lastPeakValue;
             lastPeakValue = peakValue;
@@ -645,10 +652,9 @@ public class SinBPDistortion {
                 BETA5 * E;
 
         // 制約適用
-        if (sbpRefined < dbpRefined + 10) {
-            sbpRefined = dbpRefined + 10;
+        if (sbpRefined < dbpRefined + 20) {
+            sbpRefined = dbpRefined + 20;
         }
-
         sbpRefined = SignalProcessingUtils.clamp(sbpRefined, 60, 200);
         dbpRefined = SignalProcessingUtils.clamp(dbpRefined, 40, 150);
 

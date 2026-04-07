@@ -88,7 +88,6 @@ public class RealtimeBP {
     private static final double D2 = 0.14232918573186615;   // M1_HR
     private static final double D3 = 53.34911907085872;    // M1_V2P_relTTP
     private static final double D4 = -27.23680556466717;    // M1_P2V_relTTP
-
     /**
      * BaseLogicからのコールバック用メソッド
      * @param correctedGreenValue 正規化済み PPG 振幅 (0–100%)
@@ -153,15 +152,15 @@ public class RealtimeBP {
         }
 
         // 回帰式による血圧推定: SBP = C0 + C1*A + C2*HR + C3*V2P_relTTP + C4*P2V_relTTP
-        double sbp = C0 + C1 * lastAmplitude + C2 * hr 
-                + C3 * lastValleyToPeakRelTTP + C4 * lastPeakToValleyRelTTP;
+        double sbp = C0 + C1 * amplitude + C2 * hr
+                + C3 * valleyToPeakRelTTP + C4 * peakToValleyRelTTP;
         // DBP = D0 + D1*A + D2*HR + D3*V2P_relTTP + D4*P2V_relTTP
-        double dbp = D0 + D1 * lastAmplitude + D2 * hr 
-                + D3 * lastValleyToPeakRelTTP + D4 * lastPeakToValleyRelTTP;
+        double dbp = D0 + D1 * amplitude + D2 * hr
+                + D3 * valleyToPeakRelTTP + D4 * peakToValleyRelTTP;
 
         Log.d("RealtimeBP-Estimate", String.format(
                 "RawBP: SBP=%.2f, DBP=%.2f A=%.3f, HR=%.2f, VtoP_relTTP=%.3f, PtoV_relTTP=%.3f",
-                sbp, dbp, lastAmplitude, hr, lastValleyToPeakRelTTP, lastPeakToValleyRelTTP));
+                sbp, dbp, amplitude, hr, valleyToPeakRelTTP, peakToValleyRelTTP));
 
         // 範囲制限
         sbp = clamp(sbp, 60, 200);

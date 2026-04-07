@@ -1892,7 +1892,3 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
 
 
-
-
-
-

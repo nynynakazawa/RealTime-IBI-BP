@@ -96,7 +96,6 @@ public class SinBPModel {
     private static final double BETA2 = 9.294430469883875e-05; // M3_HR
     private static final double BETA3 = -0.3937788369343091; // M3_Mean
     private static final double BETA4 = 15.691979325320622; // M3_Phi
-
     // リスナー
     public interface SinBPModelListener {
         void onSinBPModelUpdated(double sinSbp, double sinDbp,
@@ -224,6 +223,14 @@ public class SinBPModel {
 
         if (beatSamples == null || beatSamples.isEmpty()) {
             // データを更新して次の拍に備える
+            previousPeakTime = lastPeakTime;
+            previousPeakValue = lastPeakValue;
+            lastPeakValue = peakValue;
+            lastPeakTime = peakTime;
+            return;
+        }
+
+        if (!SignalProcessingUtils.isBeatWindowStable(beatSamples, ibi, frameRate)) {
             previousPeakTime = lastPeakTime;
             previousPeakValue = lastPeakValue;
             lastPeakValue = peakValue;

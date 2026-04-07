@@ -170,22 +170,25 @@ public abstract class BaseLogic implements LogicProcessor {
                 double interval = (currentTime - lastPeakTime) / 1000.0;
                 if (interval > 0.25 && interval < 1.2) {
                     double bpm = 60.0 / interval;
+                    double candidateIbi = interval * 1000.0;
                     if (bpmHistory.size() >= BPM_HISTORY_SIZE) {
                         bpmHistory.remove(0);
                     }
                     bpmHistory.add(bpm);
                     double meanBpm = getMean(bpmHistory);
                     double bpmSD   = getStdDev(bpmHistory);
+                    if (bpCallback != null) {
+                        bpCallback.onFrame(currentVal, candidateIbi);
+                    }
                     if (bpm >= meanBpm - meanBpm * 0.1
                             && bpm <= meanBpm + meanBpm * 0.1) {
                         bpmValue = bpm;
                         IBI      = 60.0 / bpmValue * 1000.0;
+                    } else {
+                        IBI = candidateIbi;
                     }
                     lastPeakTime = currentTime;
                     updateCount++;
-                    if (bpCallback != null) {
-                        bpCallback.onFrame(currentVal, IBI);
-                    }
                     // 心拍数とSDを更新
                     if (bpmValue > 0) {
                         smoothedBpm = bpmValue;
@@ -711,8 +714,8 @@ public abstract class BaseLogic implements LogicProcessor {
             
             // タイムスタンプ比較を削除し、配列順序で処理
             double amplitude = Math.abs(latestPeak.value - latestValley.value);
-            double timeDiff = latestPeak.timestamp - latestValley.timestamp;
-            double relTTP = timeDiff / ibiMs;
+            double timeDiff = Math.abs(latestPeak.timestamp - latestValley.timestamp);
+            double relTTP = Math.min(0.95, timeDiff / ibiMs);
             
             averageValleyToPeakRelTTP = relTTP;
             averageValleyToPeakAmplitude = amplitude;
@@ -730,8 +733,8 @@ public abstract class BaseLogic implements LogicProcessor {
             
             // タイムスタンプ比較を削除し、配列順序で処理
             double amplitude = Math.abs(latestPeak.value - latestValley.value);
-            double timeDiff = latestValley.timestamp - latestPeak.timestamp;
-            double relTTP = timeDiff / ibiMs;
+            double timeDiff = Math.abs(latestValley.timestamp - latestPeak.timestamp);
+            double relTTP = Math.min(0.95, timeDiff / ibiMs);
             
             averagePeakToValleyRelTTP = relTTP;
             averagePeakToValleyAmplitude = amplitude;
