@@ -505,9 +505,7 @@ def run_logger(root: Path, args: argparse.Namespace, device: TUSBAdapio) -> int:
 
                             if bp_interval_values:
                                 beat_count += 1
-                                sys_value = max(bp_interval_values)
-                                mean_value = statistics.fmean(bp_interval_values)
-                                dia_value = min(bp_interval_values)
+                                pulse_pressure = max(bp_interval_values) - min(bp_interval_values)
                                 hr_value = 60.0 / interval_s if interval_s > 0 else None
                                 map_value_for_row = (
                                     statistics.fmean(map_interval_values) if map_interval_values else None
@@ -515,6 +513,17 @@ def run_logger(root: Path, args: argparse.Namespace, device: TUSBAdapio) -> int:
                                 co_value_for_row = (
                                     statistics.fmean(co_interval_values) if co_interval_values else None
                                 )
+                                if map_value_for_row is not None:
+                                    # BP waveform channel keeps pulse shape, but its DC offset is unreliable.
+                                    # Anchor each beat to the dedicated MAP channel and recover Sys/Dia
+                                    # from pulse pressure assuming MAP ~= Dia + PP/3.
+                                    mean_value = map_value_for_row
+                                    dia_value = mean_value - pulse_pressure / 3.0
+                                    sys_value = mean_value + 2.0 * pulse_pressure / 3.0
+                                else:
+                                    sys_value = max(bp_interval_values)
+                                    mean_value = statistics.fmean(bp_interval_values)
+                                    dia_value = min(bp_interval_values)
                                 row = {
                                     "開始時刻": started_at,
                                     "記録開始時刻": recording_started_at,
