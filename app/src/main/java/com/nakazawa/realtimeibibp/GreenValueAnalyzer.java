@@ -203,7 +203,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private boolean camOpen;
     private double  IBI;
     private boolean isRecordingActive = false;
-    private static final int TRAINING_AUTOSAVE_EVERY_BEATS = 5;
+    // 5拍ごとの autosave は描画を止めやすかったため、頻度を下げる。
+    // ローカル端末側の救済用途だけ残し、PC同期は停止時の最終保存に任せる。
+    private static final int TRAINING_AUTOSAVE_EVERY_BEATS = 30;
     private long recordingStartTime = 0; // 記録開始時点（ミリ秒）
     private int beatCounter = 0;
     private String sessionId = "";
@@ -1420,7 +1422,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             return;
         }
         try {
-            saveTrainingDataToCsvInternal(outputBaseName, activeMode == 1 || activeMode == -1, false);
+            saveTrainingDataToCsvInternal(outputBaseName, false, false);
             Log.i("GreenValueAnalyzer", "Training data autosaved at beat=" + beatCounter + " sessionId=" + sessionId);
         } catch (Exception e) {
             Log.e("GreenValueAnalyzer", "Training data autosave failed", e);
