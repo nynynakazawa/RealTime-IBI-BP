@@ -3,11 +3,8 @@ package com.nakazawa.realtimeibibp;
 import android.util.Log;
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.stream.Collectors;
 import java.util.Locale;
+import com.nakazawa.realtimeibibp.bp.FeatureClampUtils;
 
 /**
  * Photoplethysmography (PPG) の形態学的特徴量を用いた
@@ -29,6 +26,9 @@ public class RealtimeBP {
     /** 直近 N 拍の推定 SBP / DBP を保持 */
     private final Deque<Double> sbpHist = new ArrayDeque<>(AVG_BEATS);
     private final Deque<Double> dbpHist = new ArrayDeque<>(AVG_BEATS);
+    private final Deque<Double> displayedSbpHist = new ArrayDeque<>(AVG_BEATS);
+    private final Deque<Double> displayedDbpHist = new ArrayDeque<>(AVG_BEATS);
+    private final BPPostProcessor postProcessor = new BPPostProcessor(BPPostProcessor.Method.RTBP);
 
     /** 現在のISO値（動的に更新） */
     private int currentISO = 600;
@@ -68,6 +68,9 @@ public class RealtimeBP {
     }
 
     private double lastSbp, lastDbp, lastSbpAvg, lastDbpAvg;
+    private double lastDisplayedSbp, lastDisplayedDbp, lastDisplayedSbpAvg, lastDisplayedDbpAvg;
+    private double lastMapRaw, lastPpRaw, lastMapSmoothed, lastPpSmoothed, lastMapCalibrated, lastPpCalibrated;
+    private int lastPostprocessApplied;
     // relTTP用フィールド
     private double lastValleyToPeakRelTTP; // 谷→山のrelTTP
     private double lastPeakToValleyRelTTP; // 山→谷のrelTTP
@@ -204,11 +207,11 @@ public class RealtimeBP {
         }
 
         StringBuilder featureClampReason = new StringBuilder();
-        double usedAmplitude = clampFeature("A", amplitude, A_SUPPORT_MIN, A_SUPPORT_MAX, featureClampReason);
-        double usedHr = clampFeature("HR", hr, HR_SUPPORT_MIN, HR_SUPPORT_MAX, featureClampReason);
-        double usedValleyToPeakRelTTP = clampFeature(
+        double usedAmplitude = FeatureClampUtils.clampFeature("A", amplitude, A_SUPPORT_MIN, A_SUPPORT_MAX, featureClampReason);
+        double usedHr = FeatureClampUtils.clampFeature("HR", hr, HR_SUPPORT_MIN, HR_SUPPORT_MAX, featureClampReason);
+        double usedValleyToPeakRelTTP = FeatureClampUtils.clampFeature(
                 "V2P_relTTP", valleyToPeakRelTTP, V2P_SUPPORT_MIN, V2P_SUPPORT_MAX, featureClampReason);
-        double usedPeakToValleyRelTTP = clampFeature(
+        double usedPeakToValleyRelTTP = FeatureClampUtils.clampFeature(
                 "P2V_relTTP", peakToValleyRelTTP, P2V_SUPPORT_MIN, P2V_SUPPORT_MAX, featureClampReason);
         lastUsedAmplitude = usedAmplitude;
         lastUsedHr = usedHr;
@@ -245,6 +248,19 @@ public class RealtimeBP {
         lastOutputValid = 1;
         lastRejectReason = "ok";
 
+        BPPostProcessor.Result postprocess = postProcessor.apply(sbp, dbp);
+        lastMapRaw = postprocess.mapRaw;
+        lastPpRaw = postprocess.ppRaw;
+        lastMapSmoothed = postprocess.mapSmoothed;
+        lastPpSmoothed = postprocess.ppSmoothed;
+        lastMapCalibrated = postprocess.mapCalibrated;
+        lastPpCalibrated = postprocess.ppCalibrated;
+        lastPostprocessApplied = postprocess.postprocessApplied;
+        double displayedSbp = postprocess.postprocessApplied == 1 ? postprocess.sbpCalibrated : sbp;
+        double displayedDbp = postprocess.postprocessApplied == 1 ? postprocess.dbpCalibrated : dbp;
+        lastDisplayedSbp = displayedSbp;
+        lastDisplayedDbp = displayedDbp;
+
         // --- 保存と平均計算 ---
         lastSbp = sbp;
         lastDbp = dbp;
@@ -254,19 +270,29 @@ public class RealtimeBP {
         dbpHist.addLast(dbp);
         if (dbpHist.size() > AVG_BEATS)
             dbpHist.pollFirst();
+        displayedSbpHist.addLast(displayedSbp);
+        if (displayedSbpHist.size() > AVG_BEATS)
+            displayedSbpHist.pollFirst();
+        displayedDbpHist.addLast(displayedDbp);
+        if (displayedDbpHist.size() > AVG_BEATS)
+            displayedDbpHist.pollFirst();
 
-        double sbpAvg = robustAverage(sbpHist);
-        double dbpAvg = robustAverage(dbpHist);
+        double sbpAvg = SignalProcessingUtils.robustAverage(sbpHist);
+        double dbpAvg = SignalProcessingUtils.robustAverage(dbpHist);
+        double displayedSbpAvg = SignalProcessingUtils.robustAverage(displayedSbpHist);
+        double displayedDbpAvg = SignalProcessingUtils.robustAverage(displayedDbpHist);
         lastSbpAvg = sbpAvg;
         lastDbpAvg = dbpAvg;
+        lastDisplayedSbpAvg = displayedSbpAvg;
+        lastDisplayedDbpAvg = displayedDbpAvg;
 
         Log.d("RealtimeBP-Estimate", String.format(
-                "Averaged BP: SBP_avg=%.1f, DBP_avg=%.1f (history size: %d)",
-                sbpAvg, dbpAvg, sbpHist.size()));
+                "Averaged BP: raw=%.1f/%.1f displayed=%.1f/%.1f (history size: %d)",
+                sbpAvg, dbpAvg, displayedSbpAvg, displayedDbpAvg, sbpHist.size()));
 
         // リスナ通知
         if (listener != null) {
-            listener.onBpUpdated(sbp, dbp, sbpAvg, dbpAvg);
+            listener.onBpUpdated(displayedSbp, displayedDbp, displayedSbpAvg, displayedDbpAvg);
             Log.d("RealtimeBP-Estimate", "BP values notified to listener");
         }
 
@@ -293,12 +319,26 @@ public class RealtimeBP {
         // 血圧履歴をクリア
         sbpHist.clear();
         dbpHist.clear();
+        displayedSbpHist.clear();
+        displayedDbpHist.clear();
+        postProcessor.reset();
         
         // 血圧値をリセット
         lastSbp = 0.0;
         lastDbp = 0.0;
         lastSbpAvg = 0.0;
         lastDbpAvg = 0.0;
+        lastDisplayedSbp = 0.0;
+        lastDisplayedDbp = 0.0;
+        lastDisplayedSbpAvg = 0.0;
+        lastDisplayedDbpAvg = 0.0;
+        lastMapRaw = 0.0;
+        lastPpRaw = 0.0;
+        lastMapSmoothed = 0.0;
+        lastPpSmoothed = 0.0;
+        lastMapCalibrated = 0.0;
+        lastPpCalibrated = 0.0;
+        lastPostprocessApplied = 0;
         
         // その他の値をリセット
         lastValleyToPeakRelTTP = 0.0;
@@ -325,37 +365,6 @@ public class RealtimeBP {
         Log.d("RealtimeBP", "Blood pressure values reset to 0.00");
     }
 
-    private double robustAverage(Deque<Double> hist) {
-        List<Double> list = new ArrayList<>(hist);
-        if (list.isEmpty())
-            return 0.0;
-
-        // 1) 中央値を求める
-        Collections.sort(list);
-        double median = list.get(list.size() / 2);
-
-        // 2) 偏差リストを作成し、その中央値 (MAD) を求める
-        List<Double> deviations = list.stream()
-                .map(v -> Math.abs(v - median))
-                .sorted()
-                .collect(Collectors.toList());
-        double mad = deviations.get(deviations.size() / 2);
-
-        // 3) 閾値 = 3 × MAD (ハンペルフィルタ相当)
-        double threshold = 3 * mad;
-
-        // 4) 中央値±閾値内のデータだけフィルタ
-        List<Double> filtered = list.stream()
-                .filter(v -> Math.abs(v - median) <= threshold)
-                .collect(Collectors.toList());
-
-        // 5) フィルタ後の平均を返す (全て除外された場合は median を返す)
-        return filtered.stream()
-                .mapToDouble(v -> v)
-                .average()
-                .orElse(median);
-    }
-
     public double getLastSbp() {
         return lastSbp;
     }
@@ -370,6 +379,22 @@ public class RealtimeBP {
 
     public double getLastDbpAvg() {
         return lastDbpAvg;
+    }
+
+    public double getLastDisplayedSbp() {
+        return lastDisplayedSbp;
+    }
+
+    public double getLastDisplayedDbp() {
+        return lastDisplayedDbp;
+    }
+
+    public double getLastDisplayedSbpAvg() {
+        return lastDisplayedSbpAvg;
+    }
+
+    public double getLastDisplayedDbpAvg() {
+        return lastDisplayedDbpAvg;
     }
 
     // 学習用CSV出力のための特徴量取得メソッド
@@ -445,16 +470,32 @@ public class RealtimeBP {
         return lastRejectReason;
     }
 
-    private static double clampFeature(String label, double value, double lo, double hi, StringBuilder reason) {
-        double clamped = clamp(value, lo, hi);
-        if (Math.abs(clamped - value) > 1e-9) {
-            if (reason.length() > 0) {
-                reason.append("|");
-            }
-            reason.append(label).append(":")
-                    .append(String.format(Locale.US, "%.4f->%.4f", value, clamped));
-        }
-        return clamped;
+    public double getLastMapRaw() {
+        return lastMapRaw;
+    }
+
+    public double getLastPpRaw() {
+        return lastPpRaw;
+    }
+
+    public double getLastMapSmoothed() {
+        return lastMapSmoothed;
+    }
+
+    public double getLastPpSmoothed() {
+        return lastPpSmoothed;
+    }
+
+    public double getLastMapCalibrated() {
+        return lastMapCalibrated;
+    }
+
+    public double getLastPpCalibrated() {
+        return lastPpCalibrated;
+    }
+
+    public int getLastPostprocessApplied() {
+        return lastPostprocessApplied;
     }
 
     /**

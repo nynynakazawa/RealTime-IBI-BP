@@ -41,6 +41,8 @@ import java.util.Locale;
 import android.graphics.Color;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.TotalCaptureResult;
+import com.nakazawa.realtimeibibp.session.BPPostprocessReplay;
+import com.nakazawa.realtimeibibp.session.CsvFormatUtils;
 import org.json.JSONObject;
 
 public class GreenValueAnalyzer implements LifecycleObserver {
@@ -1632,24 +1634,51 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             root.put("camera", camera);
 
             JSONObject rtbp = new JSONObject();
-            rtbp.put("sbp", bpEstimator != null ? bpEstimator.getLastSbp() : 0.0);
-            rtbp.put("dbp", bpEstimator != null ? bpEstimator.getLastDbp() : 0.0);
-            rtbp.put("sbp_avg", bpEstimator != null ? bpEstimator.getLastSbpAvg() : 0.0);
-            rtbp.put("dbp_avg", bpEstimator != null ? bpEstimator.getLastDbpAvg() : 0.0);
+            rtbp.put("sbp", bpEstimator != null ? bpEstimator.getLastDisplayedSbp() : 0.0);
+            rtbp.put("dbp", bpEstimator != null ? bpEstimator.getLastDisplayedDbp() : 0.0);
+            rtbp.put("sbp_avg", bpEstimator != null ? bpEstimator.getLastDisplayedSbpAvg() : 0.0);
+            rtbp.put("dbp_avg", bpEstimator != null ? bpEstimator.getLastDisplayedDbpAvg() : 0.0);
+            rtbp.put("sbp_raw", bpEstimator != null ? bpEstimator.getLastSbp() : 0.0);
+            rtbp.put("dbp_raw", bpEstimator != null ? bpEstimator.getLastDbp() : 0.0);
+            rtbp.put("map_raw", bpEstimator != null ? bpEstimator.getLastMapRaw() : 0.0);
+            rtbp.put("pp_raw", bpEstimator != null ? bpEstimator.getLastPpRaw() : 0.0);
+            rtbp.put("map_smoothed", bpEstimator != null ? bpEstimator.getLastMapSmoothed() : 0.0);
+            rtbp.put("pp_smoothed", bpEstimator != null ? bpEstimator.getLastPpSmoothed() : 0.0);
+            rtbp.put("map_calibrated", bpEstimator != null ? bpEstimator.getLastMapCalibrated() : 0.0);
+            rtbp.put("pp_calibrated", bpEstimator != null ? bpEstimator.getLastPpCalibrated() : 0.0);
+            rtbp.put("postprocess_applied", bpEstimator != null ? bpEstimator.getLastPostprocessApplied() : 0);
             root.put("rtbp", rtbp);
 
             JSONObject sinD = new JSONObject();
-            sinD.put("sbp", sinBPDistortion != null ? sinBPDistortion.getLastSinSBP() : 0.0);
-            sinD.put("dbp", sinBPDistortion != null ? sinBPDistortion.getLastSinDBP() : 0.0);
-            sinD.put("sbp_avg", sinBPDistortion != null ? sinBPDistortion.getLastSinSBPAvg() : 0.0);
-            sinD.put("dbp_avg", sinBPDistortion != null ? sinBPDistortion.getLastSinDBPAvg() : 0.0);
+            sinD.put("sbp", sinBPDistortion != null ? sinBPDistortion.getLastDisplayedSinSBP() : 0.0);
+            sinD.put("dbp", sinBPDistortion != null ? sinBPDistortion.getLastDisplayedSinDBP() : 0.0);
+            sinD.put("sbp_avg", sinBPDistortion != null ? sinBPDistortion.getLastDisplayedSinSBPAvg() : 0.0);
+            sinD.put("dbp_avg", sinBPDistortion != null ? sinBPDistortion.getLastDisplayedSinDBPAvg() : 0.0);
+            sinD.put("sbp_raw", sinBPDistortion != null ? sinBPDistortion.getLastSinSBP() : 0.0);
+            sinD.put("dbp_raw", sinBPDistortion != null ? sinBPDistortion.getLastSinDBP() : 0.0);
+            sinD.put("map_raw", sinBPDistortion != null ? sinBPDistortion.getLastMapRaw() : 0.0);
+            sinD.put("pp_raw", sinBPDistortion != null ? sinBPDistortion.getLastPpRaw() : 0.0);
+            sinD.put("map_smoothed", sinBPDistortion != null ? sinBPDistortion.getLastMapSmoothed() : 0.0);
+            sinD.put("pp_smoothed", sinBPDistortion != null ? sinBPDistortion.getLastPpSmoothed() : 0.0);
+            sinD.put("map_calibrated", sinBPDistortion != null ? sinBPDistortion.getLastMapCalibrated() : 0.0);
+            sinD.put("pp_calibrated", sinBPDistortion != null ? sinBPDistortion.getLastPpCalibrated() : 0.0);
+            sinD.put("postprocess_applied", sinBPDistortion != null ? sinBPDistortion.getLastPostprocessApplied() : 0);
             root.put("sinbp_d", sinD);
 
             JSONObject sinM = new JSONObject();
-            sinM.put("sbp", sinBPModel != null ? sinBPModel.getLastSinSBP() : 0.0);
-            sinM.put("dbp", sinBPModel != null ? sinBPModel.getLastSinDBP() : 0.0);
-            sinM.put("sbp_avg", sinBPModel != null ? sinBPModel.getLastSinSBPAvg() : 0.0);
-            sinM.put("dbp_avg", sinBPModel != null ? sinBPModel.getLastSinDBPAvg() : 0.0);
+            sinM.put("sbp", sinBPModel != null ? sinBPModel.getLastDisplayedSinSBP() : 0.0);
+            sinM.put("dbp", sinBPModel != null ? sinBPModel.getLastDisplayedSinDBP() : 0.0);
+            sinM.put("sbp_avg", sinBPModel != null ? sinBPModel.getLastDisplayedSinSBPAvg() : 0.0);
+            sinM.put("dbp_avg", sinBPModel != null ? sinBPModel.getLastDisplayedSinDBPAvg() : 0.0);
+            sinM.put("sbp_raw", sinBPModel != null ? sinBPModel.getLastSinSBP() : 0.0);
+            sinM.put("dbp_raw", sinBPModel != null ? sinBPModel.getLastSinDBP() : 0.0);
+            sinM.put("map_raw", sinBPModel != null ? sinBPModel.getLastMapRaw() : 0.0);
+            sinM.put("pp_raw", sinBPModel != null ? sinBPModel.getLastPpRaw() : 0.0);
+            sinM.put("map_smoothed", sinBPModel != null ? sinBPModel.getLastMapSmoothed() : 0.0);
+            sinM.put("pp_smoothed", sinBPModel != null ? sinBPModel.getLastPpSmoothed() : 0.0);
+            sinM.put("map_calibrated", sinBPModel != null ? sinBPModel.getLastMapCalibrated() : 0.0);
+            sinM.put("pp_calibrated", sinBPModel != null ? sinBPModel.getLastPpCalibrated() : 0.0);
+            sinM.put("postprocess_applied", sinBPModel != null ? sinBPModel.getLastPostprocessApplied() : 0);
             root.put("sinbp_m", sinM);
 
             Log.i(REALTIME_LOG_TAG, root.toString());
@@ -1987,6 +2016,14 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     public void saveRTBPToCsv(String name, boolean isMode1) {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_RTBP.csv");
+        List<BPPostProcessor.Result> postResults = BPPostprocessReplay.buildSeries(
+                BPPostProcessor.Method.RTBP,
+                recTrainingTs.size(),
+                recM1_SBP,
+                recM1_DBP,
+                recM1_OutputValid,
+                recM1_RejectReason);
+        double[] postCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.RTBP);
 
         if (recTrainingTs.isEmpty() || recM1_A.isEmpty()) {
             ui.post(() ->
@@ -1996,10 +2033,11 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
 
         StringBuilder csvContent = new StringBuilder();
-        csvContent.append("経過時間_秒, A, HR, V2P_relTTP, P2V_relTTP, A_used, HR_used, V2P_relTTP_used, P2V_relTTP_used, SBP, DBP, IBI_input_ms, IBI_smoothed_ms, used_smoothed_ibi, SBP_raw, DBP_raw, clamp_applied, feature_clamp_applied, output_valid, feature_clamp_reason, reject_reason\n");
+        csvContent.append("経過時間_秒, A, HR, V2P_relTTP, P2V_relTTP, A_used, HR_used, V2P_relTTP_used, P2V_relTTP_used, SBP, DBP, IBI_input_ms, IBI_smoothed_ms, used_smoothed_ibi, SBP_raw, DBP_raw, clamp_applied, feature_clamp_applied, output_valid, feature_clamp_reason, reject_reason, MAP_raw, PP_raw, MAP_smoothed, PP_smoothed, MAP_calibrated, PP_calibrated, SBP_smoothed, DBP_smoothed, SBP_calibrated, DBP_calibrated, postprocess_applied, POST_map_a, POST_map_b, POST_pp_a, POST_pp_b, POST_alpha_map, POST_alpha_pp\n");
 
         int maxSize = recTrainingTs.size();
         for (int i = 0; i < maxSize; i++) {
+            BPPostProcessor.Result postResult = BPPostprocessReplay.getResult(postResults, i);
             // 開始時点からの経過時間（秒）を計算
             double elapsedSeconds = (recordingStartTime > 0) ? 
                 (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
@@ -2023,8 +2061,25 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(i < recM1_ClampApplied.size() ? recM1_ClampApplied.get(i) : 0).append(", ")
                     .append(i < recM1_FeatureClampApplied.size() ? recM1_FeatureClampApplied.get(i) : 0).append(", ")
                     .append(i < recM1_OutputValid.size() ? recM1_OutputValid.get(i) : 0).append(", ")
-                    .append(sanitizeCsvText(i < recM1_FeatureClampReason.size() ? recM1_FeatureClampReason.get(i) : "missing")).append(", ")
-                    .append(sanitizeCsvText(i < recM1_RejectReason.size() ? recM1_RejectReason.get(i) : "missing"))
+                    .append(CsvFormatUtils.sanitizeCsvText(i < recM1_FeatureClampReason.size() ? recM1_FeatureClampReason.get(i) : "missing")).append(", ")
+                    .append(CsvFormatUtils.sanitizeCsvText(i < recM1_RejectReason.size() ? recM1_RejectReason.get(i) : "missing")).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.mapRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.ppRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.mapSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.ppSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.mapCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.ppCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.sbpSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.dbpSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.sbpCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.dbpCalibrated)).append(", ")
+                    .append(postResult.postprocessApplied).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[0])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[1])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[2])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[3])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaMap())).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaPp()))
                     .append("\n");
         }
 
@@ -2052,6 +2107,14 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     public void saveSinBPMToCsv(String name, boolean isMode1) {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_SinBP_M.csv");
+        List<BPPostProcessor.Result> postResults = BPPostprocessReplay.buildSeries(
+                BPPostProcessor.Method.SIN_BP_M,
+                recTrainingTs.size(),
+                recM3_SBP,
+                recM3_DBP,
+                recM3_OutputValid,
+                recM3_RejectReason);
+        double[] postCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.SIN_BP_M);
 
         if (recTrainingTs.isEmpty() || recM3_A.isEmpty()) {
             ui.post(() ->
@@ -2061,10 +2124,11 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
 
         StringBuilder csvContent = new StringBuilder();
-        csvContent.append("経過時間_秒, A, HR, Mean, Phi, A_used, HR_used, Mean_used, sinPhi_used, cosPhi_used, SBP, DBP, sinPhi, cosPhi, fit_a, fit_b, fit_rmse, IBI_current_ms, IBI_smoothed_ms, used_smoothed_ibi, beat_sample_count, beat_min, beat_max, beat_range, beat_std, systole_ratio, diastole_ratio, SBP_raw, DBP_raw, SBP_attempt_final, DBP_attempt_final, constraint_applied, clamp_applied, feature_clamp_applied, output_valid, feature_clamp_reason, reject_reason\n");
+        csvContent.append("経過時間_秒, A, HR, Mean, Phi, A_used, HR_used, Mean_used, sinPhi_used, cosPhi_used, SBP, DBP, sinPhi, cosPhi, fit_a, fit_b, fit_rmse, IBI_current_ms, IBI_smoothed_ms, used_smoothed_ibi, beat_sample_count, beat_min, beat_max, beat_range, beat_std, systole_ratio, diastole_ratio, SBP_raw, DBP_raw, SBP_attempt_final, DBP_attempt_final, constraint_applied, clamp_applied, feature_clamp_applied, output_valid, feature_clamp_reason, reject_reason, MAP_raw, PP_raw, MAP_smoothed, PP_smoothed, MAP_calibrated, PP_calibrated, SBP_smoothed, DBP_smoothed, SBP_calibrated, DBP_calibrated, postprocess_applied, POST_map_a, POST_map_b, POST_pp_a, POST_pp_b, POST_alpha_map, POST_alpha_pp\n");
 
         int maxSize = recTrainingTs.size();
         for (int i = 0; i < maxSize; i++) {
+            BPPostProcessor.Result postResult = BPPostprocessReplay.getResult(postResults, i);
             // 開始時点からの経過時間（秒）を計算
             double elapsedSeconds = (recordingStartTime > 0) ? 
                 (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
@@ -2104,8 +2168,25 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(i < recM3_ClampApplied.size() ? recM3_ClampApplied.get(i) : 0).append(", ")
                     .append(i < recM3_FeatureClampApplied.size() ? recM3_FeatureClampApplied.get(i) : 0).append(", ")
                     .append(i < recM3_OutputValid.size() ? recM3_OutputValid.get(i) : 0).append(", ")
-                    .append(sanitizeCsvText(i < recM3_FeatureClampReason.size() ? recM3_FeatureClampReason.get(i) : "missing")).append(", ")
-                    .append(sanitizeCsvText(i < recM3_RejectReason.size() ? recM3_RejectReason.get(i) : "missing"))
+                    .append(CsvFormatUtils.sanitizeCsvText(i < recM3_FeatureClampReason.size() ? recM3_FeatureClampReason.get(i) : "missing")).append(", ")
+                    .append(CsvFormatUtils.sanitizeCsvText(i < recM3_RejectReason.size() ? recM3_RejectReason.get(i) : "missing")).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.mapRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.ppRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.mapSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.ppSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.mapCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.ppCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.sbpSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.dbpSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.sbpCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.dbpCalibrated)).append(", ")
+                    .append(postResult.postprocessApplied).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[0])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[1])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[2])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[3])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaMap())).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaPp()))
                     .append("\n");
         }
 
@@ -2133,6 +2214,14 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     public void saveSinBPDToCsv(String name, boolean isMode1) {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_SinBP_D.csv");
+        List<BPPostProcessor.Result> postResults = BPPostprocessReplay.buildSeries(
+                BPPostProcessor.Method.SIN_BP_D,
+                recTrainingTs.size(),
+                recM2_SBP,
+                recM2_DBP,
+                recM2_OutputValid,
+                recM2_RejectReason);
+        double[] postCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.SIN_BP_D);
         double[] m2SbpCoefficients = SinBPDistortion.getSbpCoefficients();
         double[] m2DbpCoefficients = SinBPDistortion.getDbpCoefficients();
         double[] m2SbpBaseCoefficients = SinBPDistortion.getSbpBaseCoefficients();
@@ -2160,16 +2249,18 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("M2_SBP_CORR_G0, M2_SBP_CORR_G1, M2_SBP_CORR_G2, ")
                 .append("M2_DBP_CORR_H0, M2_DBP_CORR_H1, M2_DBP_CORR_H2, ")
                 .append("M2_SBP_term_intercept, M2_SBP_term_A, M2_SBP_term_HR, M2_SBP_term_V2P_relTTP, M2_SBP_term_P2V_relTTP, M2_SBP_term_Stiffness, M2_SBP_term_E, ")
-                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E, ");
-        appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E_ONLY, SinBPDistortionComparison.E_ONLY_LABELS);
+                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E, ")
+                .append("MAP_raw, PP_raw, MAP_smoothed, PP_smoothed, MAP_calibrated, PP_calibrated, SBP_smoothed, DBP_smoothed, SBP_calibrated, DBP_calibrated, postprocess_applied, POST_map_a, POST_map_b, POST_pp_a, POST_pp_b, POST_alpha_map, POST_alpha_pp, ");
+        CsvFormatUtils.appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E_ONLY, SinBPDistortionComparison.E_ONLY_LABELS);
         csvContent.append(", ");
-        appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E2, SinBPDistortionComparison.E2_LABELS);
+        CsvFormatUtils.appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E2, SinBPDistortionComparison.E2_LABELS);
         csvContent.append(", ");
-        appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_LOCAL_A, SinBPDistortionComparison.LOCAL_A_LABELS);
+        CsvFormatUtils.appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_LOCAL_A, SinBPDistortionComparison.LOCAL_A_LABELS);
         csvContent.append("\n");
 
         int maxSize = recTrainingTs.size();
         for (int i = 0; i < maxSize; i++) {
+            BPPostProcessor.Result postResult = BPPostprocessReplay.getResult(postResults, i);
             // 開始時点からの経過時間（秒）を計算
             double elapsedSeconds = (recordingStartTime > 0) ? 
                 (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
@@ -2219,9 +2310,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             String m2FeatureClampReason = i < recM2_FeatureClampReason.size() ? recM2_FeatureClampReason.get(i) : "missing";
             String m2RejectReason = i < recM2_RejectReason.size() ? recM2_RejectReason.get(i) : "missing";
             double[] m2Features = new double[] { m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2StiffnessUsed, m2EUsed };
-            double[] m2SbpTerms = computeLinearTerms(
+            double[] m2SbpTerms = CsvFormatUtils.computeLinearTerms(
                     m2SbpCoefficients[0], Arrays.copyOfRange(m2SbpCoefficients, 1, m2SbpCoefficients.length), m2Features);
-            double[] m2DbpTerms = computeLinearTerms(
+            double[] m2DbpTerms = CsvFormatUtils.computeLinearTerms(
                     m2DbpCoefficients[0], Arrays.copyOfRange(m2DbpCoefficients, 1, m2DbpCoefficients.length), m2Features);
             SinBPDistortionComparison.VariantResult m2EOnlyVariant =
                     SinBPDistortionComparison.estimateEOnly(m2A, m2Hr, m2V2p, m2P2v, m2E);
@@ -2273,21 +2364,55 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(m2ClampApplied).append(", ")
                     .append(m2FeatureClampApplied).append(", ")
                     .append(m2OutputValid).append(", ")
-                    .append(sanitizeCsvText(m2FeatureClampReason)).append(", ")
-                    .append(sanitizeCsvText(m2RejectReason)).append(", ")
-                    .append(formatCoefficients(m2SbpCoefficients)).append(", ")
-                    .append(formatCoefficients(m2DbpCoefficients)).append(", ")
-                    .append(formatCoefficients(m2SbpBaseCoefficients)).append(", ")
-                    .append(formatCoefficients(m2DbpBaseCoefficients)).append(", ")
-                    .append(formatCoefficients(m2SbpCorrectionCoefficients)).append(", ")
-                    .append(formatCoefficients(m2DbpCorrectionCoefficients)).append(", ")
-                    .append(formatValues(m2SbpTerms)).append(", ")
-                    .append(formatValues(m2DbpTerms)).append(", ");
-            appendVariantValues(csvContent, m2EOnlyVariant);
+                    .append(CsvFormatUtils.sanitizeCsvText(m2FeatureClampReason)).append(", ")
+                    .append(CsvFormatUtils.sanitizeCsvText(m2RejectReason)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.mapRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.ppRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.mapSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.ppSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.mapCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.ppCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.sbpSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.dbpSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.sbpCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.dbpCalibrated)).append(", ")
+                    .append(postResult.postprocessApplied).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[0])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[1])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[2])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[3])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaMap())).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaPp())).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2SbpCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2DbpCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2SbpBaseCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2DbpBaseCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2SbpCorrectionCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2DbpCorrectionCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m2SbpTerms)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m2DbpTerms)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.mapRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.ppRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.mapSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.ppSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.mapCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", postResult.ppCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.sbpSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.dbpSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.sbpCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", postResult.dbpCalibrated)).append(", ")
+                    .append(postResult.postprocessApplied).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[0])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[1])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[2])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[3])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaMap())).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaPp())).append(", ");
+            CsvFormatUtils.appendVariantValues(csvContent, m2EOnlyVariant);
             csvContent.append(", ");
-            appendVariantValues(csvContent, m2E2Variant);
+            CsvFormatUtils.appendVariantValues(csvContent, m2E2Variant);
             csvContent.append(", ");
-            appendVariantValues(csvContent, m2LocalAVariant);
+            CsvFormatUtils.appendVariantValues(csvContent, m2LocalAVariant);
             csvContent
                     .append("\n");
         }
@@ -2331,6 +2456,30 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         double[] m2DbpCorrectionCoefficients = SinBPDistortion.getDbpCorrectionCoefficients();
         double[] m3SbpCoefficients = SinBPModel.getSbpCoefficients();
         double[] m3DbpCoefficients = SinBPModel.getDbpCoefficients();
+        List<BPPostProcessor.Result> m1PostResults = BPPostprocessReplay.buildSeries(
+                BPPostProcessor.Method.RTBP,
+                recTrainingTs.size(),
+                recM1_SBP,
+                recM1_DBP,
+                recM1_OutputValid,
+                recM1_RejectReason);
+        List<BPPostProcessor.Result> m2PostResults = BPPostprocessReplay.buildSeries(
+                BPPostProcessor.Method.SIN_BP_D,
+                recTrainingTs.size(),
+                recM2_SBP,
+                recM2_DBP,
+                recM2_OutputValid,
+                recM2_RejectReason);
+        List<BPPostProcessor.Result> m3PostResults = BPPostprocessReplay.buildSeries(
+                BPPostProcessor.Method.SIN_BP_M,
+                recTrainingTs.size(),
+                recM3_SBP,
+                recM3_DBP,
+                recM3_OutputValid,
+                recM3_RejectReason);
+        double[] m1PostCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.RTBP);
+        double[] m2PostCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.SIN_BP_D);
+        double[] m3PostCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.SIN_BP_M);
 
         // 学習用データが空の場合はトースト表示して終了
         if (recTrainingTs.isEmpty()) {
@@ -2345,7 +2494,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         StringBuilder csvContent = new StringBuilder();
         csvContent.append("session_id, subject_id, session_number, mode, beat_index, timestamp, timestamp_ms, wall_time_iso, 経過時間_秒, app_version, coefficient_version, ISO, exposure_time_ns, white_balance_mode, focus_distance, f_number, aperture, sensor_sensitivity, color_temperature, fps, is_valid_beat, artifact_flag, ref_SBP, ref_DBP, ")
                 .append("M1_A, M1_HR, M1_V2P_relTTP, M1_P2V_relTTP, M1_SBP, M1_DBP, ")
-                .append("M1_IBI_input_ms, M1_IBI_smoothed_ms, M1_used_smoothed_ibi, M1_A_used, M1_HR_used, M1_V2P_relTTP_used, M1_P2V_relTTP_used, M1_SBP_raw, M1_DBP_raw, M1_clamp_applied, M1_feature_clamp_applied, M1_output_valid, M1_feature_clamp_reason, M1_reject_reason, ")
+                .append("M1_IBI_input_ms, M1_IBI_smoothed_ms, M1_used_smoothed_ibi, M1_A_used, M1_HR_used, M1_V2P_relTTP_used, M1_P2V_relTTP_used, M1_SBP_raw, M1_DBP_raw, M1_clamp_applied, M1_feature_clamp_applied, M1_output_valid, M1_feature_clamp_reason, M1_reject_reason, M1_MAP_raw, M1_PP_raw, M1_MAP_smoothed, M1_PP_smoothed, M1_MAP_calibrated, M1_PP_calibrated, M1_SBP_smoothed, M1_DBP_smoothed, M1_SBP_calibrated, M1_DBP_calibrated, M1_postprocess_applied, M1_POST_map_a, M1_POST_map_b, M1_POST_pp_a, M1_POST_pp_b, M1_POST_alpha_map, M1_POST_alpha_pp, ")
                 .append("M1_SBP_C0, M1_SBP_C1, M1_SBP_C2, M1_SBP_C3, M1_SBP_C4, M1_DBP_D0, M1_DBP_D1, M1_DBP_D2, M1_DBP_D3, M1_DBP_D4, ")
                 .append("M1_SBP_term_intercept, M1_SBP_term_A, M1_SBP_term_HR, M1_SBP_term_V2P_relTTP, M1_SBP_term_P2V_relTTP, ")
                 .append("M1_DBP_term_intercept, M1_DBP_term_A, M1_DBP_term_HR, M1_DBP_term_V2P_relTTP, M1_DBP_term_P2V_relTTP, ")
@@ -2353,7 +2502,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("M2_Mean, M2_Phi, M2_sinPhi, M2_cosPhi, M2_fit_a, M2_fit_b, M2_IBI_current_ms, M2_IBI_smoothed_ms, M2_used_smoothed_ibi, ")
                 .append("M2_A_used, M2_HR_used, M2_V2P_relTTP_used, M2_P2V_relTTP_used, M2_E_used, M2_Stiffness_used, ")
                 .append("M2_beat_sample_count, M2_beat_min, M2_beat_max, M2_beat_range, M2_beat_std, M2_systole_ratio, M2_diastole_ratio, ")
-                .append("M2_SBP_raw, M2_DBP_raw, M2_SBP_base, M2_DBP_base, M2_SBP_correction, M2_DBP_correction, M2_SBP_attempt_final, M2_DBP_attempt_final, M2_constraint_applied, M2_clamp_applied, M2_feature_clamp_applied, M2_output_valid, M2_feature_clamp_reason, M2_reject_reason, ")
+                .append("M2_SBP_raw, M2_DBP_raw, M2_SBP_base, M2_DBP_base, M2_SBP_correction, M2_DBP_correction, M2_SBP_attempt_final, M2_DBP_attempt_final, M2_constraint_applied, M2_clamp_applied, M2_feature_clamp_applied, M2_output_valid, M2_feature_clamp_reason, M2_reject_reason, M2_MAP_raw, M2_PP_raw, M2_MAP_smoothed, M2_PP_smoothed, M2_MAP_calibrated, M2_PP_calibrated, M2_SBP_smoothed, M2_DBP_smoothed, M2_SBP_calibrated, M2_DBP_calibrated, M2_postprocess_applied, M2_POST_map_a, M2_POST_map_b, M2_POST_pp_a, M2_POST_pp_b, M2_POST_alpha_map, M2_POST_alpha_pp, ")
                 .append("M2_SBP_ALPHA0, M2_SBP_ALPHA1, M2_SBP_ALPHA2, M2_SBP_ALPHA3, M2_SBP_ALPHA4, M2_SBP_ALPHA5, M2_SBP_ALPHA6, ")
                 .append("M2_DBP_BETA0, M2_DBP_BETA1, M2_DBP_BETA2, M2_DBP_BETA3, M2_DBP_BETA4, M2_DBP_BETA5, M2_DBP_BETA6, ")
                 .append("M2_SBP_BASE_C0, M2_SBP_BASE_C1, M2_SBP_BASE_C2, M2_SBP_BASE_C3, M2_SBP_BASE_C4, ")
@@ -2362,17 +2511,17 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("M2_DBP_CORR_H0, M2_DBP_CORR_H1, M2_DBP_CORR_H2, ")
                 .append("M2_SBP_term_intercept, M2_SBP_term_A, M2_SBP_term_HR, M2_SBP_term_V2P_relTTP, M2_SBP_term_P2V_relTTP, M2_SBP_term_Stiffness, M2_SBP_term_E, ")
                 .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E, ");
-        appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E_ONLY, SinBPDistortionComparison.E_ONLY_LABELS);
+        CsvFormatUtils.appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E_ONLY, SinBPDistortionComparison.E_ONLY_LABELS);
         csvContent.append(", ");
-        appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E2, SinBPDistortionComparison.E2_LABELS);
+        CsvFormatUtils.appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E2, SinBPDistortionComparison.E2_LABELS);
         csvContent.append(", ");
-        appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_LOCAL_A, SinBPDistortionComparison.LOCAL_A_LABELS);
+        CsvFormatUtils.appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_LOCAL_A, SinBPDistortionComparison.LOCAL_A_LABELS);
         csvContent.append(", ")
                 .append("M3_A, M3_HR, M3_Mean, M3_Phi, M3_SBP, M3_DBP, ")
                 .append("M3_sinPhi, M3_cosPhi, M3_fit_a, M3_fit_b, M3_fit_rmse, M3_IBI_current_ms, M3_IBI_smoothed_ms, M3_used_smoothed_ibi, ")
                 .append("M3_A_used, M3_HR_used, M3_Mean_used, M3_sinPhi_used, M3_cosPhi_used, ")
                 .append("M3_beat_sample_count, M3_beat_min, M3_beat_max, M3_beat_range, M3_beat_std, M3_systole_ratio, M3_diastole_ratio, ")
-                .append("M3_SBP_raw, M3_DBP_raw, M3_SBP_attempt_final, M3_DBP_attempt_final, M3_constraint_applied, M3_clamp_applied, M3_feature_clamp_applied, M3_output_valid, M3_feature_clamp_reason, M3_reject_reason, ")
+                .append("M3_SBP_raw, M3_DBP_raw, M3_SBP_attempt_final, M3_DBP_attempt_final, M3_constraint_applied, M3_clamp_applied, M3_feature_clamp_applied, M3_output_valid, M3_feature_clamp_reason, M3_reject_reason, M3_MAP_raw, M3_PP_raw, M3_MAP_smoothed, M3_PP_smoothed, M3_MAP_calibrated, M3_PP_calibrated, M3_SBP_smoothed, M3_DBP_smoothed, M3_SBP_calibrated, M3_DBP_calibrated, M3_postprocess_applied, M3_POST_map_a, M3_POST_map_b, M3_POST_pp_a, M3_POST_pp_b, M3_POST_alpha_map, M3_POST_alpha_pp, ")
                 .append("M3_SBP_ALPHA0, M3_SBP_ALPHA1, M3_SBP_ALPHA2, M3_SBP_ALPHA3, M3_SBP_ALPHA4, M3_SBP_ALPHA5, ")
                 .append("M3_DBP_BETA0, M3_DBP_BETA1, M3_DBP_BETA2, M3_DBP_BETA3, M3_DBP_BETA4, M3_DBP_BETA5, ")
                 .append("M3_SBP_term_intercept, M3_SBP_term_A, M3_SBP_term_HR, M3_SBP_term_Mean, M3_SBP_term_sinPhi, M3_SBP_term_cosPhi, ")
@@ -2408,8 +2557,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             String m1FeatureClampReason = i < recM1_FeatureClampReason.size() ? recM1_FeatureClampReason.get(i) : "missing";
             String m1RejectReason = i < recM1_RejectReason.size() ? recM1_RejectReason.get(i) : "missing";
             double[] m1Features = new double[] { m1AUsed, m1HrUsed, m1V2pUsed, m1P2vUsed };
-            double[] m1SbpTerms = computeLinearTerms(m1SbpCoefficients[0], Arrays.copyOfRange(m1SbpCoefficients, 1, m1SbpCoefficients.length), m1Features);
-            double[] m1DbpTerms = computeLinearTerms(m1DbpCoefficients[0], Arrays.copyOfRange(m1DbpCoefficients, 1, m1DbpCoefficients.length), m1Features);
+            double[] m1SbpTerms = CsvFormatUtils.computeLinearTerms(m1SbpCoefficients[0], Arrays.copyOfRange(m1SbpCoefficients, 1, m1SbpCoefficients.length), m1Features);
+            double[] m1DbpTerms = CsvFormatUtils.computeLinearTerms(m1DbpCoefficients[0], Arrays.copyOfRange(m1DbpCoefficients, 1, m1DbpCoefficients.length), m1Features);
+            BPPostProcessor.Result m1PostResult = BPPostprocessReplay.getResult(m1PostResults, i);
 
             double m2A = i < recM2_A.size() ? recM2_A.get(i) : 0.0;
             double m2Hr = i < recM2_HR.size() ? recM2_HR.get(i) : 0.0;
@@ -2456,8 +2606,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             String m2FeatureClampReason = i < recM2_FeatureClampReason.size() ? recM2_FeatureClampReason.get(i) : "missing";
             String m2RejectReason = i < recM2_RejectReason.size() ? recM2_RejectReason.get(i) : "missing";
             double[] m2Features = new double[] { m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2StiffnessUsed, m2EUsed };
-            double[] m2SbpTerms = computeLinearTerms(m2SbpCoefficients[0], Arrays.copyOfRange(m2SbpCoefficients, 1, m2SbpCoefficients.length), m2Features);
-            double[] m2DbpTerms = computeLinearTerms(m2DbpCoefficients[0], Arrays.copyOfRange(m2DbpCoefficients, 1, m2DbpCoefficients.length), m2Features);
+            double[] m2SbpTerms = CsvFormatUtils.computeLinearTerms(m2SbpCoefficients[0], Arrays.copyOfRange(m2SbpCoefficients, 1, m2SbpCoefficients.length), m2Features);
+            double[] m2DbpTerms = CsvFormatUtils.computeLinearTerms(m2DbpCoefficients[0], Arrays.copyOfRange(m2DbpCoefficients, 1, m2DbpCoefficients.length), m2Features);
+            BPPostProcessor.Result m2PostResult = BPPostprocessReplay.getResult(m2PostResults, i);
             SinBPDistortionComparison.VariantResult m2EOnlyVariant =
                     SinBPDistortionComparison.estimateEOnly(m2A, m2Hr, m2V2p, m2P2v, m2E);
             SinBPDistortionComparison.VariantResult m2E2Variant =
@@ -2502,8 +2653,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             String m3FeatureClampReason = i < recM3_FeatureClampReason.size() ? recM3_FeatureClampReason.get(i) : "missing";
             String m3RejectReason = i < recM3_RejectReason.size() ? recM3_RejectReason.get(i) : "missing";
             double[] m3Features = new double[] { m3AUsed, m3HrUsed, m3MeanUsed, m3SinPhiUsed, m3CosPhiUsed };
-            double[] m3SbpTerms = computeLinearTerms(m3SbpCoefficients[0], Arrays.copyOfRange(m3SbpCoefficients, 1, m3SbpCoefficients.length), m3Features);
-            double[] m3DbpTerms = computeLinearTerms(m3DbpCoefficients[0], Arrays.copyOfRange(m3DbpCoefficients, 1, m3DbpCoefficients.length), m3Features);
+            double[] m3SbpTerms = CsvFormatUtils.computeLinearTerms(m3SbpCoefficients[0], Arrays.copyOfRange(m3SbpCoefficients, 1, m3SbpCoefficients.length), m3Features);
+            double[] m3DbpTerms = CsvFormatUtils.computeLinearTerms(m3DbpCoefficients[0], Arrays.copyOfRange(m3DbpCoefficients, 1, m3DbpCoefficients.length), m3Features);
+            BPPostProcessor.Result m3PostResult = BPPostprocessReplay.getResult(m3PostResults, i);
 
             csvContent.append(sessionId).append(", ")
                     .append(subjectId).append(", ")
@@ -2548,12 +2700,29 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(m1ClampApplied).append(", ")
                     .append(m1FeatureClampApplied).append(", ")
                     .append(m1OutputValid).append(", ")
-                    .append(sanitizeCsvText(m1FeatureClampReason)).append(", ")
-                    .append(sanitizeCsvText(m1RejectReason)).append(", ")
-                    .append(formatCoefficients(m1SbpCoefficients)).append(", ")
-                    .append(formatCoefficients(m1DbpCoefficients)).append(", ")
-                    .append(formatValues(m1SbpTerms)).append(", ")
-                    .append(formatValues(m1DbpTerms)).append(", ")
+                    .append(CsvFormatUtils.sanitizeCsvText(m1FeatureClampReason)).append(", ")
+                    .append(CsvFormatUtils.sanitizeCsvText(m1RejectReason)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m1PostResult.mapRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m1PostResult.ppRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m1PostResult.mapSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m1PostResult.ppSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m1PostResult.mapCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m1PostResult.ppCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m1PostResult.sbpSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m1PostResult.dbpSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m1PostResult.sbpCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m1PostResult.dbpCalibrated)).append(", ")
+                    .append(m1PostResult.postprocessApplied).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", m1PostCoefficients[0])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", m1PostCoefficients[1])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", m1PostCoefficients[2])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", m1PostCoefficients[3])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaMap())).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaPp())).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m1SbpCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m1DbpCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m1SbpTerms)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m1DbpTerms)).append(", ")
                     // Method2
                     .append(String.format(Locale.getDefault(), "%.4f", m2A)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", m2Hr)).append(", ")
@@ -2597,21 +2766,21 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(m2ClampApplied).append(", ")
                     .append(m2FeatureClampApplied).append(", ")
                     .append(m2OutputValid).append(", ")
-                    .append(sanitizeCsvText(m2FeatureClampReason)).append(", ")
-                    .append(sanitizeCsvText(m2RejectReason)).append(", ")
-                    .append(formatCoefficients(m2SbpCoefficients)).append(", ")
-                    .append(formatCoefficients(m2DbpCoefficients)).append(", ")
-                    .append(formatCoefficients(m2SbpBaseCoefficients)).append(", ")
-                    .append(formatCoefficients(m2DbpBaseCoefficients)).append(", ")
-                    .append(formatCoefficients(m2SbpCorrectionCoefficients)).append(", ")
-                    .append(formatCoefficients(m2DbpCorrectionCoefficients)).append(", ")
-                    .append(formatValues(m2SbpTerms)).append(", ")
-                    .append(formatValues(m2DbpTerms)).append(", ");
-            appendVariantValues(csvContent, m2EOnlyVariant);
+                    .append(CsvFormatUtils.sanitizeCsvText(m2FeatureClampReason)).append(", ")
+                    .append(CsvFormatUtils.sanitizeCsvText(m2RejectReason)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2SbpCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2DbpCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2SbpBaseCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2DbpBaseCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2SbpCorrectionCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2DbpCorrectionCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m2SbpTerms)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m2DbpTerms)).append(", ");
+            CsvFormatUtils.appendVariantValues(csvContent, m2EOnlyVariant);
             csvContent.append(", ");
-            appendVariantValues(csvContent, m2E2Variant);
+            CsvFormatUtils.appendVariantValues(csvContent, m2E2Variant);
             csvContent.append(", ");
-            appendVariantValues(csvContent, m2LocalAVariant);
+            CsvFormatUtils.appendVariantValues(csvContent, m2LocalAVariant);
             csvContent.append(", ")
                     // Method3 (SinBP_M)
                     .append(String.format(Locale.getDefault(), "%.4f", m3A)).append(", ")
@@ -2648,12 +2817,29 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(m3ClampApplied).append(", ")
                     .append(m3FeatureClampApplied).append(", ")
                     .append(m3OutputValid).append(", ")
-                    .append(sanitizeCsvText(m3FeatureClampReason)).append(", ")
-                    .append(sanitizeCsvText(m3RejectReason)).append(", ")
-                    .append(formatCoefficients(m3SbpCoefficients)).append(", ")
-                    .append(formatCoefficients(m3DbpCoefficients)).append(", ")
-                    .append(formatValues(m3SbpTerms)).append(", ")
-                    .append(formatValues(m3DbpTerms))
+                    .append(CsvFormatUtils.sanitizeCsvText(m3FeatureClampReason)).append(", ")
+                    .append(CsvFormatUtils.sanitizeCsvText(m3RejectReason)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m3PostResult.mapRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m3PostResult.ppRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m3PostResult.mapSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m3PostResult.ppSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m3PostResult.mapCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m3PostResult.ppCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m3PostResult.sbpSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m3PostResult.dbpSmoothed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m3PostResult.sbpCalibrated)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m3PostResult.dbpCalibrated)).append(", ")
+                    .append(m3PostResult.postprocessApplied).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", m3PostCoefficients[0])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", m3PostCoefficients[1])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", m3PostCoefficients[2])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", m3PostCoefficients[3])).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaMap())).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaPp())).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m3SbpCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m3DbpCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m3SbpTerms)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m3DbpTerms))
                     .append("\n");
         }
 
@@ -2676,115 +2862,6 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         // PCにも保存（mode-1の場合）
         saveToPCIfConnected(name, name + "_Training_Data.csv", csvContent.toString(), isMode1);
         }
-    }
-
-    private String formatCoefficients(double[] coefficients) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < coefficients.length; i++) {
-            if (i > 0) {
-                builder.append(", ");
-            }
-            builder.append(String.format(Locale.US, "%.10f", coefficients[i]));
-        }
-        return builder.toString();
-    }
-
-    private String formatValues(double[] values) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < values.length; i++) {
-            if (i > 0) {
-                builder.append(", ");
-            }
-            builder.append(String.format(Locale.US, "%.10f", values[i]));
-        }
-        return builder.toString();
-    }
-
-    private void appendVariantHeader(StringBuilder csvContent, String prefix, String[] labels) {
-        List<String> columns = new ArrayList<>();
-        columns.add(prefix + "_SBP");
-        columns.add(prefix + "_DBP");
-        columns.add(prefix + "_SBP_raw");
-        columns.add(prefix + "_DBP_raw");
-        columns.add(prefix + "_SBP_base");
-        columns.add(prefix + "_DBP_base");
-        columns.add(prefix + "_SBP_correction");
-        columns.add(prefix + "_DBP_correction");
-        columns.add(prefix + "_A_used");
-        columns.add(prefix + "_E_used");
-        columns.add(prefix + "_Stiffness_used");
-        columns.add(prefix + "_constraint_applied");
-        columns.add(prefix + "_clamp_applied");
-        columns.add(prefix + "_feature_clamp_applied");
-        columns.add(prefix + "_output_valid");
-        columns.add(prefix + "_feature_clamp_reason");
-        columns.add(prefix + "_reject_reason");
-        for (String label : labels) {
-            columns.add(prefix + "_SBP_coef_" + label);
-        }
-        for (String label : labels) {
-            columns.add(prefix + "_DBP_coef_" + label);
-        }
-        for (String label : labels) {
-            columns.add(prefix + "_SBP_term_" + label);
-        }
-        for (String label : labels) {
-            columns.add(prefix + "_DBP_term_" + label);
-        }
-        csvContent.append(String.join(", ", columns));
-    }
-
-    private void appendVariantValues(
-            StringBuilder csvContent,
-            SinBPDistortionComparison.VariantResult variant) {
-        List<String> values = new ArrayList<>();
-        values.add(String.format(Locale.getDefault(), "%.2f", variant.sbp));
-        values.add(String.format(Locale.getDefault(), "%.2f", variant.dbp));
-        values.add(String.format(Locale.getDefault(), "%.2f", variant.rawSbp));
-        values.add(String.format(Locale.getDefault(), "%.2f", variant.rawDbp));
-        values.add(String.format(Locale.getDefault(), "%.2f", variant.baseSbp));
-        values.add(String.format(Locale.getDefault(), "%.2f", variant.baseDbp));
-        values.add(String.format(Locale.getDefault(), "%.2f", variant.sbpCorrection));
-        values.add(String.format(Locale.getDefault(), "%.2f", variant.dbpCorrection));
-        values.add(String.format(Locale.getDefault(), "%.4f", variant.amplitudeUsed));
-        values.add(String.format(Locale.getDefault(), "%.4f", variant.distortionUsed));
-        values.add(String.format(Locale.getDefault(), "%.4f", variant.stiffnessUsed));
-        values.add(String.valueOf(variant.constraintApplied));
-        values.add(String.valueOf(variant.clampApplied));
-        values.add(String.valueOf(variant.featureClampApplied));
-        values.add(String.valueOf(variant.outputValid));
-        values.add(sanitizeCsvText(normalizeRejectReason(variant.featureClampReason)));
-        values.add(sanitizeCsvText(normalizeRejectReason(variant.rejectReason)));
-        values.add(formatCoefficients(variant.sbpCoefficients));
-        values.add(formatCoefficients(variant.dbpCoefficients));
-        values.add(formatValues(variant.sbpTerms));
-        values.add(formatValues(variant.dbpTerms));
-        csvContent.append(String.join(", ", values));
-    }
-
-    private double[] computeLinearTerms(double intercept, double[] coefficients, double[] features) {
-        double[] terms = new double[coefficients.length + 1];
-        terms[0] = intercept;
-        for (int i = 0; i < coefficients.length && i < features.length; i++) {
-            terms[i + 1] = coefficients[i] * features[i];
-        }
-        return terms;
-    }
-
-    private String normalizeRejectReason(String reason) {
-        if (reason == null) {
-            return "missing";
-        }
-        String trimmed = reason.trim();
-        return trimmed.isEmpty() ? "ok" : trimmed;
-    }
-
-    private String sanitizeCsvText(String value) {
-        if (value == null) {
-            return "";
-        }
-        String sanitized = value.replace(",", "_").replace("\n", "_").replace("\r", "_");
-        return sanitized;
     }
 
     // ===== カメラ操作 =====

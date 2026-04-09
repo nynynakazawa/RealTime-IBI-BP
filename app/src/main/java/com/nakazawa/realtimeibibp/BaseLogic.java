@@ -1,6 +1,7 @@
 package com.nakazawa.realtimeibibp;
 
 import android.util.Log;
+import com.nakazawa.realtimeibibp.bp.PeakInterpolationUtils;
 import java.util.ArrayList;
 import java.util.Locale;
 
@@ -176,8 +177,9 @@ public abstract class BaseLogic implements LogicProcessor {
                 && isPrimaryPeakCandidate(previous1)) {
             framesSinceLastPeak = 0;
             long currentTime = System.currentTimeMillis();
+            long candidatePeakTime = interpolatePeakTimeMs(previous2, previous1, currentVal, currentTime);
             if (lastPeakTime != 0) {
-                double interval = (currentTime - lastPeakTime) / 1000.0;
+                double interval = (candidatePeakTime - lastPeakTime) / 1000.0;
                 if (interval >= MIN_HEART_INTERVAL_S && interval <= MAX_HEART_INTERVAL_S) {
                     double bpm = 60.0 / interval;
                     double candidateIbi = interval * 1000.0;
@@ -197,7 +199,7 @@ public abstract class BaseLogic implements LogicProcessor {
                     } else {
                         IBI = candidateIbi;
                     }
-                    lastPeakTime = currentTime;
+                    lastPeakTime = candidatePeakTime;
                     updateCount++;
                     // 心拍数とSDを更新
                     if (bpmValue > 0) {
@@ -216,10 +218,16 @@ public abstract class BaseLogic implements LogicProcessor {
                     return new LogicResult(currentVal, IBI, bpmValue, bpmSD);
                 }
             }
-            lastPeakTime = System.currentTimeMillis();
+            lastPeakTime = candidatePeakTime;
         }
         framesSinceLastPeak++;
         return null; // 心拍数が検出されなかった場合
+    }
+
+    protected long interpolatePeakTimeMs(double left, double center, double right, long currentFrameTimeMs) {
+        double frameDurationMs = 1000.0 / DETECTION_FRAME_RATE;
+        long candidateBaseTimeMs = Math.round(currentFrameTimeMs - frameDurationMs);
+        return PeakInterpolationUtils.interpolatePeakTimeMs(left, center, right, candidateBaseTimeMs, DETECTION_FRAME_RATE);
     }
 
     private int getAdaptiveRefractoryFrames() {

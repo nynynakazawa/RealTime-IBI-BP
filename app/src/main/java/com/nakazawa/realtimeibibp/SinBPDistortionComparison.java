@@ -1,5 +1,6 @@
 package com.nakazawa.realtimeibibp;
 
+import com.nakazawa.realtimeibibp.bp.FeatureClampUtils;
 import java.util.Locale;
 
 /**
@@ -130,14 +131,19 @@ public final class SinBPDistortionComparison {
         }
 
         StringBuilder featureClampReason = new StringBuilder();
-        double usedAmplitude = clampFeature("A", amplitude, A_SUPPORT_MIN, A_SUPPORT_MAX, featureClampReason);
-        double usedHr = clampFeature("HR", hr, HR_SUPPORT_MIN, HR_SUPPORT_MAX, featureClampReason);
-        double usedV2p = clampFeature("V2P_relTTP", valleyToPeakRelTTP, V2P_SUPPORT_MIN, V2P_SUPPORT_MAX, featureClampReason);
-        double usedP2v = clampFeature("P2V_relTTP", peakToValleyRelTTP, P2V_SUPPORT_MIN, P2V_SUPPORT_MAX, featureClampReason);
-        double usedE = clampUpperFeature("E", distortion, E_SUPPORT_MAX, featureClampReason);
+        double usedAmplitude = FeatureClampUtils.clampFeature(
+                "A", amplitude, A_SUPPORT_MIN, A_SUPPORT_MAX, featureClampReason);
+        double usedHr = FeatureClampUtils.clampFeature(
+                "HR", hr, HR_SUPPORT_MIN, HR_SUPPORT_MAX, featureClampReason);
+        double usedV2p = FeatureClampUtils.clampFeature(
+                "V2P_relTTP", valleyToPeakRelTTP, V2P_SUPPORT_MIN, V2P_SUPPORT_MAX, featureClampReason);
+        double usedP2v = FeatureClampUtils.clampFeature(
+                "P2V_relTTP", peakToValleyRelTTP, P2V_SUPPORT_MIN, P2V_SUPPORT_MAX, featureClampReason);
+        double usedE = FeatureClampUtils.clampUpperFeature(
+                "E", distortion, E_SUPPORT_MAX, featureClampReason);
         double usedStiffness = 0.0;
         if (useStiffness) {
-            usedStiffness = clampUpperFeature(
+            usedStiffness = FeatureClampUtils.clampUpperFeature(
                     "Stiffness",
                     usedE * Math.sqrt(Math.max(usedAmplitude, 0.0)),
                     STIFFNESS_SUPPORT_MAX,
@@ -145,7 +151,7 @@ public final class SinBPDistortionComparison {
         }
         int featureClampApplied = featureClampReason.length() > 0 ? 1 : 0;
         String featureClampText = featureClampReason.length() > 0 ? featureClampReason.toString() : "ok";
-        if (countFeatureClampSegments(featureClampReason) > MAX_ALLOWED_FEATURE_CLAMPS) {
+        if (FeatureClampUtils.countFeatureClampSegments(featureClampReason) > MAX_ALLOWED_FEATURE_CLAMPS) {
             return rejected(methodName, labels, "feature_support_violation", featureClampApplied, featureClampText);
         }
 
@@ -406,61 +412,6 @@ public final class SinBPDistortionComparison {
                 dbpCoefficients,
                 sbpTerms,
                 dbpTerms);
-    }
-
-    private static double clampFeature(
-            String name,
-            double value,
-            double minValue,
-            double maxValue,
-            StringBuilder reasonBuilder) {
-        double clamped = value;
-        if (Double.isNaN(value)) {
-            clamped = minValue;
-            appendClampReason(reasonBuilder, String.format(Locale.US, "%s:NaN->%.4f", name, clamped));
-            return clamped;
-        }
-        if (value < minValue) {
-            clamped = minValue;
-        } else if (value > maxValue) {
-            clamped = maxValue;
-        }
-        if (Math.abs(clamped - value) > 1e-9) {
-            appendClampReason(reasonBuilder, String.format(Locale.US, "%s:%.4f->%.4f", name, value, clamped));
-        }
-        return clamped;
-    }
-
-    private static double clampUpperFeature(
-            String name,
-            double value,
-            double maxValue,
-            StringBuilder reasonBuilder) {
-        double clamped = value;
-        if (Double.isNaN(value)) {
-            clamped = 0.0;
-            appendClampReason(reasonBuilder, String.format(Locale.US, "%s:NaN->%.4f", name, clamped));
-            return clamped;
-        }
-        if (value > maxValue) {
-            clamped = maxValue;
-            appendClampReason(reasonBuilder, String.format(Locale.US, "%s:%.4f->%.4f", name, value, clamped));
-        }
-        return clamped;
-    }
-
-    private static void appendClampReason(StringBuilder reasonBuilder, String reason) {
-        if (reasonBuilder.length() > 0) {
-            reasonBuilder.append("; ");
-        }
-        reasonBuilder.append(reason);
-    }
-
-    private static int countFeatureClampSegments(StringBuilder reasonBuilder) {
-        if (reasonBuilder.length() == 0) {
-            return 0;
-        }
-        return reasonBuilder.toString().split(";").length;
     }
 
     private static double[] computeLinearTerms(double[] coefficients, double[] features) {

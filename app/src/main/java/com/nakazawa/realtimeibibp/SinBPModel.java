@@ -1,13 +1,13 @@
 package com.nakazawa.realtimeibibp;
 
 import android.util.Log;
+import com.nakazawa.realtimeibibp.bp.FeatureClampUtils;
+import com.nakazawa.realtimeibibp.bp.PeakInterpolationUtils;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
-import java.util.stream.Collectors;
 
 /**
  * Sin波モデルベースのリアルタイム血圧推定器（SBP/DBP）
@@ -99,10 +99,24 @@ public class SinBPModel {
     private double lastSinDBP = 0;
     private double lastSinSBPAvg = 0;
     private double lastSinDBPAvg = 0;
+    private double lastDisplayedSinSBP = 0;
+    private double lastDisplayedSinDBP = 0;
+    private double lastDisplayedSinSBPAvg = 0;
+    private double lastDisplayedSinDBPAvg = 0;
+    private double lastMapRaw = 0;
+    private double lastPpRaw = 0;
+    private double lastMapSmoothed = 0;
+    private double lastPpSmoothed = 0;
+    private double lastMapCalibrated = 0;
+    private double lastPpCalibrated = 0;
+    private int lastPostprocessApplied = 0;
 
     // 平均用履歴
     private final Deque<Double> sinSbpHist = new ArrayDeque<>(AVG_BEATS);
     private final Deque<Double> sinDbpHist = new ArrayDeque<>(AVG_BEATS);
+    private final Deque<Double> displayedSbpHist = new ArrayDeque<>(AVG_BEATS);
+    private final Deque<Double> displayedDbpHist = new ArrayDeque<>(AVG_BEATS);
+    private final BPPostProcessor postProcessor = new BPPostProcessor(BPPostProcessor.Method.SIN_BP_M);
 
     // ISO管理
     private int currentISO = 600;
@@ -240,6 +254,7 @@ public class SinBPModel {
 
         // 移動窓での最大値チェック（前後3フレーム）
         Double[] recent = ppgBuffer.toArray(new Double[0]);
+        Long[] recentTimes = timeBuffer.toArray(new Long[0]);
         int idx = recent.length - 4; // 中央
 
         if (idx < 3 || idx >= recent.length - 3) {
@@ -255,10 +270,25 @@ public class SinBPModel {
             }
         }
 
-        Long[] recentTimes = timeBuffer.toArray(new Long[0]);
         if (isPeak && isProminentPeak(recent, idx)) {
-            processPeak(recent[idx], recentTimes[idx]);
+            long interpolatedPeakTime = interpolatePeakTimeMs(recent, recentTimes, idx, currentTime);
+            processPeak(recent[idx], interpolatedPeakTime);
         }
+    }
+
+    private long interpolatePeakTimeMs(Double[] recent, Long[] recentTimes, int peakIndex, long currentTimeMs) {
+        double left = recent[peakIndex - 1];
+        double center = recent[peakIndex];
+        double right = recent[peakIndex + 1];
+        double frameDurationMs = 1000.0 / Math.max(frameRate, 1);
+        long baseTime = Math.round(currentTimeMs - 3.0 * frameDurationMs);
+        if (recentTimes != null && peakIndex >= 0 && peakIndex < recentTimes.length && recentTimes[peakIndex] != null) {
+            long candidate = recentTimes[peakIndex];
+            if (Math.abs(candidate - currentTimeMs) <= frameDurationMs * 4.0) {
+                baseTime = candidate;
+            }
+        }
+        return PeakInterpolationUtils.interpolatePeakTimeMs(left, center, right, baseTime, frameRate);
     }
 
     private long getAdaptiveRefractoryPeriodMs() {
@@ -507,12 +537,12 @@ public class SinBPModel {
         }
 
         StringBuilder featureClampReason = new StringBuilder();
-        double usedA = clampFeature("A", currentA, A_SUPPORT_MIN, A_SUPPORT_MAX, featureClampReason);
-        double usedHr = clampFeature("HR", hr, HR_SUPPORT_MIN, HR_SUPPORT_MAX, featureClampReason);
-        double usedMean = clampFeature("Mean", currentMean, MEAN_SUPPORT_MIN, MEAN_SUPPORT_MAX, featureClampReason);
-        double usedSinPhi = clampFeature(
+        double usedA = FeatureClampUtils.clampFeature("A", currentA, A_SUPPORT_MIN, A_SUPPORT_MAX, featureClampReason);
+        double usedHr = FeatureClampUtils.clampFeature("HR", hr, HR_SUPPORT_MIN, HR_SUPPORT_MAX, featureClampReason);
+        double usedMean = FeatureClampUtils.clampFeature("Mean", currentMean, MEAN_SUPPORT_MIN, MEAN_SUPPORT_MAX, featureClampReason);
+        double usedSinPhi = FeatureClampUtils.clampFeature(
                 "sinPhi", currentSinPhi, SIN_PHI_SUPPORT_MIN, SIN_PHI_SUPPORT_MAX, featureClampReason);
-        double usedCosPhi = clampFeature(
+        double usedCosPhi = FeatureClampUtils.clampFeature(
                 "cosPhi", currentCosPhi, COS_PHI_SUPPORT_MIN, COS_PHI_SUPPORT_MAX, featureClampReason);
         currentUsedA = usedA;
         currentUsedHR = usedHr;
@@ -521,7 +551,7 @@ public class SinBPModel {
         currentUsedCosPhi = usedCosPhi;
         currentFeatureClampApplied = featureClampReason.length() > 0 ? 1 : 0;
         currentFeatureClampReason = featureClampReason.length() > 0 ? featureClampReason.toString() : "ok";
-        if (countFeatureClampSegments(featureClampReason) > MAX_ALLOWED_FEATURE_CLAMPS) {
+        if (FeatureClampUtils.countFeatureClampSegments(featureClampReason) > MAX_ALLOWED_FEATURE_CLAMPS) {
             currentRejectReason = "feature_support_violation";
             return;
         }
@@ -587,6 +617,19 @@ public class SinBPModel {
         lastSinSBP = sbp;
         lastSinDBP = dbp;
 
+        BPPostProcessor.Result postprocess = postProcessor.apply(sbp, dbp);
+        lastMapRaw = postprocess.mapRaw;
+        lastPpRaw = postprocess.ppRaw;
+        lastMapSmoothed = postprocess.mapSmoothed;
+        lastPpSmoothed = postprocess.ppSmoothed;
+        lastMapCalibrated = postprocess.mapCalibrated;
+        lastPpCalibrated = postprocess.ppCalibrated;
+        lastPostprocessApplied = postprocess.postprocessApplied;
+        double displayedSbp = postprocess.postprocessApplied == 1 ? postprocess.sbpCalibrated : sbp;
+        double displayedDbp = postprocess.postprocessApplied == 1 ? postprocess.dbpCalibrated : dbp;
+        lastDisplayedSinSBP = displayedSbp;
+        lastDisplayedSinDBP = displayedDbp;
+
         // 履歴に追加
         sinSbpHist.addLast(sbp);
         if (sinSbpHist.size() > AVG_BEATS) {
@@ -597,21 +640,33 @@ public class SinBPModel {
         if (sinDbpHist.size() > AVG_BEATS) {
             sinDbpHist.pollFirst();
         }
+        displayedSbpHist.addLast(displayedSbp);
+        if (displayedSbpHist.size() > AVG_BEATS) {
+            displayedSbpHist.pollFirst();
+        }
+        displayedDbpHist.addLast(displayedDbp);
+        if (displayedDbpHist.size() > AVG_BEATS) {
+            displayedDbpHist.pollFirst();
+        }
 
         // ロバスト平均計算
         double sbpAvg = SignalProcessingUtils.robustAverage(sinSbpHist);
         double dbpAvg = SignalProcessingUtils.robustAverage(sinDbpHist);
+        double displayedSbpAvg = SignalProcessingUtils.robustAverage(displayedSbpHist);
+        double displayedDbpAvg = SignalProcessingUtils.robustAverage(displayedDbpHist);
 
         lastSinSBPAvg = sbpAvg;
         lastSinDBPAvg = dbpAvg;
+        lastDisplayedSinSBPAvg = displayedSbpAvg;
+        lastDisplayedSinDBPAvg = displayedDbpAvg;
 
         Log.d(TAG + "-Average", String.format(
-                "Averaged BP: SBP_avg=%.1f, DBP_avg=%.1f (history size: %d)",
-                sbpAvg, dbpAvg, sinSbpHist.size()));
+                "Averaged BP: raw=%.1f/%.1f displayed=%.1f/%.1f (history size: %d)",
+                sbpAvg, dbpAvg, displayedSbpAvg, displayedDbpAvg, sinSbpHist.size()));
 
         // リスナー通知
         if (listener != null) {
-            listener.onSinBPModelUpdated(sbp, dbp, sbpAvg, dbpAvg);
+            listener.onSinBPModelUpdated(displayedSbp, displayedDbp, displayedSbpAvg, displayedDbpAvg);
         }
     }
 
@@ -624,6 +679,10 @@ public class SinBPModel {
         lastSinDBP = 0;
         lastSinSBPAvg = 0;
         lastSinDBPAvg = 0;
+        lastDisplayedSinSBP = 0;
+        lastDisplayedSinDBP = 0;
+        lastDisplayedSinSBPAvg = 0;
+        lastDisplayedSinDBPAvg = 0;
         Log.d(TAG, "SinBPModel initialized");
     }
 
@@ -635,6 +694,9 @@ public class SinBPModel {
         timeBuffer.clear();
         sinSbpHist.clear();
         sinDbpHist.clear();
+        displayedSbpHist.clear();
+        displayedDbpHist.clear();
+        postProcessor.reset();
 
         lastPeakValue = 0;
         lastPeakTime = 0;
@@ -650,6 +712,17 @@ public class SinBPModel {
         lastSinDBP = 0;
         lastSinSBPAvg = 0;
         lastSinDBPAvg = 0;
+        lastDisplayedSinSBP = 0;
+        lastDisplayedSinDBP = 0;
+        lastDisplayedSinSBPAvg = 0;
+        lastDisplayedSinDBPAvg = 0;
+        lastMapRaw = 0;
+        lastPpRaw = 0;
+        lastMapSmoothed = 0;
+        lastPpSmoothed = 0;
+        lastMapCalibrated = 0;
+        lastPpCalibrated = 0;
+        lastPostprocessApplied = 0;
         lastValidIBI = 0;
         currentFitAComponent = 0;
         currentFitBComponent = 0;
@@ -733,6 +806,22 @@ public class SinBPModel {
 
     public double getLastSinDBPAvg() {
         return lastSinDBPAvg;
+    }
+
+    public double getLastDisplayedSinSBP() {
+        return lastDisplayedSinSBP;
+    }
+
+    public double getLastDisplayedSinDBP() {
+        return lastDisplayedSinDBP;
+    }
+
+    public double getLastDisplayedSinSBPAvg() {
+        return lastDisplayedSinSBPAvg;
+    }
+
+    public double getLastDisplayedSinDBPAvg() {
+        return lastDisplayedSinDBPAvg;
     }
 
     // 学習用CSV出力のための特徴量取得メソッド
@@ -868,28 +957,32 @@ public class SinBPModel {
         return currentFeatureClampReason;
     }
 
-    private static double clampFeature(String label, double value, double lo, double hi, StringBuilder reason) {
-        double clamped = SignalProcessingUtils.clamp(value, lo, hi);
-        if (Math.abs(clamped - value) > 1e-9) {
-            if (reason.length() > 0) {
-                reason.append("|");
-            }
-            reason.append(label).append(":")
-                    .append(String.format(Locale.US, "%.4f->%.4f", value, clamped));
-        }
-        return clamped;
+    public double getLastMapRaw() {
+        return lastMapRaw;
     }
 
-    private static int countFeatureClampSegments(CharSequence reason) {
-        if (reason == null || reason.length() == 0) {
-            return 0;
-        }
-        int count = 1;
-        for (int i = 0; i < reason.length(); i++) {
-            if (reason.charAt(i) == '|') {
-                count++;
-            }
-        }
-        return count;
+    public double getLastPpRaw() {
+        return lastPpRaw;
     }
+
+    public double getLastMapSmoothed() {
+        return lastMapSmoothed;
+    }
+
+    public double getLastPpSmoothed() {
+        return lastPpSmoothed;
+    }
+
+    public double getLastMapCalibrated() {
+        return lastMapCalibrated;
+    }
+
+    public double getLastPpCalibrated() {
+        return lastPpCalibrated;
+    }
+
+    public int getLastPostprocessApplied() {
+        return lastPostprocessApplied;
+    }
+
 }
