@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
  * 2. 振幅A、周期IBI（実測peak-to-peak）を抽出
  * 3. 歪み指標Eで理想非対称サイン波形からの外れを評価
  * 4. BaseLogicからRTBP特徴量（A・HR・relTTP）を取得
- * 5. 線形回帰で RTBP features + residual E からBPを推定
+ * 5. Stiffness_sin = E√A を計算し、RTBP base を残差補正する
  * 
  * 非対称サイン波モデル（理論的背景）：
  * - t=0でピーク、谷までが2/3T（拡張期）、谷から次のピークまでが1/3T（収縮期）
@@ -90,6 +90,12 @@ public class SinBPDistortion {
     private double currentUsedValleyToPeakRelTTP = 0;
     private double currentUsedPeakToValleyRelTTP = 0;
     private double currentUsedDistortion = 0;
+    private double currentStiffnessSin = 0;
+    private double currentUsedStiffnessSin = 0;
+    private double currentBaseSbp = 0;
+    private double currentBaseDbp = 0;
+    private double currentSbpCorrection = 0;
+    private double currentDbpCorrection = 0;
     private int currentFeatureClampApplied = 0;
     private String currentFeatureClampReason = "init";
     private String currentRejectReason = "init";
@@ -113,24 +119,17 @@ public class SinBPDistortion {
     // フレームレート
     private int frameRate = 30;
 
-    // 固定係数（2026-03-18時点、PPTXロジック整合版）
-    // 注意: 振幅AはLogic1で正規化された値（0-10範囲）を使用
-    // 2025-11-22評価結果より最適化（SinBP_D係数）
-    // PPTX発表資料に合わせた SinBP(D) = RTBP features + E
-    // SBP: ALPHA0 + ALPHA1*A + ALPHA2*HR + ALPHA3*V2P_relTTP + ALPHA4*P2V_relTTP + ALPHA5*E
-    private static final double ALPHA0 = 84.35966783913528; // intercept
-    private static final double ALPHA1 = 1.4380416150092454; // raw amplitude (RTBP A)
-    private static final double ALPHA2 = -0.17496518103590775; // HR
-    private static final double ALPHA3 = 37.5562372225141; // V2P_relTTP
-    private static final double ALPHA4 = -23.202992904621805; // P2V_relTTP
-    private static final double ALPHA5 = 13.061600306485024; // residual E
-    // DBP: BETA0 + BETA1*A + BETA2*HR + BETA3*V2P_relTTP + BETA4*P2V_relTTP + BETA5*E
-    private static final double BETA0 = 31.1337382399846; // intercept
-    private static final double BETA1 = 2.6094510034965035; // raw amplitude (RTBP A)
-    private static final double BETA2 = 0.24212419864020945; // HR
-    private static final double BETA3 = 62.88226696234021; // V2P_relTTP
-    private static final double BETA4 = -19.577300435396946; // P2V_relTTP
-    private static final double BETA5 = 10.236851183332778; // residual E
+    // 固定係数（2026-04-09時点）
+    // SinBP(D) は RTBP を第1段の base とし、第2段で Stiffness_sin = E√A と E を加える。
+    // 補正係数は prepared_training_data.csv 上で RTBP 残差を [Stiffness_sin, E] に回帰して得た。
+    private static final double[] RTBP_SBP_BASE = RealtimeBP.getSbpCoefficients();
+    private static final double[] RTBP_DBP_BASE = RealtimeBP.getDbpCoefficients();
+    private static final double GAMMA0 = 2.690652753209871;
+    private static final double GAMMA1 = 2.537295192342401;
+    private static final double GAMMA2 = -1.807192089982415;
+    private static final double DELTA0 = 13.061043372954417;
+    private static final double DELTA1 = 2.632014752144330;
+    private static final double DELTA2 = -4.290118500197587;
 
     // prepared_training_data.csv から求めた支持域。
     // A / HR / relTTP は 1-99 percentile を使用する。
@@ -144,16 +143,52 @@ public class SinBPDistortion {
     private static final double V2P_SUPPORT_MAX = -0.270672;
     private static final double P2V_SUPPORT_MIN = -0.859316;
     private static final double P2V_SUPPORT_MAX = -0.272260;
-    private static final double E_SUPPORT_MIN = 2.741920;
-    private static final double E_SUPPORT_MAX = 4.491780;
+    private static final double E_SUPPORT_MAX = 4.810248;
+    private static final double STIFFNESS_SUPPORT_MAX = 10.860692;
     private static final int MAX_ALLOWED_FEATURE_CLAMPS = 1;
 
     public static double[] getSbpCoefficients() {
-        return new double[] { ALPHA0, ALPHA1, ALPHA2, ALPHA3, ALPHA4, ALPHA5 };
+        return new double[] {
+                RTBP_SBP_BASE[0] + GAMMA0,
+                RTBP_SBP_BASE[1],
+                RTBP_SBP_BASE[2],
+                RTBP_SBP_BASE[3],
+                RTBP_SBP_BASE[4],
+                GAMMA1,
+                GAMMA2
+        };
     }
 
     public static double[] getDbpCoefficients() {
-        return new double[] { BETA0, BETA1, BETA2, BETA3, BETA4, BETA5 };
+        return new double[] {
+                RTBP_DBP_BASE[0] + DELTA0,
+                RTBP_DBP_BASE[1],
+                RTBP_DBP_BASE[2],
+                RTBP_DBP_BASE[3],
+                RTBP_DBP_BASE[4],
+                DELTA1,
+                DELTA2
+        };
+    }
+
+    public static double[] getSbpBaseCoefficients() {
+        return new double[] {
+                RTBP_SBP_BASE[0], RTBP_SBP_BASE[1], RTBP_SBP_BASE[2], RTBP_SBP_BASE[3], RTBP_SBP_BASE[4]
+        };
+    }
+
+    public static double[] getDbpBaseCoefficients() {
+        return new double[] {
+                RTBP_DBP_BASE[0], RTBP_DBP_BASE[1], RTBP_DBP_BASE[2], RTBP_DBP_BASE[3], RTBP_DBP_BASE[4]
+        };
+    }
+
+    public static double[] getSbpCorrectionCoefficients() {
+        return new double[] { GAMMA0, GAMMA1, GAMMA2 };
+    }
+
+    public static double[] getDbpCorrectionCoefficients() {
+        return new double[] { DELTA0, DELTA1, DELTA2 };
     }
 
     // 理想曲線データ（UI表示用）
@@ -404,6 +439,12 @@ public class SinBPDistortion {
         currentUsedValleyToPeakRelTTP = 0;
         currentUsedPeakToValleyRelTTP = 0;
         currentUsedDistortion = 0;
+        currentStiffnessSin = 0;
+        currentUsedStiffnessSin = 0;
+        currentBaseSbp = 0;
+        currentBaseDbp = 0;
+        currentSbpCorrection = 0;
+        currentDbpCorrection = 0;
         currentFeatureClampApplied = 0;
         currentFeatureClampReason = "ok";
         currentRawSbp = 0;
@@ -723,7 +764,7 @@ public class SinBPDistortion {
             hr = 60000.0 / ibi; // フォールバック
         }
 
-        // PPTXの説明に合わせて RTBP features + E を使用
+        // SinBP(D) は RTBP features を base とし、Stiffness_sin と E で補正する。
         double valleyToPeakRelTTP = (logicRef != null) ? logicRef.averageValleyToPeakRelTTP : 0.0;
         double peakToValleyRelTTP = (logicRef != null) ? logicRef.averagePeakToValleyRelTTP : 0.0;
         double regressionAmplitude = (logicRef != null) ? logicRef.averageValleyToPeakAmplitude : 0.0;
@@ -745,11 +786,17 @@ public class SinBPDistortion {
         double usedPeakToValleyRelTTP = clampFeature(
                 "P2V_relTTP", peakToValleyRelTTP, P2V_SUPPORT_MIN, P2V_SUPPORT_MAX, featureClampReason);
         double usedE = clampUpperFeature("E", E, E_SUPPORT_MAX, featureClampReason);
+        double stiffnessSin = E * Math.sqrt(Math.max(regressionAmplitude, 0.0));
+        double usedStiffnessSin = clampUpperFeature(
+                "Stiffness", usedE * Math.sqrt(Math.max(usedRegressionAmplitude, 0.0)),
+                STIFFNESS_SUPPORT_MAX, featureClampReason);
         currentUsedRegressionAmplitude = usedRegressionAmplitude;
         currentUsedHR = usedHr;
         currentUsedValleyToPeakRelTTP = usedValleyToPeakRelTTP;
         currentUsedPeakToValleyRelTTP = usedPeakToValleyRelTTP;
         currentUsedDistortion = usedE;
+        currentStiffnessSin = stiffnessSin;
+        currentUsedStiffnessSin = usedStiffnessSin;
         currentFeatureClampApplied = featureClampReason.length() > 0 ? 1 : 0;
         currentFeatureClampReason = featureClampReason.length() > 0 ? featureClampReason.toString() : "ok";
         if (countFeatureClampSegments(featureClampReason) > MAX_ALLOWED_FEATURE_CLAMPS) {
@@ -757,13 +804,19 @@ public class SinBPDistortion {
             return;
         }
 
-        double sbpRefined = ALPHA0 + ALPHA1 * usedRegressionAmplitude + ALPHA2 * usedHr +
-                ALPHA3 * usedValleyToPeakRelTTP + ALPHA4 * usedPeakToValleyRelTTP +
-                ALPHA5 * usedE;
+        double sbpBase = RTBP_SBP_BASE[0] + RTBP_SBP_BASE[1] * usedRegressionAmplitude + RTBP_SBP_BASE[2] * usedHr +
+                RTBP_SBP_BASE[3] * usedValleyToPeakRelTTP + RTBP_SBP_BASE[4] * usedPeakToValleyRelTTP;
+        double dbpBase = RTBP_DBP_BASE[0] + RTBP_DBP_BASE[1] * usedRegressionAmplitude + RTBP_DBP_BASE[2] * usedHr +
+                RTBP_DBP_BASE[3] * usedValleyToPeakRelTTP + RTBP_DBP_BASE[4] * usedPeakToValleyRelTTP;
+        double sbpCorrection = GAMMA0 + GAMMA1 * usedStiffnessSin + GAMMA2 * usedE;
+        double dbpCorrection = DELTA0 + DELTA1 * usedStiffnessSin + DELTA2 * usedE;
+        currentBaseSbp = sbpBase;
+        currentBaseDbp = dbpBase;
+        currentSbpCorrection = sbpCorrection;
+        currentDbpCorrection = dbpCorrection;
 
-        double dbpRefined = BETA0 + BETA1 * usedRegressionAmplitude + BETA2 * usedHr +
-                BETA3 * usedValleyToPeakRelTTP + BETA4 * usedPeakToValleyRelTTP +
-                BETA5 * usedE;
+        double sbpRefined = sbpBase + sbpCorrection;
+        double dbpRefined = dbpBase + dbpCorrection;
         currentRawSbp = sbpRefined;
         currentRawDbp = dbpRefined;
 
@@ -795,12 +848,15 @@ public class SinBPDistortion {
 
         Log.d(TAG + "-Estimate", String.format(
                 Locale.US,
-                "BP: SBP=%.1f, DBP=%.1f (A=%.3f->%.3f, HR=%.1f->%.1f, V2P=%.3f->%.3f, P2V=%.3f->%.3f, E=%.3f->%.3f, clamp=%s)",
+                "BP: SBP=%.1f, DBP=%.1f (base=%.1f/%.1f, corr=%.1f/%.1f, A=%.3f->%.3f, HR=%.1f->%.1f, V2P=%.3f->%.3f, P2V=%.3f->%.3f, Stiff=%.3f->%.3f, E=%.3f->%.3f, clamp=%s)",
                 sbpRefined, dbpRefined,
+                sbpBase, dbpBase,
+                sbpCorrection, dbpCorrection,
                 regressionAmplitude, usedRegressionAmplitude,
                 hr, usedHr,
                 valleyToPeakRelTTP, usedValleyToPeakRelTTP,
                 peakToValleyRelTTP, usedPeakToValleyRelTTP,
+                stiffnessSin, usedStiffnessSin,
                 E, usedE,
                 currentFeatureClampReason));
 
@@ -1104,6 +1160,12 @@ public class SinBPDistortion {
         currentUsedValleyToPeakRelTTP = 0;
         currentUsedPeakToValleyRelTTP = 0;
         currentUsedDistortion = 0;
+        currentStiffnessSin = 0;
+        currentUsedStiffnessSin = 0;
+        currentBaseSbp = 0;
+        currentBaseDbp = 0;
+        currentSbpCorrection = 0;
+        currentDbpCorrection = 0;
         currentFeatureClampApplied = 0;
         currentFeatureClampReason = "reset";
         currentRejectReason = "reset";
@@ -1197,6 +1259,30 @@ public class SinBPDistortion {
 
     public double getCurrentUsedDistortion() {
         return currentUsedDistortion;
+    }
+
+    public double getCurrentStiffnessSin() {
+        return currentStiffnessSin;
+    }
+
+    public double getCurrentUsedStiffnessSin() {
+        return currentUsedStiffnessSin;
+    }
+
+    public double getCurrentBaseSbp() {
+        return currentBaseSbp;
+    }
+
+    public double getCurrentBaseDbp() {
+        return currentBaseDbp;
+    }
+
+    public double getCurrentSbpCorrection() {
+        return currentSbpCorrection;
+    }
+
+    public double getCurrentDbpCorrection() {
+        return currentDbpCorrection;
     }
 
     public double getCurrentPhi() {

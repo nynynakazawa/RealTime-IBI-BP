@@ -115,6 +115,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private final List<Double> recM2_V2P_relTTP = new ArrayList<>();
     private final List<Double> recM2_P2V_relTTP = new ArrayList<>();
     private final List<Double> recM2_E = new ArrayList<>();
+    private final List<Double> recM2_Stiffness = new ArrayList<>();
     private final List<Double> recM2_SBP = new ArrayList<>();
     private final List<Double> recM2_DBP = new ArrayList<>();
     private final List<Double> recM2_Mean = new ArrayList<>();
@@ -131,6 +132,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private final List<Double> recM2_V2P_relTTP_Used = new ArrayList<>();
     private final List<Double> recM2_P2V_relTTP_Used = new ArrayList<>();
     private final List<Double> recM2_E_Used = new ArrayList<>();
+    private final List<Double> recM2_Stiffness_Used = new ArrayList<>();
     private final List<Integer> recM2_BeatSampleCount = new ArrayList<>();
     private final List<Double> recM2_BeatMin = new ArrayList<>();
     private final List<Double> recM2_BeatMax = new ArrayList<>();
@@ -140,6 +142,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private final List<Double> recM2_DiastoleRatio = new ArrayList<>();
     private final List<Double> recM2_SBP_Raw = new ArrayList<>();
     private final List<Double> recM2_DBP_Raw = new ArrayList<>();
+    private final List<Double> recM2_SBP_Base = new ArrayList<>();
+    private final List<Double> recM2_DBP_Base = new ArrayList<>();
+    private final List<Double> recM2_SBP_Correction = new ArrayList<>();
+    private final List<Double> recM2_DBP_Correction = new ArrayList<>();
     private final List<Double> recM2_SBP_AttemptFinal = new ArrayList<>();
     private final List<Double> recM2_DBP_AttemptFinal = new ArrayList<>();
     private final List<Integer> recM2_ConstraintApplied = new ArrayList<>();
@@ -767,6 +773,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                                 recM2_V2P_relTTP.add(sinBPDistortion.getCurrentValleyToPeakRelTTP());
                                 recM2_P2V_relTTP.add(sinBPDistortion.getCurrentPeakToValleyRelTTP());
                                 recM2_E.add(sinBPDistortion.getCurrentDistortion());
+                                recM2_Stiffness.add(sinBPDistortion.getCurrentStiffnessSin());
                                 recM2_SBP.add(sinBPDistortion.getLastSinSBP());
                                 recM2_DBP.add(sinBPDistortion.getLastSinDBP());
                                 recM2_Mean.add(sinBPDistortion.getCurrentMean());
@@ -783,6 +790,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                                 recM2_V2P_relTTP_Used.add(sinBPDistortion.getCurrentUsedValleyToPeakRelTTP());
                                 recM2_P2V_relTTP_Used.add(sinBPDistortion.getCurrentUsedPeakToValleyRelTTP());
                                 recM2_E_Used.add(sinBPDistortion.getCurrentUsedDistortion());
+                                recM2_Stiffness_Used.add(sinBPDistortion.getCurrentUsedStiffnessSin());
                                 recM2_BeatSampleCount.add(sinBPDistortion.getCurrentBeatWindowSampleCount());
                                 recM2_BeatMin.add(sinBPDistortion.getCurrentBeatMin());
                                 recM2_BeatMax.add(sinBPDistortion.getCurrentBeatMax());
@@ -792,6 +800,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                                 recM2_DiastoleRatio.add(sinBPDistortion.getCurrentDiastoleRatio());
                                 recM2_SBP_Raw.add(sinBPDistortion.getCurrentRawSbp());
                                 recM2_DBP_Raw.add(sinBPDistortion.getCurrentRawDbp());
+                                recM2_SBP_Base.add(sinBPDistortion.getCurrentBaseSbp());
+                                recM2_DBP_Base.add(sinBPDistortion.getCurrentBaseDbp());
+                                recM2_SBP_Correction.add(sinBPDistortion.getCurrentSbpCorrection());
+                                recM2_DBP_Correction.add(sinBPDistortion.getCurrentDbpCorrection());
                                 recM2_SBP_AttemptFinal.add(sinBPDistortion.getCurrentConstrainedSbp());
                                 recM2_DBP_AttemptFinal.add(sinBPDistortion.getCurrentConstrainedDbp());
                                 recM2_ConstraintApplied.add(sinBPDistortion.getCurrentConstraintApplied());
@@ -806,6 +818,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                                 recM2_V2P_relTTP.add(0.0);
                                 recM2_P2V_relTTP.add(0.0);
                                 recM2_E.add(0.0);
+                                recM2_Stiffness.add(0.0);
                                 recM2_SBP.add(0.0);
                                 recM2_DBP.add(0.0);
                                 recM2_Mean.add(0.0);
@@ -822,6 +835,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                                 recM2_V2P_relTTP_Used.add(0.0);
                                 recM2_P2V_relTTP_Used.add(0.0);
                                 recM2_E_Used.add(0.0);
+                                recM2_Stiffness_Used.add(0.0);
                                 recM2_BeatSampleCount.add(0);
                                 recM2_BeatMin.add(0.0);
                                 recM2_BeatMax.add(0.0);
@@ -831,6 +845,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                                 recM2_DiastoleRatio.add(0.0);
                                 recM2_SBP_Raw.add(0.0);
                                 recM2_DBP_Raw.add(0.0);
+                                recM2_SBP_Base.add(0.0);
+                                recM2_DBP_Base.add(0.0);
+                                recM2_SBP_Correction.add(0.0);
+                                recM2_DBP_Correction.add(0.0);
                                 recM2_SBP_AttemptFinal.add(0.0);
                                 recM2_DBP_AttemptFinal.add(0.0);
                                 recM2_ConstraintApplied.add(0);
@@ -1472,6 +1490,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         recM2_V2P_relTTP.clear();
         recM2_P2V_relTTP.clear();
         recM2_E.clear();
+        recM2_Stiffness.clear();
         recM2_SBP.clear();
         recM2_DBP.clear();
         recM2_Mean.clear();
@@ -1488,6 +1507,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         recM2_V2P_relTTP_Used.clear();
         recM2_P2V_relTTP_Used.clear();
         recM2_E_Used.clear();
+        recM2_Stiffness_Used.clear();
         recM2_BeatSampleCount.clear();
         recM2_BeatMin.clear();
         recM2_BeatMax.clear();
@@ -1497,6 +1517,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         recM2_DiastoleRatio.clear();
         recM2_SBP_Raw.clear();
         recM2_DBP_Raw.clear();
+        recM2_SBP_Base.clear();
+        recM2_DBP_Base.clear();
+        recM2_SBP_Correction.clear();
+        recM2_DBP_Correction.clear();
         recM2_SBP_AttemptFinal.clear();
         recM2_DBP_AttemptFinal.clear();
         recM2_ConstraintApplied.clear();
@@ -2085,6 +2109,12 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     public void saveSinBPDToCsv(String name, boolean isMode1) {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_SinBP_D.csv");
+        double[] m2SbpCoefficients = SinBPDistortion.getSbpCoefficients();
+        double[] m2DbpCoefficients = SinBPDistortion.getDbpCoefficients();
+        double[] m2SbpBaseCoefficients = SinBPDistortion.getSbpBaseCoefficients();
+        double[] m2DbpBaseCoefficients = SinBPDistortion.getDbpBaseCoefficients();
+        double[] m2SbpCorrectionCoefficients = SinBPDistortion.getSbpCorrectionCoefficients();
+        double[] m2DbpCorrectionCoefficients = SinBPDistortion.getDbpCorrectionCoefficients();
 
         if (recTrainingTs.isEmpty() || recM2_A.isEmpty()) {
             ui.post(() ->
@@ -2094,53 +2124,129 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
 
         StringBuilder csvContent = new StringBuilder();
-        csvContent.append("経過時間_秒, A, HR, V2P_relTTP, P2V_relTTP, E, A_used, HR_used, V2P_relTTP_used, P2V_relTTP_used, E_used, SBP, DBP, Mean, Phi, sinPhi, cosPhi, fit_a, fit_b, IBI_current_ms, IBI_smoothed_ms, used_smoothed_ibi, beat_sample_count, beat_min, beat_max, beat_range, beat_std, systole_ratio, diastole_ratio, SBP_raw, DBP_raw, SBP_attempt_final, DBP_attempt_final, constraint_applied, clamp_applied, feature_clamp_applied, output_valid, feature_clamp_reason, reject_reason\n");
+        csvContent.append("経過時間_秒, A, HR, V2P_relTTP, P2V_relTTP, E, Stiffness, A_used, HR_used, V2P_relTTP_used, P2V_relTTP_used, E_used, Stiffness_used, ")
+                .append("SBP, DBP, Mean, Phi, sinPhi, cosPhi, fit_a, fit_b, IBI_current_ms, IBI_smoothed_ms, used_smoothed_ibi, ")
+                .append("beat_sample_count, beat_min, beat_max, beat_range, beat_std, systole_ratio, diastole_ratio, ")
+                .append("SBP_raw, DBP_raw, SBP_base, DBP_base, SBP_correction, DBP_correction, SBP_attempt_final, DBP_attempt_final, ")
+                .append("constraint_applied, clamp_applied, feature_clamp_applied, output_valid, feature_clamp_reason, reject_reason, ")
+                .append("M2_SBP_ALPHA0, M2_SBP_ALPHA1, M2_SBP_ALPHA2, M2_SBP_ALPHA3, M2_SBP_ALPHA4, M2_SBP_ALPHA5, M2_SBP_ALPHA6, ")
+                .append("M2_DBP_BETA0, M2_DBP_BETA1, M2_DBP_BETA2, M2_DBP_BETA3, M2_DBP_BETA4, M2_DBP_BETA5, M2_DBP_BETA6, ")
+                .append("M2_SBP_BASE_C0, M2_SBP_BASE_C1, M2_SBP_BASE_C2, M2_SBP_BASE_C3, M2_SBP_BASE_C4, ")
+                .append("M2_DBP_BASE_D0, M2_DBP_BASE_D1, M2_DBP_BASE_D2, M2_DBP_BASE_D3, M2_DBP_BASE_D4, ")
+                .append("M2_SBP_CORR_G0, M2_SBP_CORR_G1, M2_SBP_CORR_G2, ")
+                .append("M2_DBP_CORR_H0, M2_DBP_CORR_H1, M2_DBP_CORR_H2, ")
+                .append("M2_SBP_term_intercept, M2_SBP_term_A, M2_SBP_term_HR, M2_SBP_term_V2P_relTTP, M2_SBP_term_P2V_relTTP, M2_SBP_term_Stiffness, M2_SBP_term_E, ")
+                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E\n");
 
         int maxSize = recTrainingTs.size();
         for (int i = 0; i < maxSize; i++) {
             // 開始時点からの経過時間（秒）を計算
             double elapsedSeconds = (recordingStartTime > 0) ? 
                 (recTrainingTs.get(i) - recordingStartTime) / 1000.0 : 0.0;
-            
+
+            double m2A = i < recM2_A.size() ? recM2_A.get(i) : 0.0;
+            double m2Hr = i < recM2_HR.size() ? recM2_HR.get(i) : 0.0;
+            double m2V2p = i < recM2_V2P_relTTP.size() ? recM2_V2P_relTTP.get(i) : 0.0;
+            double m2P2v = i < recM2_P2V_relTTP.size() ? recM2_P2V_relTTP.get(i) : 0.0;
+            double m2E = i < recM2_E.size() ? recM2_E.get(i) : 0.0;
+            double m2Stiffness = i < recM2_Stiffness.size() ? recM2_Stiffness.get(i) : 0.0;
+            double m2Sbp = i < recM2_SBP.size() ? recM2_SBP.get(i) : 0.0;
+            double m2Dbp = i < recM2_DBP.size() ? recM2_DBP.get(i) : 0.0;
+            double m2Mean = i < recM2_Mean.size() ? recM2_Mean.get(i) : 0.0;
+            double m2Phi = i < recM2_Phi.size() ? recM2_Phi.get(i) : 0.0;
+            double m2SinPhi = i < recM2_SinPhi.size() ? recM2_SinPhi.get(i) : 0.0;
+            double m2CosPhi = i < recM2_CosPhi.size() ? recM2_CosPhi.get(i) : 1.0;
+            double m2FitA = i < recM2_FitA.size() ? recM2_FitA.get(i) : 0.0;
+            double m2FitB = i < recM2_FitB.size() ? recM2_FitB.get(i) : 0.0;
+            double m2IbiCurrent = i < recM2_IbiCurrent.size() ? recM2_IbiCurrent.get(i) : 0.0;
+            double m2SmoothedIbi = i < recM2_SmoothedIbi.size() ? recM2_SmoothedIbi.get(i) : 0.0;
+            int m2UsedSmoothedIbi = i < recM2_UsedSmoothedIbi.size() ? recM2_UsedSmoothedIbi.get(i) : 0;
+            double m2AUsed = i < recM2_A_Used.size() ? recM2_A_Used.get(i) : m2A;
+            double m2HrUsed = i < recM2_HR_Used.size() ? recM2_HR_Used.get(i) : m2Hr;
+            double m2V2pUsed = i < recM2_V2P_relTTP_Used.size() ? recM2_V2P_relTTP_Used.get(i) : m2V2p;
+            double m2P2vUsed = i < recM2_P2V_relTTP_Used.size() ? recM2_P2V_relTTP_Used.get(i) : m2P2v;
+            double m2EUsed = i < recM2_E_Used.size() ? recM2_E_Used.get(i) : m2E;
+            double m2StiffnessUsed = i < recM2_Stiffness_Used.size() ? recM2_Stiffness_Used.get(i) : m2Stiffness;
+            int m2BeatSampleCount = i < recM2_BeatSampleCount.size() ? recM2_BeatSampleCount.get(i) : 0;
+            double m2BeatMin = i < recM2_BeatMin.size() ? recM2_BeatMin.get(i) : 0.0;
+            double m2BeatMax = i < recM2_BeatMax.size() ? recM2_BeatMax.get(i) : 0.0;
+            double m2BeatRange = i < recM2_BeatRange.size() ? recM2_BeatRange.get(i) : 0.0;
+            double m2BeatStd = i < recM2_BeatStd.size() ? recM2_BeatStd.get(i) : 0.0;
+            double m2SystoleRatio = i < recM2_SystoleRatio.size() ? recM2_SystoleRatio.get(i) : 0.0;
+            double m2DiastoleRatio = i < recM2_DiastoleRatio.size() ? recM2_DiastoleRatio.get(i) : 0.0;
+            double m2SbpRaw = i < recM2_SBP_Raw.size() ? recM2_SBP_Raw.get(i) : 0.0;
+            double m2DbpRaw = i < recM2_DBP_Raw.size() ? recM2_DBP_Raw.get(i) : 0.0;
+            double m2SbpBase = i < recM2_SBP_Base.size() ? recM2_SBP_Base.get(i) : 0.0;
+            double m2DbpBase = i < recM2_DBP_Base.size() ? recM2_DBP_Base.get(i) : 0.0;
+            double m2SbpCorrection = i < recM2_SBP_Correction.size() ? recM2_SBP_Correction.get(i) : 0.0;
+            double m2DbpCorrection = i < recM2_DBP_Correction.size() ? recM2_DBP_Correction.get(i) : 0.0;
+            double m2SbpAttemptFinal = i < recM2_SBP_AttemptFinal.size() ? recM2_SBP_AttemptFinal.get(i) : 0.0;
+            double m2DbpAttemptFinal = i < recM2_DBP_AttemptFinal.size() ? recM2_DBP_AttemptFinal.get(i) : 0.0;
+            int m2ConstraintApplied = i < recM2_ConstraintApplied.size() ? recM2_ConstraintApplied.get(i) : 0;
+            int m2ClampApplied = i < recM2_ClampApplied.size() ? recM2_ClampApplied.get(i) : 0;
+            int m2FeatureClampApplied = i < recM2_FeatureClampApplied.size() ? recM2_FeatureClampApplied.get(i) : 0;
+            int m2OutputValid = i < recM2_OutputValid.size() ? recM2_OutputValid.get(i) : 0;
+            String m2FeatureClampReason = i < recM2_FeatureClampReason.size() ? recM2_FeatureClampReason.get(i) : "missing";
+            String m2RejectReason = i < recM2_RejectReason.size() ? recM2_RejectReason.get(i) : "missing";
+            double[] m2Features = new double[] { m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2StiffnessUsed, m2EUsed };
+            double[] m2SbpTerms = computeLinearTerms(
+                    m2SbpCoefficients[0], Arrays.copyOfRange(m2SbpCoefficients, 1, m2SbpCoefficients.length), m2Features);
+            double[] m2DbpTerms = computeLinearTerms(
+                    m2DbpCoefficients[0], Arrays.copyOfRange(m2DbpCoefficients, 1, m2DbpCoefficients.length), m2Features);
+
             csvContent.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_A.size() ? recM2_A.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_HR.size() ? recM2_HR.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_V2P_relTTP.size() ? recM2_V2P_relTTP.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_P2V_relTTP.size() ? recM2_P2V_relTTP.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_E.size() ? recM2_E.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_A_Used.size() ? recM2_A_Used.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_HR_Used.size() ? recM2_HR_Used.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_V2P_relTTP_Used.size() ? recM2_V2P_relTTP_Used.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_P2V_relTTP_Used.size() ? recM2_P2V_relTTP_Used.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_E_Used.size() ? recM2_E_Used.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.2f", i < recM2_SBP.size() ? recM2_SBP.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.2f", i < recM2_DBP.size() ? recM2_DBP.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_Mean.size() ? recM2_Mean.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_Phi.size() ? recM2_Phi.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_SinPhi.size() ? recM2_SinPhi.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_CosPhi.size() ? recM2_CosPhi.get(i) : 1.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_FitA.size() ? recM2_FitA.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_FitB.size() ? recM2_FitB.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_IbiCurrent.size() ? recM2_IbiCurrent.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_SmoothedIbi.size() ? recM2_SmoothedIbi.get(i) : 0.0)).append(", ")
-                    .append(i < recM2_UsedSmoothedIbi.size() ? recM2_UsedSmoothedIbi.get(i) : 0).append(", ")
-                    .append(i < recM2_BeatSampleCount.size() ? recM2_BeatSampleCount.get(i) : 0).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_BeatMin.size() ? recM2_BeatMin.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_BeatMax.size() ? recM2_BeatMax.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_BeatRange.size() ? recM2_BeatRange.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_BeatStd.size() ? recM2_BeatStd.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_SystoleRatio.size() ? recM2_SystoleRatio.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.4f", i < recM2_DiastoleRatio.size() ? recM2_DiastoleRatio.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.2f", i < recM2_SBP_Raw.size() ? recM2_SBP_Raw.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.2f", i < recM2_DBP_Raw.size() ? recM2_DBP_Raw.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.2f", i < recM2_SBP_AttemptFinal.size() ? recM2_SBP_AttemptFinal.get(i) : 0.0)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.2f", i < recM2_DBP_AttemptFinal.size() ? recM2_DBP_AttemptFinal.get(i) : 0.0)).append(", ")
-                    .append(i < recM2_ConstraintApplied.size() ? recM2_ConstraintApplied.get(i) : 0).append(", ")
-                    .append(i < recM2_ClampApplied.size() ? recM2_ClampApplied.get(i) : 0).append(", ")
-                    .append(i < recM2_FeatureClampApplied.size() ? recM2_FeatureClampApplied.get(i) : 0).append(", ")
-                    .append(i < recM2_OutputValid.size() ? recM2_OutputValid.get(i) : 0).append(", ")
-                    .append(sanitizeCsvText(i < recM2_FeatureClampReason.size() ? recM2_FeatureClampReason.get(i) : "missing")).append(", ")
-                    .append(sanitizeCsvText(i < recM2_RejectReason.size() ? recM2_RejectReason.get(i) : "missing"))
+                    .append(String.format(Locale.getDefault(), "%.4f", m2A)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2Hr)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2V2p)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2P2v)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2E)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2Stiffness)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2AUsed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2HrUsed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2V2pUsed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2P2vUsed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2EUsed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2StiffnessUsed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2Sbp)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2Dbp)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2Mean)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2Phi)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2SinPhi)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2CosPhi)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2FitA)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2FitB)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2IbiCurrent)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2SmoothedIbi)).append(", ")
+                    .append(m2UsedSmoothedIbi).append(", ")
+                    .append(m2BeatSampleCount).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2BeatMin)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2BeatMax)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2BeatRange)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2BeatStd)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2SystoleRatio)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2DiastoleRatio)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2SbpRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2DbpRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2SbpBase)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2DbpBase)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2SbpCorrection)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2DbpCorrection)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2SbpAttemptFinal)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2DbpAttemptFinal)).append(", ")
+                    .append(m2ConstraintApplied).append(", ")
+                    .append(m2ClampApplied).append(", ")
+                    .append(m2FeatureClampApplied).append(", ")
+                    .append(m2OutputValid).append(", ")
+                    .append(sanitizeCsvText(m2FeatureClampReason)).append(", ")
+                    .append(sanitizeCsvText(m2RejectReason)).append(", ")
+                    .append(formatCoefficients(m2SbpCoefficients)).append(", ")
+                    .append(formatCoefficients(m2DbpCoefficients)).append(", ")
+                    .append(formatCoefficients(m2SbpBaseCoefficients)).append(", ")
+                    .append(formatCoefficients(m2DbpBaseCoefficients)).append(", ")
+                    .append(formatCoefficients(m2SbpCorrectionCoefficients)).append(", ")
+                    .append(formatCoefficients(m2DbpCorrectionCoefficients)).append(", ")
+                    .append(formatValues(m2SbpTerms)).append(", ")
+                    .append(formatValues(m2DbpTerms))
                     .append("\n");
         }
 
@@ -2176,6 +2282,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         double[] m1DbpCoefficients = RealtimeBP.getDbpCoefficients();
         double[] m2SbpCoefficients = SinBPDistortion.getSbpCoefficients();
         double[] m2DbpCoefficients = SinBPDistortion.getDbpCoefficients();
+        double[] m2SbpBaseCoefficients = SinBPDistortion.getSbpBaseCoefficients();
+        double[] m2DbpBaseCoefficients = SinBPDistortion.getDbpBaseCoefficients();
+        double[] m2SbpCorrectionCoefficients = SinBPDistortion.getSbpCorrectionCoefficients();
+        double[] m2DbpCorrectionCoefficients = SinBPDistortion.getDbpCorrectionCoefficients();
         double[] m3SbpCoefficients = SinBPModel.getSbpCoefficients();
         double[] m3DbpCoefficients = SinBPModel.getDbpCoefficients();
 
@@ -2196,14 +2306,19 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("M1_SBP_C0, M1_SBP_C1, M1_SBP_C2, M1_SBP_C3, M1_SBP_C4, M1_DBP_D0, M1_DBP_D1, M1_DBP_D2, M1_DBP_D3, M1_DBP_D4, ")
                 .append("M1_SBP_term_intercept, M1_SBP_term_A, M1_SBP_term_HR, M1_SBP_term_V2P_relTTP, M1_SBP_term_P2V_relTTP, ")
                 .append("M1_DBP_term_intercept, M1_DBP_term_A, M1_DBP_term_HR, M1_DBP_term_V2P_relTTP, M1_DBP_term_P2V_relTTP, ")
-                .append("M2_A, M2_HR, M2_V2P_relTTP, M2_P2V_relTTP, M2_E, M2_SBP, M2_DBP, ")
+                .append("M2_A, M2_HR, M2_V2P_relTTP, M2_P2V_relTTP, M2_E, M2_Stiffness, M2_SBP, M2_DBP, ")
                 .append("M2_Mean, M2_Phi, M2_sinPhi, M2_cosPhi, M2_fit_a, M2_fit_b, M2_IBI_current_ms, M2_IBI_smoothed_ms, M2_used_smoothed_ibi, ")
-                .append("M2_A_used, M2_HR_used, M2_V2P_relTTP_used, M2_P2V_relTTP_used, M2_E_used, ")
+                .append("M2_A_used, M2_HR_used, M2_V2P_relTTP_used, M2_P2V_relTTP_used, M2_E_used, M2_Stiffness_used, ")
                 .append("M2_beat_sample_count, M2_beat_min, M2_beat_max, M2_beat_range, M2_beat_std, M2_systole_ratio, M2_diastole_ratio, ")
-                .append("M2_SBP_raw, M2_DBP_raw, M2_SBP_attempt_final, M2_DBP_attempt_final, M2_constraint_applied, M2_clamp_applied, M2_feature_clamp_applied, M2_output_valid, M2_feature_clamp_reason, M2_reject_reason, ")
-                .append("M2_SBP_ALPHA0, M2_SBP_ALPHA1, M2_SBP_ALPHA2, M2_SBP_ALPHA3, M2_SBP_ALPHA4, M2_SBP_ALPHA5, M2_DBP_BETA0, M2_DBP_BETA1, M2_DBP_BETA2, M2_DBP_BETA3, M2_DBP_BETA4, M2_DBP_BETA5, ")
-                .append("M2_SBP_term_intercept, M2_SBP_term_A, M2_SBP_term_HR, M2_SBP_term_V2P_relTTP, M2_SBP_term_P2V_relTTP, M2_SBP_term_E, ")
-                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_E, ")
+                .append("M2_SBP_raw, M2_DBP_raw, M2_SBP_base, M2_DBP_base, M2_SBP_correction, M2_DBP_correction, M2_SBP_attempt_final, M2_DBP_attempt_final, M2_constraint_applied, M2_clamp_applied, M2_feature_clamp_applied, M2_output_valid, M2_feature_clamp_reason, M2_reject_reason, ")
+                .append("M2_SBP_ALPHA0, M2_SBP_ALPHA1, M2_SBP_ALPHA2, M2_SBP_ALPHA3, M2_SBP_ALPHA4, M2_SBP_ALPHA5, M2_SBP_ALPHA6, ")
+                .append("M2_DBP_BETA0, M2_DBP_BETA1, M2_DBP_BETA2, M2_DBP_BETA3, M2_DBP_BETA4, M2_DBP_BETA5, M2_DBP_BETA6, ")
+                .append("M2_SBP_BASE_C0, M2_SBP_BASE_C1, M2_SBP_BASE_C2, M2_SBP_BASE_C3, M2_SBP_BASE_C4, ")
+                .append("M2_DBP_BASE_D0, M2_DBP_BASE_D1, M2_DBP_BASE_D2, M2_DBP_BASE_D3, M2_DBP_BASE_D4, ")
+                .append("M2_SBP_CORR_G0, M2_SBP_CORR_G1, M2_SBP_CORR_G2, ")
+                .append("M2_DBP_CORR_H0, M2_DBP_CORR_H1, M2_DBP_CORR_H2, ")
+                .append("M2_SBP_term_intercept, M2_SBP_term_A, M2_SBP_term_HR, M2_SBP_term_V2P_relTTP, M2_SBP_term_P2V_relTTP, M2_SBP_term_Stiffness, M2_SBP_term_E, ")
+                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E, ")
                 .append("M3_A, M3_HR, M3_Mean, M3_Phi, M3_SBP, M3_DBP, ")
                 .append("M3_sinPhi, M3_cosPhi, M3_fit_a, M3_fit_b, M3_fit_rmse, M3_IBI_current_ms, M3_IBI_smoothed_ms, M3_used_smoothed_ibi, ")
                 .append("M3_A_used, M3_HR_used, M3_Mean_used, M3_sinPhi_used, M3_cosPhi_used, ")
@@ -2252,6 +2367,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             double m2V2p = i < recM2_V2P_relTTP.size() ? recM2_V2P_relTTP.get(i) : 0.0;
             double m2P2v = i < recM2_P2V_relTTP.size() ? recM2_P2V_relTTP.get(i) : 0.0;
             double m2E = i < recM2_E.size() ? recM2_E.get(i) : 0.0;
+            double m2Stiffness = i < recM2_Stiffness.size() ? recM2_Stiffness.get(i) : 0.0;
             double m2Sbp = i < recM2_SBP.size() ? recM2_SBP.get(i) : 0.0;
             double m2Dbp = i < recM2_DBP.size() ? recM2_DBP.get(i) : 0.0;
             double m2Mean = i < recM2_Mean.size() ? recM2_Mean.get(i) : 0.0;
@@ -2268,6 +2384,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             double m2V2pUsed = i < recM2_V2P_relTTP_Used.size() ? recM2_V2P_relTTP_Used.get(i) : m2V2p;
             double m2P2vUsed = i < recM2_P2V_relTTP_Used.size() ? recM2_P2V_relTTP_Used.get(i) : m2P2v;
             double m2EUsed = i < recM2_E_Used.size() ? recM2_E_Used.get(i) : m2E;
+            double m2StiffnessUsed = i < recM2_Stiffness_Used.size() ? recM2_Stiffness_Used.get(i) : m2Stiffness;
             int m2BeatSampleCount = i < recM2_BeatSampleCount.size() ? recM2_BeatSampleCount.get(i) : 0;
             double m2BeatMin = i < recM2_BeatMin.size() ? recM2_BeatMin.get(i) : 0.0;
             double m2BeatMax = i < recM2_BeatMax.size() ? recM2_BeatMax.get(i) : 0.0;
@@ -2277,6 +2394,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             double m2DiastoleRatio = i < recM2_DiastoleRatio.size() ? recM2_DiastoleRatio.get(i) : 0.0;
             double m2SbpRaw = i < recM2_SBP_Raw.size() ? recM2_SBP_Raw.get(i) : 0.0;
             double m2DbpRaw = i < recM2_DBP_Raw.size() ? recM2_DBP_Raw.get(i) : 0.0;
+            double m2SbpBase = i < recM2_SBP_Base.size() ? recM2_SBP_Base.get(i) : 0.0;
+            double m2DbpBase = i < recM2_DBP_Base.size() ? recM2_DBP_Base.get(i) : 0.0;
+            double m2SbpCorrection = i < recM2_SBP_Correction.size() ? recM2_SBP_Correction.get(i) : 0.0;
+            double m2DbpCorrection = i < recM2_DBP_Correction.size() ? recM2_DBP_Correction.get(i) : 0.0;
             double m2SbpAttemptFinal = i < recM2_SBP_AttemptFinal.size() ? recM2_SBP_AttemptFinal.get(i) : 0.0;
             double m2DbpAttemptFinal = i < recM2_DBP_AttemptFinal.size() ? recM2_DBP_AttemptFinal.get(i) : 0.0;
             int m2ConstraintApplied = i < recM2_ConstraintApplied.size() ? recM2_ConstraintApplied.get(i) : 0;
@@ -2285,7 +2406,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             int m2OutputValid = i < recM2_OutputValid.size() ? recM2_OutputValid.get(i) : 0;
             String m2FeatureClampReason = i < recM2_FeatureClampReason.size() ? recM2_FeatureClampReason.get(i) : "missing";
             String m2RejectReason = i < recM2_RejectReason.size() ? recM2_RejectReason.get(i) : "missing";
-            double[] m2Features = new double[] { m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2EUsed };
+            double[] m2Features = new double[] { m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2StiffnessUsed, m2EUsed };
             double[] m2SbpTerms = computeLinearTerms(m2SbpCoefficients[0], Arrays.copyOfRange(m2SbpCoefficients, 1, m2SbpCoefficients.length), m2Features);
             double[] m2DbpTerms = computeLinearTerms(m2DbpCoefficients[0], Arrays.copyOfRange(m2DbpCoefficients, 1, m2DbpCoefficients.length), m2Features);
 
@@ -2384,6 +2505,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(String.format(Locale.getDefault(), "%.4f", m2V2p)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", m2P2v)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", m2E)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2Stiffness)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.2f", m2Sbp)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.2f", m2Dbp)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", m2Mean)).append(", ")
@@ -2400,6 +2522,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(String.format(Locale.getDefault(), "%.4f", m2V2pUsed)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", m2P2vUsed)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", m2EUsed)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", m2StiffnessUsed)).append(", ")
                     .append(m2BeatSampleCount).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", m2BeatMin)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", m2BeatMax)).append(", ")
@@ -2409,6 +2532,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(String.format(Locale.getDefault(), "%.4f", m2DiastoleRatio)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.2f", m2SbpRaw)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.2f", m2DbpRaw)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2SbpBase)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2DbpBase)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2SbpCorrection)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", m2DbpCorrection)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.2f", m2SbpAttemptFinal)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.2f", m2DbpAttemptFinal)).append(", ")
                     .append(m2ConstraintApplied).append(", ")
@@ -2419,6 +2546,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(sanitizeCsvText(m2RejectReason)).append(", ")
                     .append(formatCoefficients(m2SbpCoefficients)).append(", ")
                     .append(formatCoefficients(m2DbpCoefficients)).append(", ")
+                    .append(formatCoefficients(m2SbpBaseCoefficients)).append(", ")
+                    .append(formatCoefficients(m2DbpBaseCoefficients)).append(", ")
+                    .append(formatCoefficients(m2SbpCorrectionCoefficients)).append(", ")
+                    .append(formatCoefficients(m2DbpCorrectionCoefficients)).append(", ")
                     .append(formatValues(m2SbpTerms)).append(", ")
                     .append(formatValues(m2DbpTerms)).append(", ")
                     // Method3 (SinBP_M)
@@ -2514,6 +2645,14 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             terms[i + 1] = coefficients[i] * features[i];
         }
         return terms;
+    }
+
+    private String normalizeRejectReason(String reason) {
+        if (reason == null) {
+            return "missing";
+        }
+        String trimmed = reason.trim();
+        return trimmed.isEmpty() ? "ok" : trimmed;
     }
 
     private String sanitizeCsvText(String value) {

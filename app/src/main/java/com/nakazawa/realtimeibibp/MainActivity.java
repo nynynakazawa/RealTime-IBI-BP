@@ -38,7 +38,7 @@ public class MainActivity extends AppCompatActivity
     public static final String EXTRA_MODE = "mode";
     public static final String EXTRA_AUTOMATED = "automated";
     private static final String APP_VERSION = "1.0";
-    private static final String COEFFICIENT_VERSION = "2025-11-22";
+    private static final String COEFFICIENT_VERSION = "2026-04-09-sinbpd-stage-stiffness";
     private static final String AUTOMATION_LOG_TAG = "RealtimeAutomation";
 
     // ===== 定数 =====
