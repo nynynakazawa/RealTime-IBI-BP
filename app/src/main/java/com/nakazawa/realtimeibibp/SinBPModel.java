@@ -39,6 +39,10 @@ public class SinBPModel {
 
     // 不応期（ミリ秒）
     private static final long REFRACTORY_PERIOD_MS = 500;
+    private static final long MAX_REFRACTORY_PERIOD_MS = 900;
+    private static final double ADAPTIVE_REFRACTORY_RATIO = 0.58;
+    private static final double MIN_PEAK_PROMINENCE = 0.12;
+    private static final double MIN_PEAK_PROMINENCE_RATIO = 0.35;
 
     // リングバッファ
     private final Deque<Double> ppgBuffer = new ArrayDeque<>(BUFFER_SIZE);
@@ -225,7 +229,7 @@ public class SinBPModel {
      */
     private void detectPeak(double currentValue, long currentTime) {
         // 不応期チェック
-        if (currentTime - lastPeakTime < REFRACTORY_PERIOD_MS) {
+        if (currentTime - lastPeakTime < getAdaptiveRefractoryPeriodMs()) {
             return;
         }
 
@@ -251,9 +255,39 @@ public class SinBPModel {
             }
         }
 
-        if (isPeak) {
-            processPeak(recent[idx], currentTime);
+        Long[] recentTimes = timeBuffer.toArray(new Long[0]);
+        if (isPeak && isProminentPeak(recent, idx)) {
+            processPeak(recent[idx], recentTimes[idx]);
         }
+    }
+
+    private long getAdaptiveRefractoryPeriodMs() {
+        double referenceIbiMs = 0.0;
+        if (lastValidIBI > 0) {
+            referenceIbiMs = lastValidIBI;
+        } else if (logicRef != null && !logicRef.smoothedIbi.isEmpty()) {
+            referenceIbiMs = logicRef.getLastSmoothedIbi();
+        } else if (currentIBI > 0) {
+            referenceIbiMs = currentIBI;
+        }
+        if (referenceIbiMs <= 0) {
+            return REFRACTORY_PERIOD_MS;
+        }
+        long adaptiveMs = Math.round(referenceIbiMs * ADAPTIVE_REFRACTORY_RATIO);
+        return Math.max(REFRACTORY_PERIOD_MS, Math.min(MAX_REFRACTORY_PERIOD_MS, adaptiveMs));
+    }
+
+    private boolean isProminentPeak(Double[] recent, int peakIndex) {
+        double localMin = Double.POSITIVE_INFINITY;
+        double localMax = Double.NEGATIVE_INFINITY;
+        for (int i = Math.max(0, peakIndex - 6); i <= Math.min(recent.length - 1, peakIndex + 3); i++) {
+            localMin = Math.min(localMin, recent[i]);
+            localMax = Math.max(localMax, recent[i]);
+        }
+        double prominence = recent[peakIndex] - localMin;
+        double localRange = localMax - localMin;
+        double requiredProminence = Math.max(MIN_PEAK_PROMINENCE, localRange * MIN_PEAK_PROMINENCE_RATIO);
+        return prominence >= requiredProminence;
     }
 
     /**

@@ -11,6 +11,14 @@ public abstract class BaseLogic implements LogicProcessor {
     protected static final int WINDOW_SIZE = 240;
     protected static final int BPM_HISTORY_SIZE = 20;
     protected static final int REFRACTORY_FRAMES = 8;
+    protected static final int MAX_REFRACTORY_FRAMES = 24;
+    protected static final double DETECTION_FRAME_RATE = 30.0;
+    protected static final double ADAPTIVE_REFRACTORY_RATIO = 0.58;
+    protected static final int PEAK_PROMINENCE_LOOKBACK = 12;
+    protected static final double MIN_PEAK_PROMINENCE = 0.12;
+    protected static final double MIN_PEAK_PROMINENCE_RATIO = 0.35;
+    protected static final double MIN_HEART_INTERVAL_S = 0.30;
+    protected static final double MAX_HEART_INTERVAL_S = 1.50;
 
     // メンバ変数
     protected ArrayList<Double> greenValues = new ArrayList<>();
@@ -159,16 +167,18 @@ public abstract class BaseLogic implements LogicProcessor {
         double previous3  = window[(windowIndex + WINDOW_SIZE - 4) % WINDOW_SIZE];
         double previous4  = window[(windowIndex + WINDOW_SIZE - 5) % WINDOW_SIZE];
 
-        if (framesSinceLastPeak >= REFRACTORY_FRAMES
+        int adaptiveRefractoryFrames = getAdaptiveRefractoryFrames();
+        if (framesSinceLastPeak >= adaptiveRefractoryFrames
                 && previous1 > previous2
                 && previous2 > previous3
                 && previous3 > previous4
-                && previous1 > currentVal) {
+                && previous1 > currentVal
+                && isPrimaryPeakCandidate(previous1)) {
             framesSinceLastPeak = 0;
             long currentTime = System.currentTimeMillis();
             if (lastPeakTime != 0) {
                 double interval = (currentTime - lastPeakTime) / 1000.0;
-                if (interval > 0.25 && interval < 1.2) {
+                if (interval >= MIN_HEART_INTERVAL_S && interval <= MAX_HEART_INTERVAL_S) {
                     double bpm = 60.0 / interval;
                     double candidateIbi = interval * 1000.0;
                     if (bpmHistory.size() >= BPM_HISTORY_SIZE) {
@@ -210,6 +220,39 @@ public abstract class BaseLogic implements LogicProcessor {
         }
         framesSinceLastPeak++;
         return null; // 心拍数が検出されなかった場合
+    }
+
+    private int getAdaptiveRefractoryFrames() {
+        double referenceIbiMs = 0.0;
+        if (!smoothedIbi.isEmpty()) {
+            referenceIbiMs = smoothedIbi.get(smoothedIbi.size() - 1);
+        } else if (IBI > 0) {
+            referenceIbiMs = IBI;
+        }
+        if (referenceIbiMs <= 0) {
+            return REFRACTORY_FRAMES;
+        }
+        int adaptiveFrames = (int) Math.round(
+                (referenceIbiMs * ADAPTIVE_REFRACTORY_RATIO) / (1000.0 / DETECTION_FRAME_RATE));
+        return Math.max(REFRACTORY_FRAMES, Math.min(MAX_REFRACTORY_FRAMES, adaptiveFrames));
+    }
+
+    private boolean isPrimaryPeakCandidate(double candidateValue) {
+        double localMin = Double.POSITIVE_INFINITY;
+        double localMax = Double.NEGATIVE_INFINITY;
+        for (int offset = 1; offset <= PEAK_PROMINENCE_LOOKBACK; offset++) {
+            int index = (windowIndex + WINDOW_SIZE - 1 - offset) % WINDOW_SIZE;
+            double value = window[index];
+            localMin = Math.min(localMin, value);
+            localMax = Math.max(localMax, value);
+        }
+        if (!Double.isFinite(localMin) || !Double.isFinite(localMax)) {
+            return false;
+        }
+        double prominence = candidateValue - localMin;
+        double localRange = localMax - localMin;
+        double requiredProminence = Math.max(MIN_PEAK_PROMINENCE, localRange * MIN_PEAK_PROMINENCE_RATIO);
+        return prominence >= requiredProminence;
     }
 
 

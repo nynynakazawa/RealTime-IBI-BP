@@ -66,9 +66,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private final List<Float> lastIdealWaveform = new ArrayList<>();  // 直近の理想曲線波形
     private int lastIdealWaveformCursor = 0;
     private boolean idealCurveNeedsRefresh = false;  // 理想曲線のデータセットを再設定する必要があるか
+    private static final double DEFAULT_SIN_PHASE_OFFSET = 0.16;
     
     // Sin波の位相オフセット（遅延補正用、-1.0～1.0の範囲、正の値で前方シフト）
-    private double sinPhaseOffset = 0.14;  // デフォルトは0.12（周期の12%前方シフトで遅延補正）
+    private double sinPhaseOffset = DEFAULT_SIN_PHASE_OFFSET;  // 表示用の位相を少しだけ前へ寄せる
 
     // ===== 記録 =====
     private final List<Double> recValue = new ArrayList<>(),
@@ -1414,7 +1415,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         lastIdealValue = Float.NaN;
         lastIdealWaveform.clear();
         lastIdealWaveformCursor = 0;
-        sinPhaseOffset = 0.14;  // 位相オフセットをデフォルト値にリセット
+        sinPhaseOffset = DEFAULT_SIN_PHASE_OFFSET;  // 位相オフセットをデフォルト値にリセット
     }
 
     // ★ 修正: startRecording メソッド
