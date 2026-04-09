@@ -209,9 +209,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private boolean camOpen;
     private double  IBI;
     private boolean isRecordingActive = false;
-    // 5拍ごとの autosave は描画を止めやすかったため、頻度を下げる。
-    // ローカル端末側の救済用途だけ残し、PC同期は停止時の最終保存に任せる。
-    private static final int TRAINING_AUTOSAVE_EVERY_BEATS = 30;
+    // autosave は描画系で同期実行すると波形を止めるため、
+    // 頻度をさらに下げ、バックグラウンドへ逃がす。
+    private static final int TRAINING_AUTOSAVE_EVERY_BEATS = 60;
     private long recordingStartTime = 0; // 記録開始時点（ミリ秒）
     private int beatCounter = 0;
     private String sessionId = "";
@@ -248,6 +248,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     // ===== ハンドラ =====
     private final Handler ui = new Handler(Looper.getMainLooper());
+    private final ExecutorService autosaveExecutor = Executors.newSingleThreadExecutor();
+    private final Object trainingCsvSaveLock = new Object();
+    private final Object autosaveStateLock = new Object();
+    private boolean trainingAutosaveInFlight = false;
 
     // 外部から注入されるBP推定器
     private RealtimeBP bpEstimator;
@@ -1439,12 +1443,31 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         if (beatCounter <= 0 || beatCounter % TRAINING_AUTOSAVE_EVERY_BEATS != 0) {
             return;
         }
-        try {
-            saveTrainingDataToCsvInternal(outputBaseName, false, false);
-            Log.i("GreenValueAnalyzer", "Training data autosaved at beat=" + beatCounter + " sessionId=" + sessionId);
-        } catch (Exception e) {
-            Log.e("GreenValueAnalyzer", "Training data autosave failed", e);
+        final String autosaveName = outputBaseName;
+        final int autosaveBeat = beatCounter;
+        synchronized (autosaveStateLock) {
+            if (trainingAutosaveInFlight) {
+                Log.d("GreenValueAnalyzer", "Training data autosave skipped because a previous autosave is still running");
+                return;
+            }
+            trainingAutosaveInFlight = true;
         }
+        autosaveExecutor.execute(() -> {
+            try {
+                if (!isRecordingActive && autosaveBeat < beatCounter) {
+                    Log.i("GreenValueAnalyzer", "Training data autosave cancelled after recording stopped");
+                    return;
+                }
+                saveTrainingDataToCsvInternal(autosaveName, false, false);
+                Log.i("GreenValueAnalyzer", "Training data autosaved at beat=" + autosaveBeat + " sessionId=" + sessionId);
+            } catch (Exception e) {
+                Log.e("GreenValueAnalyzer", "Training data autosave failed", e);
+            } finally {
+                synchronized (autosaveStateLock) {
+                    trainingAutosaveInFlight = false;
+                }
+            }
+        });
     }
 
     public void clearRecordedData() {
@@ -2136,7 +2159,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("M2_SBP_CORR_G0, M2_SBP_CORR_G1, M2_SBP_CORR_G2, ")
                 .append("M2_DBP_CORR_H0, M2_DBP_CORR_H1, M2_DBP_CORR_H2, ")
                 .append("M2_SBP_term_intercept, M2_SBP_term_A, M2_SBP_term_HR, M2_SBP_term_V2P_relTTP, M2_SBP_term_P2V_relTTP, M2_SBP_term_Stiffness, M2_SBP_term_E, ")
-                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E\n");
+                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E, ");
+        appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E_ONLY, SinBPDistortionComparison.E_ONLY_LABELS);
+        csvContent.append(", ");
+        appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E2, SinBPDistortionComparison.E2_LABELS);
+        csvContent.append(", ");
+        appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_LOCAL_A, SinBPDistortionComparison.LOCAL_A_LABELS);
+        csvContent.append("\n");
 
         int maxSize = recTrainingTs.size();
         for (int i = 0; i < maxSize; i++) {
@@ -2193,6 +2222,12 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     m2SbpCoefficients[0], Arrays.copyOfRange(m2SbpCoefficients, 1, m2SbpCoefficients.length), m2Features);
             double[] m2DbpTerms = computeLinearTerms(
                     m2DbpCoefficients[0], Arrays.copyOfRange(m2DbpCoefficients, 1, m2DbpCoefficients.length), m2Features);
+            SinBPDistortionComparison.VariantResult m2EOnlyVariant =
+                    SinBPDistortionComparison.estimateEOnly(m2A, m2Hr, m2V2p, m2P2v, m2E);
+            SinBPDistortionComparison.VariantResult m2E2Variant =
+                    SinBPDistortionComparison.estimateE2(m2A, m2Hr, m2V2p, m2P2v, m2E);
+            SinBPDistortionComparison.VariantResult m2LocalAVariant =
+                    SinBPDistortionComparison.estimateLocalA(m2BeatRange, m2Hr, m2V2p, m2P2v, m2E);
 
             csvContent.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", m2A)).append(", ")
@@ -2246,7 +2281,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(formatCoefficients(m2SbpCorrectionCoefficients)).append(", ")
                     .append(formatCoefficients(m2DbpCorrectionCoefficients)).append(", ")
                     .append(formatValues(m2SbpTerms)).append(", ")
-                    .append(formatValues(m2DbpTerms))
+                    .append(formatValues(m2DbpTerms)).append(", ");
+            appendVariantValues(csvContent, m2EOnlyVariant);
+            csvContent.append(", ");
+            appendVariantValues(csvContent, m2E2Variant);
+            csvContent.append(", ");
+            appendVariantValues(csvContent, m2LocalAVariant);
+            csvContent
                     .append("\n");
         }
 
@@ -2276,6 +2317,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     }
 
     private void saveTrainingDataToCsvInternal(String name, boolean isMode1, boolean showToast) {
+        synchronized (trainingCsvSaveLock) {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_Training_Data.csv");
         double[] m1SbpCoefficients = RealtimeBP.getSbpCoefficients();
@@ -2318,7 +2360,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("M2_SBP_CORR_G0, M2_SBP_CORR_G1, M2_SBP_CORR_G2, ")
                 .append("M2_DBP_CORR_H0, M2_DBP_CORR_H1, M2_DBP_CORR_H2, ")
                 .append("M2_SBP_term_intercept, M2_SBP_term_A, M2_SBP_term_HR, M2_SBP_term_V2P_relTTP, M2_SBP_term_P2V_relTTP, M2_SBP_term_Stiffness, M2_SBP_term_E, ")
-                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E, ")
+                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E, ");
+        appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E_ONLY, SinBPDistortionComparison.E_ONLY_LABELS);
+        csvContent.append(", ");
+        appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E2, SinBPDistortionComparison.E2_LABELS);
+        csvContent.append(", ");
+        appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_LOCAL_A, SinBPDistortionComparison.LOCAL_A_LABELS);
+        csvContent.append(", ")
                 .append("M3_A, M3_HR, M3_Mean, M3_Phi, M3_SBP, M3_DBP, ")
                 .append("M3_sinPhi, M3_cosPhi, M3_fit_a, M3_fit_b, M3_fit_rmse, M3_IBI_current_ms, M3_IBI_smoothed_ms, M3_used_smoothed_ibi, ")
                 .append("M3_A_used, M3_HR_used, M3_Mean_used, M3_sinPhi_used, M3_cosPhi_used, ")
@@ -2409,6 +2457,12 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             double[] m2Features = new double[] { m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2StiffnessUsed, m2EUsed };
             double[] m2SbpTerms = computeLinearTerms(m2SbpCoefficients[0], Arrays.copyOfRange(m2SbpCoefficients, 1, m2SbpCoefficients.length), m2Features);
             double[] m2DbpTerms = computeLinearTerms(m2DbpCoefficients[0], Arrays.copyOfRange(m2DbpCoefficients, 1, m2DbpCoefficients.length), m2Features);
+            SinBPDistortionComparison.VariantResult m2EOnlyVariant =
+                    SinBPDistortionComparison.estimateEOnly(m2A, m2Hr, m2V2p, m2P2v, m2E);
+            SinBPDistortionComparison.VariantResult m2E2Variant =
+                    SinBPDistortionComparison.estimateE2(m2A, m2Hr, m2V2p, m2P2v, m2E);
+            SinBPDistortionComparison.VariantResult m2LocalAVariant =
+                    SinBPDistortionComparison.estimateLocalA(m2BeatRange, m2Hr, m2V2p, m2P2v, m2E);
 
             double m3A = i < recM3_A.size() ? recM3_A.get(i) : 0.0;
             double m3Hr = i < recM3_HR.size() ? recM3_HR.get(i) : 0.0;
@@ -2551,7 +2605,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(formatCoefficients(m2SbpCorrectionCoefficients)).append(", ")
                     .append(formatCoefficients(m2DbpCorrectionCoefficients)).append(", ")
                     .append(formatValues(m2SbpTerms)).append(", ")
-                    .append(formatValues(m2DbpTerms)).append(", ")
+                    .append(formatValues(m2DbpTerms)).append(", ");
+            appendVariantValues(csvContent, m2EOnlyVariant);
+            csvContent.append(", ");
+            appendVariantValues(csvContent, m2E2Variant);
+            csvContent.append(", ");
+            appendVariantValues(csvContent, m2LocalAVariant);
+            csvContent.append(", ")
                     // Method3 (SinBP_M)
                     .append(String.format(Locale.getDefault(), "%.4f", m3A)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", m3Hr)).append(", ")
@@ -2614,6 +2674,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         
         // PCにも保存（mode-1の場合）
         saveToPCIfConnected(name, name + "_Training_Data.csv", csvContent.toString(), isMode1);
+        }
     }
 
     private String formatCoefficients(double[] coefficients) {
@@ -2636,6 +2697,68 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             builder.append(String.format(Locale.US, "%.10f", values[i]));
         }
         return builder.toString();
+    }
+
+    private void appendVariantHeader(StringBuilder csvContent, String prefix, String[] labels) {
+        List<String> columns = new ArrayList<>();
+        columns.add(prefix + "_SBP");
+        columns.add(prefix + "_DBP");
+        columns.add(prefix + "_SBP_raw");
+        columns.add(prefix + "_DBP_raw");
+        columns.add(prefix + "_SBP_base");
+        columns.add(prefix + "_DBP_base");
+        columns.add(prefix + "_SBP_correction");
+        columns.add(prefix + "_DBP_correction");
+        columns.add(prefix + "_A_used");
+        columns.add(prefix + "_E_used");
+        columns.add(prefix + "_Stiffness_used");
+        columns.add(prefix + "_constraint_applied");
+        columns.add(prefix + "_clamp_applied");
+        columns.add(prefix + "_feature_clamp_applied");
+        columns.add(prefix + "_output_valid");
+        columns.add(prefix + "_feature_clamp_reason");
+        columns.add(prefix + "_reject_reason");
+        for (String label : labels) {
+            columns.add(prefix + "_SBP_coef_" + label);
+        }
+        for (String label : labels) {
+            columns.add(prefix + "_DBP_coef_" + label);
+        }
+        for (String label : labels) {
+            columns.add(prefix + "_SBP_term_" + label);
+        }
+        for (String label : labels) {
+            columns.add(prefix + "_DBP_term_" + label);
+        }
+        csvContent.append(String.join(", ", columns));
+    }
+
+    private void appendVariantValues(
+            StringBuilder csvContent,
+            SinBPDistortionComparison.VariantResult variant) {
+        List<String> values = new ArrayList<>();
+        values.add(String.format(Locale.getDefault(), "%.2f", variant.sbp));
+        values.add(String.format(Locale.getDefault(), "%.2f", variant.dbp));
+        values.add(String.format(Locale.getDefault(), "%.2f", variant.rawSbp));
+        values.add(String.format(Locale.getDefault(), "%.2f", variant.rawDbp));
+        values.add(String.format(Locale.getDefault(), "%.2f", variant.baseSbp));
+        values.add(String.format(Locale.getDefault(), "%.2f", variant.baseDbp));
+        values.add(String.format(Locale.getDefault(), "%.2f", variant.sbpCorrection));
+        values.add(String.format(Locale.getDefault(), "%.2f", variant.dbpCorrection));
+        values.add(String.format(Locale.getDefault(), "%.4f", variant.amplitudeUsed));
+        values.add(String.format(Locale.getDefault(), "%.4f", variant.distortionUsed));
+        values.add(String.format(Locale.getDefault(), "%.4f", variant.stiffnessUsed));
+        values.add(String.valueOf(variant.constraintApplied));
+        values.add(String.valueOf(variant.clampApplied));
+        values.add(String.valueOf(variant.featureClampApplied));
+        values.add(String.valueOf(variant.outputValid));
+        values.add(sanitizeCsvText(normalizeRejectReason(variant.featureClampReason)));
+        values.add(sanitizeCsvText(normalizeRejectReason(variant.rejectReason)));
+        values.add(formatCoefficients(variant.sbpCoefficients));
+        values.add(formatCoefficients(variant.dbpCoefficients));
+        values.add(formatValues(variant.sbpTerms));
+        values.add(formatValues(variant.dbpTerms));
+        csvContent.append(String.join(", ", values));
     }
 
     private double[] computeLinearTerms(double intercept, double[] coefficients, double[] features) {
