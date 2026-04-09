@@ -139,6 +139,10 @@ public class SinBPModel {
     private static final double SIN_PHI_SUPPORT_MAX = 0.999557;
     private static final double COS_PHI_SUPPORT_MIN = -0.975257;
     private static final double COS_PHI_SUPPORT_MAX = 0.899444;
+    // 090943 セッションでは大外れ拍が single-sine fit RMSE > 1.0 に集中していた。
+    // SinBP(M) は 1 次調和モデル前提なので、ここを超えた拍は「モデル前提から外れた拍」として除外する。
+    private static final double MAX_FIT_RMSE = 1.0;
+    private static final int MAX_ALLOWED_FEATURE_CLAMPS = 1;
 
     public static double[] getSbpCoefficients() {
         return new double[] { ALPHA0, ALPHA1, ALPHA2, ALPHA3, ALPHA4, ALPHA5 };
@@ -337,6 +341,15 @@ public class SinBPModel {
             return;
         }
 
+        if (currentFitRMSE > MAX_FIT_RMSE) {
+            currentRejectReason = "poor_sine_fit";
+            previousPeakTime = lastPeakTime;
+            previousPeakValue = lastPeakValue;
+            lastPeakValue = peakValue;
+            lastPeakTime = peakTime;
+            return;
+        }
+
         // Sin波パラメータから線形回帰でBP推定
         estimateBPFromModel();
 
@@ -474,6 +487,10 @@ public class SinBPModel {
         currentUsedCosPhi = usedCosPhi;
         currentFeatureClampApplied = featureClampReason.length() > 0 ? 1 : 0;
         currentFeatureClampReason = featureClampReason.length() > 0 ? featureClampReason.toString() : "ok";
+        if (countFeatureClampSegments(featureClampReason) > MAX_ALLOWED_FEATURE_CLAMPS) {
+            currentRejectReason = "feature_support_violation";
+            return;
+        }
 
         // Treat phase as a circular variable. Using sin/cos avoids the artificial
         // discontinuity between Phi ~= 0 and Phi ~= 2π.
@@ -827,5 +844,18 @@ public class SinBPModel {
                     .append(String.format(Locale.US, "%.4f->%.4f", value, clamped));
         }
         return clamped;
+    }
+
+    private static int countFeatureClampSegments(CharSequence reason) {
+        if (reason == null || reason.length() == 0) {
+            return 0;
+        }
+        int count = 1;
+        for (int i = 0; i < reason.length(); i++) {
+            if (reason.charAt(i) == '|') {
+                count++;
+            }
+        }
+        return count;
     }
 }

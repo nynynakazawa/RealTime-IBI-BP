@@ -168,6 +168,15 @@ public class RealtimeBP {
         Log.d("RealtimeBP-Estimate", String.format(
                 "BaseLogic values: A=%.3f, V2P_relTTP=%.3f, P2V_relTTP=%.3f",
                 amplitude, valleyToPeakRelTTP, peakToValleyRelTTP));
+
+        String relTtpReason = SignalProcessingUtils.getRelTtpConsistencyReason(
+                valleyToPeakRelTTP, peakToValleyRelTTP);
+        if (!"ok".equals(relTtpReason)) {
+            lastOutputValid = 0;
+            lastRejectReason = relTtpReason;
+            Log.w("RealtimeBP-Estimate", "Skipping RTBP update due to inconsistent relTTP pair: " + relTtpReason);
+            return;
+        }
         
         // --- 回帰式計算 ---
         // 最新のsmoothedBpmを使用

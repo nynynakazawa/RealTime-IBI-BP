@@ -247,6 +247,21 @@ public class SignalProcessingUtils {
         return "ok".equals(getInvalidBPReason(sbp, dbp));
     }
 
+    /**
+     * relTTP の 2 項が 1 拍内の時間分割として整合しているかを確認する。
+     * backward-looking 定義のため符号は負だが、絶対値の和は概ね 1.0 に近い。
+     */
+    public static String getRelTtpConsistencyReason(double valleyToPeakRelTTP, double peakToValleyRelTTP) {
+        if (!Double.isFinite(valleyToPeakRelTTP) || !Double.isFinite(peakToValleyRelTTP)) {
+            return "invalid_rel_ttp";
+        }
+        double sum = Math.abs(valleyToPeakRelTTP) + Math.abs(peakToValleyRelTTP);
+        if (sum < 0.80 || sum > 1.30) {
+            return "rel_ttp_sum_out_of_range";
+        }
+        return "ok";
+    }
+
     public static String getInvalidBPReason(double sbp, double dbp) {
         // 範囲チェック
         if (sbp < 60 || sbp > 200)

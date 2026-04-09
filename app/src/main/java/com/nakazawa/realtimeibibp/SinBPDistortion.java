@@ -133,7 +133,9 @@ public class SinBPDistortion {
     private static final double BETA5 = 10.236851183332778; // residual E
 
     // prepared_training_data.csv から求めた支持域。
-    // A / HR / relTTP は 1-99 percentile、E は残差スパイクの影響を抑えるため 5-95 percentile。
+    // A / HR / relTTP は 1-99 percentile を使用する。
+    // E は「残差が大きすぎる拍だけを抑える」ため上限のみ使う。低残差拍を下から押し上げると
+    // clean beat を人工的に歪ませるため、下限側は拘束しない。
     private static final double A_SUPPORT_MIN = 1.396092;
     private static final double A_SUPPORT_MAX = 5.098340;
     private static final double HR_SUPPORT_MIN = 49.652532;
@@ -144,6 +146,7 @@ public class SinBPDistortion {
     private static final double P2V_SUPPORT_MAX = -0.272260;
     private static final double E_SUPPORT_MIN = 2.741920;
     private static final double E_SUPPORT_MAX = 4.491780;
+    private static final int MAX_ALLOWED_FEATURE_CLAMPS = 1;
 
     public static double[] getSbpCoefficients() {
         return new double[] { ALPHA0, ALPHA1, ALPHA2, ALPHA3, ALPHA4, ALPHA5 };
@@ -726,6 +729,13 @@ public class SinBPDistortion {
         double regressionAmplitude = (logicRef != null) ? logicRef.averageValleyToPeakAmplitude : 0.0;
         currentRegressionAmplitude = regressionAmplitude;
 
+        String relTtpReason = SignalProcessingUtils.getRelTtpConsistencyReason(
+                valleyToPeakRelTTP, peakToValleyRelTTP);
+        if (!"ok".equals(relTtpReason)) {
+            currentRejectReason = relTtpReason;
+            return;
+        }
+
         StringBuilder featureClampReason = new StringBuilder();
         double usedRegressionAmplitude = clampFeature(
                 "A", regressionAmplitude, A_SUPPORT_MIN, A_SUPPORT_MAX, featureClampReason);
@@ -734,7 +744,7 @@ public class SinBPDistortion {
                 "V2P_relTTP", valleyToPeakRelTTP, V2P_SUPPORT_MIN, V2P_SUPPORT_MAX, featureClampReason);
         double usedPeakToValleyRelTTP = clampFeature(
                 "P2V_relTTP", peakToValleyRelTTP, P2V_SUPPORT_MIN, P2V_SUPPORT_MAX, featureClampReason);
-        double usedE = clampFeature("E", E, E_SUPPORT_MIN, E_SUPPORT_MAX, featureClampReason);
+        double usedE = clampUpperFeature("E", E, E_SUPPORT_MAX, featureClampReason);
         currentUsedRegressionAmplitude = usedRegressionAmplitude;
         currentUsedHR = usedHr;
         currentUsedValleyToPeakRelTTP = usedValleyToPeakRelTTP;
@@ -742,6 +752,10 @@ public class SinBPDistortion {
         currentUsedDistortion = usedE;
         currentFeatureClampApplied = featureClampReason.length() > 0 ? 1 : 0;
         currentFeatureClampReason = featureClampReason.length() > 0 ? featureClampReason.toString() : "ok";
+        if (countFeatureClampSegments(featureClampReason) > MAX_ALLOWED_FEATURE_CLAMPS) {
+            currentRejectReason = "feature_support_violation";
+            return;
+        }
 
         double sbpRefined = ALPHA0 + ALPHA1 * usedRegressionAmplitude + ALPHA2 * usedHr +
                 ALPHA3 * usedValleyToPeakRelTTP + ALPHA4 * usedPeakToValleyRelTTP +
@@ -1291,5 +1305,30 @@ public class SinBPDistortion {
                     .append(String.format(Locale.US, "%.4f->%.4f", value, clamped));
         }
         return clamped;
+    }
+
+    private static double clampUpperFeature(String label, double value, double hi, StringBuilder reason) {
+        double clamped = Math.min(value, hi);
+        if (Math.abs(clamped - value) > 1e-9) {
+            if (reason.length() > 0) {
+                reason.append("|");
+            }
+            reason.append(label).append(":")
+                    .append(String.format(Locale.US, "%.4f->%.4f", value, clamped));
+        }
+        return clamped;
+    }
+
+    private static int countFeatureClampSegments(CharSequence reason) {
+        if (reason == null || reason.length() == 0) {
+            return 0;
+        }
+        int count = 1;
+        for (int i = 0; i < reason.length(); i++) {
+            if (reason.charAt(i) == '|') {
+                count++;
+            }
+        }
+        return count;
     }
 }
