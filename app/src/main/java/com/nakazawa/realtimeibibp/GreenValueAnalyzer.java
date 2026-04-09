@@ -68,7 +68,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private final List<Float> lastIdealWaveform = new ArrayList<>();  // 直近の理想曲線波形
     private int lastIdealWaveformCursor = 0;
     private boolean idealCurveNeedsRefresh = false;  // 理想曲線のデータセットを再設定する必要があるか
-    private static final double DEFAULT_SIN_PHASE_OFFSET = 0.16;
+    private static final double DEFAULT_SIN_PHASE_OFFSET = 0.25;
     
     // Sin波の位相オフセット（遅延補正用、-1.0～1.0の範囲、正の値で前方シフト）
     private double sinPhaseOffset = DEFAULT_SIN_PHASE_OFFSET;  // 表示用の位相を少しだけ前へ寄せる
