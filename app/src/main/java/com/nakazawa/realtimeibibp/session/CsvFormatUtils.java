@@ -31,6 +31,17 @@ public final class CsvFormatUtils {
         return builder.toString();
     }
 
+    public static String formatValuesSemicolon(double[] values) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0) {
+                builder.append(";");
+            }
+            builder.append(String.format(Locale.US, "%.10f", values[i]));
+        }
+        return builder.toString();
+    }
+
     public static void appendVariantHeader(StringBuilder csvContent, String prefix, String[] labels) {
         List<String> columns = new ArrayList<>();
         columns.add(prefix + "_SBP");

@@ -43,6 +43,7 @@ import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.TotalCaptureResult;
 import com.nakazawa.realtimeibibp.session.BPPostprocessReplay;
 import com.nakazawa.realtimeibibp.session.CsvFormatUtils;
+import com.nakazawa.realtimeibibp.session.RealtimeBaselineReplay;
 import org.json.JSONObject;
 
 public class GreenValueAnalyzer implements LifecycleObserver {
@@ -2425,6 +2426,250 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         saveTrainingDataToCsvInternal(name, isMode1, true);
     }
 
+    private RealtimeBaselineReplay.ResultSet buildRealtimeBaselineResults(
+            List<BPPostProcessor.Result> m1PostResults,
+            List<BPPostProcessor.Result> m2PostResults,
+            List<BPPostProcessor.Result> m3PostResults,
+            double[] m1SbpCoefficients,
+            double[] m1DbpCoefficients,
+            double[] m2SbpCoefficients,
+            double[] m2DbpCoefficients,
+            double[] m3SbpCoefficients,
+            double[] m3DbpCoefficients) {
+        int size = recTrainingTs.size();
+        List<SinBPDistortionComparison.VariantResult> eOnlyVariants = new ArrayList<>(size);
+        List<SinBPDistortionComparison.VariantResult> e2Variants = new ArrayList<>(size);
+        List<SinBPDistortionComparison.VariantResult> localAVariants = new ArrayList<>(size);
+
+        for (int i = 0; i < size; i++) {
+            double m2A = doubleAt(recM2_A, i, 0.0);
+            double m2Hr = doubleAt(recM2_HR, i, 0.0);
+            double m2V2p = doubleAt(recM2_V2P_relTTP, i, 0.0);
+            double m2P2v = doubleAt(recM2_P2V_relTTP, i, 0.0);
+            double m2E = doubleAt(recM2_E, i, 0.0);
+            double m2BeatRange = doubleAt(recM2_BeatRange, i, 0.0);
+            eOnlyVariants.add(SinBPDistortionComparison.estimateEOnly(m2A, m2Hr, m2V2p, m2P2v, m2E));
+            e2Variants.add(SinBPDistortionComparison.estimateE2(m2A, m2Hr, m2V2p, m2P2v, m2E));
+            localAVariants.add(SinBPDistortionComparison.estimateLocalA(m2BeatRange, m2Hr, m2V2p, m2P2v, m2E));
+        }
+
+        List<BPPostProcessor.Result> eOnlyPostResults = buildVariantPostResults(eOnlyVariants);
+        List<BPPostProcessor.Result> e2PostResults = buildVariantPostResults(e2Variants);
+        List<BPPostProcessor.Result> localAPostResults = buildVariantPostResults(localAVariants);
+
+        List<RealtimeBaselineReplay.Row> rows = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) {
+            RealtimeBaselineReplay.Row row = new RealtimeBaselineReplay.Row()
+                    .setStatus("RTBP", intAt(recM1_OutputValid, i, 0), stringAt(recM1_RejectReason, i, "missing"))
+                    .setStatus("SinBP_D", intAt(recM2_OutputValid, i, 0), stringAt(recM2_RejectReason, i, "missing"))
+                    .setStatus("SinBP_M", intAt(recM3_OutputValid, i, 0), stringAt(recM3_RejectReason, i, "missing"));
+
+            double m1A = doubleAt(recM1_A, i, 0.0);
+            double m1Hr = doubleAt(recM1_HR, i, 0.0);
+            double m1V2p = doubleAt(recM1_V2P_relTTP, i, 0.0);
+            double m1P2v = doubleAt(recM1_P2V_relTTP, i, 0.0);
+            double m1Sbp = doubleAt(recM1_SBP, i, 0.0);
+            double m1Dbp = doubleAt(recM1_DBP, i, 0.0);
+            double m1AUsed = doubleAt(recM1_A_Used, i, m1A);
+            double m1HrUsed = doubleAt(recM1_HR_Used, i, m1Hr);
+            double m1V2pUsed = doubleAt(recM1_V2P_relTTP_Used, i, m1V2p);
+            double m1P2vUsed = doubleAt(recM1_P2V_relTTP_Used, i, m1P2v);
+            double m1SbpRaw = doubleAt(recM1_SBP_Raw, i, 0.0);
+            double m1DbpRaw = doubleAt(recM1_DBP_Raw, i, 0.0);
+            double[] m1Features = new double[] {m1AUsed, m1HrUsed, m1V2pUsed, m1P2vUsed};
+            putCoreBp(row, "M1", m1Sbp, m1Dbp, m1SbpRaw, m1DbpRaw, BPPostprocessReplay.getResult(m1PostResults, i));
+            row.put("M1_A", m1A)
+                    .put("M1_A_used", m1AUsed)
+                    .put("M1_HR", m1Hr)
+                    .put("M1_HR_used", m1HrUsed)
+                    .put("M1_V2P_relTTP", m1V2p)
+                    .put("M1_V2P_relTTP_used", m1V2pUsed)
+                    .put("M1_P2V_relTTP", m1P2v)
+                    .put("M1_P2V_relTTP_used", m1P2vUsed);
+            putTerms(row, "M1_SBP_term_", new String[] {"intercept", "A", "HR", "V2P_relTTP", "P2V_relTTP"},
+                    CsvFormatUtils.computeLinearTerms(m1SbpCoefficients[0], Arrays.copyOfRange(m1SbpCoefficients, 1, m1SbpCoefficients.length), m1Features));
+            putTerms(row, "M1_DBP_term_", new String[] {"intercept", "A", "HR", "V2P_relTTP", "P2V_relTTP"},
+                    CsvFormatUtils.computeLinearTerms(m1DbpCoefficients[0], Arrays.copyOfRange(m1DbpCoefficients, 1, m1DbpCoefficients.length), m1Features));
+
+            double m2A = doubleAt(recM2_A, i, 0.0);
+            double m2Hr = doubleAt(recM2_HR, i, 0.0);
+            double m2V2p = doubleAt(recM2_V2P_relTTP, i, 0.0);
+            double m2P2v = doubleAt(recM2_P2V_relTTP, i, 0.0);
+            double m2E = doubleAt(recM2_E, i, 0.0);
+            double m2Stiffness = doubleAt(recM2_Stiffness, i, 0.0);
+            double m2Sbp = doubleAt(recM2_SBP, i, 0.0);
+            double m2Dbp = doubleAt(recM2_DBP, i, 0.0);
+            double m2AUsed = doubleAt(recM2_A_Used, i, m2A);
+            double m2HrUsed = doubleAt(recM2_HR_Used, i, m2Hr);
+            double m2V2pUsed = doubleAt(recM2_V2P_relTTP_Used, i, m2V2p);
+            double m2P2vUsed = doubleAt(recM2_P2V_relTTP_Used, i, m2P2v);
+            double m2EUsed = doubleAt(recM2_E_Used, i, m2E);
+            double m2StiffnessUsed = doubleAt(recM2_Stiffness_Used, i, m2Stiffness);
+            double m2SbpRaw = doubleAt(recM2_SBP_Raw, i, 0.0);
+            double m2DbpRaw = doubleAt(recM2_DBP_Raw, i, 0.0);
+            double[] m2Features = new double[] {m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2StiffnessUsed, m2EUsed};
+            putCoreBp(row, "M2", m2Sbp, m2Dbp, m2SbpRaw, m2DbpRaw, BPPostprocessReplay.getResult(m2PostResults, i));
+            row.put("M2_A", m2A)
+                    .put("M2_A_used", m2AUsed)
+                    .put("M2_HR", m2Hr)
+                    .put("M2_HR_used", m2HrUsed)
+                    .put("M2_V2P_relTTP", m2V2p)
+                    .put("M2_V2P_relTTP_used", m2V2pUsed)
+                    .put("M2_P2V_relTTP", m2P2v)
+                    .put("M2_P2V_relTTP_used", m2P2vUsed)
+                    .put("M2_E", m2E)
+                    .put("M2_E_used", m2EUsed)
+                    .put("M2_Stiffness", m2Stiffness)
+                    .put("M2_Stiffness_used", m2StiffnessUsed)
+                    .put("M2_Mean", doubleAt(recM2_Mean, i, 0.0))
+                    .put("M2_Phi", doubleAt(recM2_Phi, i, 0.0))
+                    .put("M2_sinPhi", doubleAt(recM2_SinPhi, i, 0.0))
+                    .put("M2_cosPhi", doubleAt(recM2_CosPhi, i, 1.0))
+                    .put("M2_beat_range", doubleAt(recM2_BeatRange, i, 0.0))
+                    .put("M2_beat_std", doubleAt(recM2_BeatStd, i, 0.0))
+                    .put("M2_systole_ratio", doubleAt(recM2_SystoleRatio, i, 0.0))
+                    .put("M2_diastole_ratio", doubleAt(recM2_DiastoleRatio, i, 0.0));
+            putTerms(row, "M2_SBP_term_", new String[] {"intercept", "A", "HR", "V2P_relTTP", "P2V_relTTP", "Stiffness", "E"},
+                    CsvFormatUtils.computeLinearTerms(m2SbpCoefficients[0], Arrays.copyOfRange(m2SbpCoefficients, 1, m2SbpCoefficients.length), m2Features));
+            putTerms(row, "M2_DBP_term_", new String[] {"intercept", "A", "HR", "V2P_relTTP", "P2V_relTTP", "Stiffness", "E"},
+                    CsvFormatUtils.computeLinearTerms(m2DbpCoefficients[0], Arrays.copyOfRange(m2DbpCoefficients, 1, m2DbpCoefficients.length), m2Features));
+
+            putVariant(row, SinBPDistortionComparison.METHOD_E_ONLY, eOnlyVariants.get(i), BPPostprocessReplay.getResult(eOnlyPostResults, i));
+            putVariant(row, SinBPDistortionComparison.METHOD_E2, e2Variants.get(i), BPPostprocessReplay.getResult(e2PostResults, i));
+            putVariant(row, SinBPDistortionComparison.METHOD_LOCAL_A, localAVariants.get(i), BPPostprocessReplay.getResult(localAPostResults, i));
+
+            double m3A = doubleAt(recM3_A, i, 0.0);
+            double m3Hr = doubleAt(recM3_HR, i, 0.0);
+            double m3Mean = doubleAt(recM3_Mean, i, 0.0);
+            double m3Sbp = doubleAt(recM3_SBP, i, 0.0);
+            double m3Dbp = doubleAt(recM3_DBP, i, 0.0);
+            double m3AUsed = doubleAt(recM3_A_Used, i, m3A);
+            double m3HrUsed = doubleAt(recM3_HR_Used, i, m3Hr);
+            double m3MeanUsed = doubleAt(recM3_Mean_Used, i, m3Mean);
+            double m3SinPhi = doubleAt(recM3_SinPhi, i, 0.0);
+            double m3CosPhi = doubleAt(recM3_CosPhi, i, 1.0);
+            double m3SinPhiUsed = doubleAt(recM3_SinPhi_Used, i, m3SinPhi);
+            double m3CosPhiUsed = doubleAt(recM3_CosPhi_Used, i, m3CosPhi);
+            double m3SbpRaw = doubleAt(recM3_SBP_Raw, i, 0.0);
+            double m3DbpRaw = doubleAt(recM3_DBP_Raw, i, 0.0);
+            double[] m3Features = new double[] {m3AUsed, m3HrUsed, m3MeanUsed, m3SinPhiUsed, m3CosPhiUsed};
+            putCoreBp(row, "M3", m3Sbp, m3Dbp, m3SbpRaw, m3DbpRaw, BPPostprocessReplay.getResult(m3PostResults, i));
+            row.put("M3_A", m3A)
+                    .put("M3_A_used", m3AUsed)
+                    .put("M3_HR", m3Hr)
+                    .put("M3_HR_used", m3HrUsed)
+                    .put("M3_Mean", m3Mean)
+                    .put("M3_Mean_used", m3MeanUsed)
+                    .put("M3_Phi", doubleAt(recM3_Phi, i, 0.0))
+                    .put("M3_sinPhi", m3SinPhi)
+                    .put("M3_sinPhi_used", m3SinPhiUsed)
+                    .put("M3_cosPhi", m3CosPhi)
+                    .put("M3_cosPhi_used", m3CosPhiUsed)
+                    .put("M3_beat_range", doubleAt(recM3_BeatRange, i, 0.0))
+                    .put("M3_beat_std", doubleAt(recM3_BeatStd, i, 0.0))
+                    .put("M3_fit_rmse", doubleAt(recM3_FitRMSE, i, 0.0))
+                    .put("M3_systole_ratio", doubleAt(recM3_SystoleRatio, i, 0.0))
+                    .put("M3_diastole_ratio", doubleAt(recM3_DiastoleRatio, i, 0.0));
+            putTerms(row, "M3_SBP_term_", new String[] {"intercept", "A", "HR", "Mean", "sinPhi", "cosPhi"},
+                    CsvFormatUtils.computeLinearTerms(m3SbpCoefficients[0], Arrays.copyOfRange(m3SbpCoefficients, 1, m3SbpCoefficients.length), m3Features));
+            putTerms(row, "M3_DBP_term_", new String[] {"intercept", "A", "HR", "Mean", "sinPhi", "cosPhi"},
+                    CsvFormatUtils.computeLinearTerms(m3DbpCoefficients[0], Arrays.copyOfRange(m3DbpCoefficients, 1, m3DbpCoefficients.length), m3Features));
+
+            rows.add(row);
+        }
+
+        return RealtimeBaselineReplay.compute(ctx, rows);
+    }
+
+    private List<BPPostProcessor.Result> buildVariantPostResults(List<SinBPDistortionComparison.VariantResult> variants) {
+        List<Double> sbp = new ArrayList<>(variants.size());
+        List<Double> dbp = new ArrayList<>(variants.size());
+        List<Integer> valid = new ArrayList<>(variants.size());
+        List<String> reject = new ArrayList<>(variants.size());
+        for (SinBPDistortionComparison.VariantResult variant : variants) {
+            sbp.add(variant.sbp);
+            dbp.add(variant.dbp);
+            valid.add(variant.outputValid);
+            reject.add(variant.rejectReason);
+        }
+        return BPPostprocessReplay.buildSeries(BPPostProcessor.Method.SIN_BP_D, variants.size(), sbp, dbp, valid, reject);
+    }
+
+    private static void putCoreBp(
+            RealtimeBaselineReplay.Row row,
+            String prefix,
+            double sbp,
+            double dbp,
+            double sbpRaw,
+            double dbpRaw,
+            BPPostProcessor.Result postResult) {
+        row.put(prefix + "_SBP", sbp)
+                .put(prefix + "_DBP", dbp)
+                .put(prefix + "_SBP_raw", sbpRaw)
+                .put(prefix + "_DBP_raw", dbpRaw)
+                .put(prefix + "_MAP_raw", postResult.mapRaw)
+                .put(prefix + "_PP_raw", postResult.ppRaw)
+                .put(prefix + "_MAP_smoothed", postResult.mapSmoothed)
+                .put(prefix + "_PP_smoothed", postResult.ppSmoothed)
+                .put(prefix + "_MAP_calibrated", postResult.mapCalibrated)
+                .put(prefix + "_PP_calibrated", postResult.ppCalibrated)
+                .put(prefix + "_SBP_smoothed", postResult.sbpSmoothed)
+                .put(prefix + "_DBP_smoothed", postResult.dbpSmoothed)
+                .put(prefix + "_SBP_calibrated", postResult.sbpCalibrated)
+                .put(prefix + "_DBP_calibrated", postResult.dbpCalibrated);
+    }
+
+    private static void putVariant(
+            RealtimeBaselineReplay.Row row,
+            String prefix,
+            SinBPDistortionComparison.VariantResult variant,
+            BPPostProcessor.Result postResult) {
+        putCoreBp(row, prefix, variant.sbp, variant.dbp, variant.rawSbp, variant.rawDbp, postResult);
+        row.put(prefix + "_SBP_base", variant.baseSbp)
+                .put(prefix + "_DBP_base", variant.baseDbp)
+                .put(prefix + "_SBP_correction", variant.sbpCorrection)
+                .put(prefix + "_DBP_correction", variant.dbpCorrection)
+                .put(prefix + "_A_used", variant.amplitudeUsed)
+                .put(prefix + "_E_used", variant.distortionUsed)
+                .put(prefix + "_Stiffness_used", variant.stiffnessUsed);
+        putTerms(row, prefix + "_SBP_term_", variant.featureLabels, variant.sbpTerms);
+        putTerms(row, prefix + "_DBP_term_", variant.featureLabels, variant.dbpTerms);
+    }
+
+    private static void putTerms(
+            RealtimeBaselineReplay.Row row,
+            String prefix,
+            String[] labels,
+            double[] terms) {
+        for (int i = 0; i < labels.length && i < terms.length; i++) {
+            row.put(prefix + labels[i], terms[i]);
+        }
+    }
+
+    private static double doubleAt(List<Double> values, int index, double fallback) {
+        if (values == null || index < 0 || index >= values.size()) {
+            return fallback;
+        }
+        Double value = values.get(index);
+        return value != null && Double.isFinite(value) ? value : fallback;
+    }
+
+    private static int intAt(List<Integer> values, int index, int fallback) {
+        if (values == null || index < 0 || index >= values.size()) {
+            return fallback;
+        }
+        Integer value = values.get(index);
+        return value == null ? fallback : value;
+    }
+
+    private static String stringAt(List<String> values, int index, String fallback) {
+        if (values == null || index < 0 || index >= values.size()) {
+            return fallback;
+        }
+        String value = values.get(index);
+        return value == null ? fallback : value;
+    }
+
     private void saveTrainingDataToCsvInternal(String name, boolean isMode1, boolean showToast) {
         synchronized (trainingCsvSaveLock) {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
@@ -2463,6 +2708,16 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         double[] m1PostCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.RTBP);
         double[] m2PostCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.SIN_BP_D);
         double[] m3PostCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.SIN_BP_M);
+        RealtimeBaselineReplay.ResultSet baselineResults = buildRealtimeBaselineResults(
+                m1PostResults,
+                m2PostResults,
+                m3PostResults,
+                m1SbpCoefficients,
+                m1DbpCoefficients,
+                m2SbpCoefficients,
+                m2DbpCoefficients,
+                m3SbpCoefficients,
+                m3DbpCoefficients);
 
         // 学習用データが空の場合はトースト表示して終了
         if (recTrainingTs.isEmpty()) {
@@ -2508,7 +2763,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("M3_SBP_ALPHA0, M3_SBP_ALPHA1, M3_SBP_ALPHA2, M3_SBP_ALPHA3, M3_SBP_ALPHA4, M3_SBP_ALPHA5, ")
                 .append("M3_DBP_BETA0, M3_DBP_BETA1, M3_DBP_BETA2, M3_DBP_BETA3, M3_DBP_BETA4, M3_DBP_BETA5, ")
                 .append("M3_SBP_term_intercept, M3_SBP_term_A, M3_SBP_term_HR, M3_SBP_term_Mean, M3_SBP_term_sinPhi, M3_SBP_term_cosPhi, ")
-                .append("M3_DBP_term_intercept, M3_DBP_term_A, M3_DBP_term_HR, M3_DBP_term_Mean, M3_DBP_term_sinPhi, M3_DBP_term_cosPhi\n");
+                .append("M3_DBP_term_intercept, M3_DBP_term_A, M3_DBP_term_HR, M3_DBP_term_Mean, M3_DBP_term_sinPhi, M3_DBP_term_cosPhi, ");
+        RealtimeBaselineReplay.appendHeader(csvContent);
+        csvContent.append("\n");
 
         // 記録データを CSV に書き出し
         int maxSize = recTrainingTs.size();
@@ -2839,7 +3096,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(CsvFormatUtils.formatCoefficients(m3SbpCoefficients)).append(", ")
                     .append(CsvFormatUtils.formatCoefficients(m3DbpCoefficients)).append(", ")
                     .append(CsvFormatUtils.formatValues(m3SbpTerms)).append(", ")
-                    .append(CsvFormatUtils.formatValues(m3DbpTerms))
+                    .append(CsvFormatUtils.formatValues(m3DbpTerms)).append(", ");
+            RealtimeBaselineReplay.appendValues(csvContent, baselineResults, i);
+            csvContent
                     .append("\n");
         }
 

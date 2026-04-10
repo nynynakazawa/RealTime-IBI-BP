@@ -10,6 +10,7 @@ local.properties
 # Android ビルド成果物
 app/build/
 */build/
+!app/src/main/res/raw/realtime_bp_coefficients.json
 
 # 環境設定ファイル
 env/

@@ -38,7 +38,7 @@ public class MainActivity extends AppCompatActivity
     public static final String EXTRA_MODE = "mode";
     public static final String EXTRA_AUTOMATED = "automated";
     private static final String APP_VERSION = "1.0";
-    private static final String COEFFICIENT_VERSION = "2026-04-10-map-pp-3session-fixed";
+    private static final String COEFFICIENT_VERSION = "2026-04-10-smartphone-baseline-4session";
     private static final String AUTOMATION_LOG_TAG = "RealtimeAutomation";
 
     // ===== 定数 =====
