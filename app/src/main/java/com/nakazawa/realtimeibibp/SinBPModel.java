@@ -36,6 +36,8 @@ public class SinBPModel {
 
     // 平均用ウィンドウ（10拍）
     private static final int AVG_BEATS = 10;
+    // postprocess 後の表示平均は短めに保ち、SBP/DBP の見かけ上の一体化を抑える
+    private static final int DISPLAY_AVG_BEATS = 5;
 
     // 不応期（ミリ秒）
     private static final long REFRACTORY_PERIOD_MS = 500;
@@ -129,22 +131,23 @@ public class SinBPModel {
 
     // 線形回帰係数（Sin波パラメータのみを使用）
     // 注意: 振幅Aと平均値MeanはLogic1で正規化された値（0-10範囲）を使用
-    // 2026-04-07: 位相Phiの円周性に合わせて sin/cos 表現へ再学習
+    // 2026-04-10: realtime session 3件から MAP/PP を別々に再学習し、SBP/DBP 係数へ変換。
+    // CNAP はオフライン教師ラベルとしてのみ使用し、アプリ実行時の補正入力には使わない。
     // SBP = ALPHA0 + ALPHA1*A + ALPHA2*HR + ALPHA3*Mean + ALPHA4*sinPhi + ALPHA5*cosPhi
-    private static final double ALPHA0 = 122.69218037029376; // intercept
-    private static final double ALPHA1 = 4.309119671976174; // M3_A
-    private static final double ALPHA2 = -0.24476462220196565; // M3_HR
-    private static final double ALPHA3 = -0.6078533562531622; // M3_Mean
-    private static final double ALPHA4 = -10.14313210087717; // M3_sinPhi
-    private static final double ALPHA5 = -19.90886182442149; // M3_cosPhi
+    private static final double ALPHA0 = 142.7628950120919; // intercept
+    private static final double ALPHA1 = -2.5624732687040424; // M3_A
+    private static final double ALPHA2 = 0.1148598656663119; // M3_HR
+    private static final double ALPHA3 = 0.05546399935526579; // M3_Mean
+    private static final double ALPHA4 = -21.01363796681076; // M3_sinPhi
+    private static final double ALPHA5 = 0.6257597683196169; // M3_cosPhi
 
     // DBP = BETA0 + BETA1*A + BETA2*HR + BETA3*Mean + BETA4*sinPhi + BETA5*cosPhi
-    private static final double BETA0 = 55.325295727832724; // intercept
-    private static final double BETA1 = 2.5353874259304723; // M3_A
-    private static final double BETA2 = 0.15574837938491537; // M3_HR
-    private static final double BETA3 = -0.7460749390504687; // M3_Mean
-    private static final double BETA4 = -4.481564396278337; // M3_sinPhi
-    private static final double BETA5 = -20.885323412664174; // M3_cosPhi
+    private static final double BETA0 = 75.89358484916787; // intercept
+    private static final double BETA1 = 1.269476107026161; // M3_A
+    private static final double BETA2 = -0.0581896641241181; // M3_HR
+    private static final double BETA3 = -0.038938921280612285; // M3_Mean
+    private static final double BETA4 = 10.637750764540236; // M3_sinPhi
+    private static final double BETA5 = -0.31912231331633445; // M3_cosPhi
 
     // prepared_training_data.csv 由来の 1-99 percentile 支持域。
     private static final double A_SUPPORT_MIN = 1.407856;
@@ -625,8 +628,8 @@ public class SinBPModel {
         lastMapCalibrated = postprocess.mapCalibrated;
         lastPpCalibrated = postprocess.ppCalibrated;
         lastPostprocessApplied = postprocess.postprocessApplied;
-        double displayedSbp = postprocess.postprocessApplied == 1 ? postprocess.sbpCalibrated : sbp;
-        double displayedDbp = postprocess.postprocessApplied == 1 ? postprocess.dbpCalibrated : dbp;
+        double displayedSbp = postprocess.postprocessApplied == 1 ? postprocess.sbpSmoothed : sbp;
+        double displayedDbp = postprocess.postprocessApplied == 1 ? postprocess.dbpSmoothed : dbp;
         lastDisplayedSinSBP = displayedSbp;
         lastDisplayedSinDBP = displayedDbp;
 
@@ -641,11 +644,11 @@ public class SinBPModel {
             sinDbpHist.pollFirst();
         }
         displayedSbpHist.addLast(displayedSbp);
-        if (displayedSbpHist.size() > AVG_BEATS) {
+        if (displayedSbpHist.size() > DISPLAY_AVG_BEATS) {
             displayedSbpHist.pollFirst();
         }
         displayedDbpHist.addLast(displayedDbp);
-        if (displayedDbpHist.size() > AVG_BEATS) {
+        if (displayedDbpHist.size() > DISPLAY_AVG_BEATS) {
             displayedDbpHist.pollFirst();
         }
 

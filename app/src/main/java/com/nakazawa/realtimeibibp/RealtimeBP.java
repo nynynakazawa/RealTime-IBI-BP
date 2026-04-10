@@ -22,6 +22,8 @@ public class RealtimeBP {
 
     /** 平均用ウィンドウ (10 拍) */
     private static final int AVG_BEATS = 10;
+    /** postprocess 後の表示用平均は、追加の二重平滑化を避けるため少し短くする */
+    private static final int DISPLAY_AVG_BEATS = 5;
 
     /** 直近 N 拍の推定 SBP / DBP を保持 */
     private final Deque<Double> sbpHist = new ArrayDeque<>(AVG_BEATS);
@@ -90,21 +92,20 @@ public class RealtimeBP {
     private String lastFeatureClampReason = "init";
     private String lastRejectReason = "init";
 
-    // --- 回帰係数（2025-11-22評価結果より最適化） ---
+    // 2026-04-10: realtime session 3件から MAP/PP を別々に再学習し、SBP/DBP 係数へ変換。
+    // CNAP はオフライン教師ラベルとしてのみ使用し、アプリ実行時の補正入力には使わない。
     // SBP: C0 + C1*A + C2*HR + C3*V2P_relTTP + C4*P2V_relTTP
-    // RealTimeBP SBP係数（2025-11-22）
-    private static final double C0 = 120.49478037874556;  // intercept
-    private static final double C1 = 2.924063174160665;     // M1_A
-    private static final double C2 = -0.3107170597000359;   // M1_HR
-    private static final double C3 = 27.499385119512844;    // M1_V2P_relTTP
-    private static final double C4 = -31.8944153518056;     // M1_P2V_relTTP
+    private static final double C0 = 120.17891432255932;  // intercept
+    private static final double C1 = -0.8591241817045703; // M1_A
+    private static final double C2 = 0.17319093422811827; // M1_HR
+    private static final double C3 = 0.5477678810080552;  // M1_V2P_relTTP
+    private static final double C4 = 11.021048362406805;  // M1_P2V_relTTP
     // DBP: D0 + D1*A + D2*HR + D3*V2P_relTTP + D4*P2V_relTTP
-    // RealTimeBP DBP係数（2025-11-22）
-    private static final double D0 = 57.22996321631314;    // intercept
-    private static final double D1 = 3.810689138933605;     // M1_A
-    private static final double D2 = 0.14232918573186615;   // M1_HR
-    private static final double D3 = 53.34911907085872;    // M1_V2P_relTTP
-    private static final double D4 = -27.23680556466717;    // M1_P2V_relTTP
+    private static final double D0 = 87.20713989383975;   // intercept
+    private static final double D1 = 0.431515602257126;   // M1_A
+    private static final double D2 = -0.0888642718739695; // M1_HR
+    private static final double D3 = -0.3713417153679063; // M1_V2P_relTTP
+    private static final double D4 = -5.5791444452849595; // M1_P2V_relTTP
 
     // prepared_training_data.csv の 1-99 percentile で支持域を定義。
     // 線形係数の外挿を避け、実機で異常特徴量が入ったときの暴走を抑える。
@@ -256,8 +257,8 @@ public class RealtimeBP {
         lastMapCalibrated = postprocess.mapCalibrated;
         lastPpCalibrated = postprocess.ppCalibrated;
         lastPostprocessApplied = postprocess.postprocessApplied;
-        double displayedSbp = postprocess.postprocessApplied == 1 ? postprocess.sbpCalibrated : sbp;
-        double displayedDbp = postprocess.postprocessApplied == 1 ? postprocess.dbpCalibrated : dbp;
+        double displayedSbp = postprocess.postprocessApplied == 1 ? postprocess.sbpSmoothed : sbp;
+        double displayedDbp = postprocess.postprocessApplied == 1 ? postprocess.dbpSmoothed : dbp;
         lastDisplayedSbp = displayedSbp;
         lastDisplayedDbp = displayedDbp;
 
@@ -271,10 +272,10 @@ public class RealtimeBP {
         if (dbpHist.size() > AVG_BEATS)
             dbpHist.pollFirst();
         displayedSbpHist.addLast(displayedSbp);
-        if (displayedSbpHist.size() > AVG_BEATS)
+        if (displayedSbpHist.size() > DISPLAY_AVG_BEATS)
             displayedSbpHist.pollFirst();
         displayedDbpHist.addLast(displayedDbp);
-        if (displayedDbpHist.size() > AVG_BEATS)
+        if (displayedDbpHist.size() > DISPLAY_AVG_BEATS)
             displayedDbpHist.pollFirst();
 
         double sbpAvg = SignalProcessingUtils.robustAverage(sbpHist);

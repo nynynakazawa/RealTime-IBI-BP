@@ -8,8 +8,9 @@ package com.nakazawa.realtimeibibp;
  * 2. recent session から求めた軽い bias 補正を MAP/PP にだけ適用する
  *
  * 補正は method-specific だが形は共通。
- * 現状は identity-preserving な軽補正として b=1.0 を採用し、a だけ recent session の平均 bias
- * から決めている。将来 Analysis 側で再推定しても wire shape を変えずに差し替えられる。
+ * 2026-04-09 時点では multi-session で十分に安定した postprocess 係数がまだないため、
+ * calibration は identity に戻している。将来 Analysis 側で再推定しても wire shape を
+ * 変えずに差し替えられるよう、系列自体は残しておく。
  */
 public final class BPPostProcessor {
     public enum Method {
@@ -19,7 +20,7 @@ public final class BPPostProcessor {
     }
 
     private static final double ALPHA_MAP = 0.30;
-    private static final double ALPHA_PP = 0.20;
+    private static final double ALPHA_PP = 0.50;
     private static final double MIN_PULSE_PRESSURE = 20.0;
     private static final double MAX_PULSE_PRESSURE = 100.0;
 
@@ -114,22 +115,12 @@ public final class BPPostProcessor {
 
         double mapCalibrated = calibration.mapIntercept + calibration.mapSlope * mapSmoothed;
         double ppCalibrated = calibration.ppIntercept + calibration.ppSlope * ppSmoothed;
-        ppCalibrated = clamp(ppCalibrated, MIN_PULSE_PRESSURE, MAX_PULSE_PRESSURE);
 
         double dbpSmoothed = mapSmoothed - ppSmoothed / 3.0;
         double sbpSmoothed = dbpSmoothed + ppSmoothed;
 
         double dbpCalibrated = mapCalibrated - ppCalibrated / 3.0;
         double sbpCalibrated = dbpCalibrated + ppCalibrated;
-        if (sbpCalibrated < dbpCalibrated + MIN_PULSE_PRESSURE) {
-            sbpCalibrated = dbpCalibrated + MIN_PULSE_PRESSURE;
-        }
-        sbpCalibrated = clamp(sbpCalibrated, 60.0, 200.0);
-        dbpCalibrated = clamp(dbpCalibrated, 40.0, 150.0);
-        if (sbpCalibrated < dbpCalibrated + MIN_PULSE_PRESSURE) {
-            sbpCalibrated = dbpCalibrated + MIN_PULSE_PRESSURE;
-            sbpCalibrated = clamp(sbpCalibrated, 60.0, 200.0);
-        }
 
         return new Result(
                 mapRaw,
@@ -172,11 +163,11 @@ public final class BPPostProcessor {
     private static Calibration calibrationFor(Method method) {
         switch (method) {
             case RTBP:
-                return new Calibration(5.4781780404121205, 1.0, -24.739958588809092, 1.0);
+                return new Calibration(0.0, 1.0, 0.0, 1.0);
             case SIN_BP_D:
-                return new Calibration(0.5932244173246748, 1.0, -26.501813770266235, 1.0);
+                return new Calibration(0.0, 1.0, 0.0, 1.0);
             case SIN_BP_M:
-                return new Calibration(3.417667569820697, 1.0, -26.214421129848375, 1.0);
+                return new Calibration(0.0, 1.0, 0.0, 1.0);
             default:
                 throw new IllegalArgumentException("Unsupported method: " + method);
         }

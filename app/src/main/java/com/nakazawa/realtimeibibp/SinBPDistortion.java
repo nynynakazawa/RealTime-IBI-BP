@@ -35,6 +35,8 @@ public class SinBPDistortion {
 
     // 平均用ウィンドウ（10拍）
     private static final int AVG_BEATS = 10;
+    // postprocess 後の表示平均は短めに保ち、SBP/DBP の見かけ上の一体化を抑える
+    private static final int DISPLAY_AVG_BEATS = 5;
 
     // サイン波フィット用のサンプル数
     private static final int FIT_SAMPLES = 64;
@@ -137,17 +139,18 @@ public class SinBPDistortion {
     // フレームレート
     private int frameRate = 30;
 
-    // 固定係数（2026-04-09時点）
+    // 固定係数（2026-04-10時点）
     // SinBP(D) は RTBP を第1段の base とし、第2段で Stiffness_sin = E√A と E を加える。
-    // 補正係数は prepared_training_data.csv 上で RTBP 残差を [Stiffness_sin, E] に回帰して得た。
+    // 補正係数は realtime session 3件で MAP/PP 残差を再学習し、SBP/DBP 補正へ変換した。
+    // CNAP はオフライン教師ラベルとしてのみ使用し、アプリ実行時の補正入力には使わない。
     private static final double[] RTBP_SBP_BASE = RealtimeBP.getSbpCoefficients();
     private static final double[] RTBP_DBP_BASE = RealtimeBP.getDbpCoefficients();
-    private static final double GAMMA0 = 2.690652753209871;
-    private static final double GAMMA1 = 2.537295192342401;
-    private static final double GAMMA2 = -1.807192089982415;
-    private static final double DELTA0 = 13.061043372954417;
-    private static final double DELTA1 = 2.632014752144330;
-    private static final double DELTA2 = -4.290118500197587;
+    private static final double GAMMA0 = 3.5220794727967157;
+    private static final double GAMMA1 = 0.30302301356597755;
+    private static final double GAMMA2 = -2.7151679532747397;
+    private static final double DELTA0 = -1.7222820086086568;
+    private static final double DELTA1 = -0.14883020270567043;
+    private static final double DELTA2 = 1.3424399508896214;
 
     // prepared_training_data.csv から求めた支持域。
     // A / HR / relTTP は 1-99 percentile を使用する。
@@ -944,8 +947,8 @@ public class SinBPDistortion {
         lastMapCalibrated = postprocess.mapCalibrated;
         lastPpCalibrated = postprocess.ppCalibrated;
         lastPostprocessApplied = postprocess.postprocessApplied;
-        double displayedSbp = postprocess.postprocessApplied == 1 ? postprocess.sbpCalibrated : sbp;
-        double displayedDbp = postprocess.postprocessApplied == 1 ? postprocess.dbpCalibrated : dbp;
+        double displayedSbp = postprocess.postprocessApplied == 1 ? postprocess.sbpSmoothed : sbp;
+        double displayedDbp = postprocess.postprocessApplied == 1 ? postprocess.dbpSmoothed : dbp;
         lastDisplayedSinSBP = displayedSbp;
         lastDisplayedSinDBP = displayedDbp;
 
@@ -960,11 +963,11 @@ public class SinBPDistortion {
             sinDbpHist.pollFirst();
         }
         displayedSbpHist.addLast(displayedSbp);
-        if (displayedSbpHist.size() > AVG_BEATS) {
+        if (displayedSbpHist.size() > DISPLAY_AVG_BEATS) {
             displayedSbpHist.pollFirst();
         }
         displayedDbpHist.addLast(displayedDbp);
-        if (displayedDbpHist.size() > AVG_BEATS) {
+        if (displayedDbpHist.size() > DISPLAY_AVG_BEATS) {
             displayedDbpHist.pollFirst();
         }
 
