@@ -1,5 +1,6 @@
 package com.nakazawa.realtimeibibp.session;
 
+import com.nakazawa.realtimeibibp.BPPostProcessor;
 import com.nakazawa.realtimeibibp.SinBPDistortionComparison;
 import java.util.ArrayList;
 import java.util.List;
@@ -61,6 +62,23 @@ public final class CsvFormatUtils {
         columns.add(prefix + "_output_valid");
         columns.add(prefix + "_feature_clamp_reason");
         columns.add(prefix + "_reject_reason");
+        columns.add(prefix + "_MAP_raw");
+        columns.add(prefix + "_PP_raw");
+        columns.add(prefix + "_MAP_smoothed");
+        columns.add(prefix + "_PP_smoothed");
+        columns.add(prefix + "_MAP_calibrated");
+        columns.add(prefix + "_PP_calibrated");
+        columns.add(prefix + "_SBP_smoothed");
+        columns.add(prefix + "_DBP_smoothed");
+        columns.add(prefix + "_SBP_calibrated");
+        columns.add(prefix + "_DBP_calibrated");
+        columns.add(prefix + "_postprocess_applied");
+        columns.add(prefix + "_POST_map_a");
+        columns.add(prefix + "_POST_map_b");
+        columns.add(prefix + "_POST_pp_a");
+        columns.add(prefix + "_POST_pp_b");
+        columns.add(prefix + "_POST_alpha_map");
+        columns.add(prefix + "_POST_alpha_pp");
         for (String label : labels) {
             columns.add(prefix + "_SBP_coef_" + label);
         }
@@ -78,7 +96,9 @@ public final class CsvFormatUtils {
 
     public static void appendVariantValues(
             StringBuilder csvContent,
-            SinBPDistortionComparison.VariantResult variant) {
+            SinBPDistortionComparison.VariantResult variant,
+            BPPostProcessor.Result postResult,
+            double[] postCoefficients) {
         List<String> values = new ArrayList<>();
         values.add(String.format(Locale.getDefault(), "%.2f", variant.sbp));
         values.add(String.format(Locale.getDefault(), "%.2f", variant.dbp));
@@ -97,11 +117,44 @@ public final class CsvFormatUtils {
         values.add(String.valueOf(variant.outputValid));
         values.add(sanitizeCsvText(normalizeRejectReason(variant.featureClampReason)));
         values.add(sanitizeCsvText(normalizeRejectReason(variant.rejectReason)));
+        values.add(String.format(Locale.getDefault(), "%.4f", postResult.mapRaw));
+        values.add(String.format(Locale.getDefault(), "%.4f", postResult.ppRaw));
+        values.add(String.format(Locale.getDefault(), "%.4f", postResult.mapSmoothed));
+        values.add(String.format(Locale.getDefault(), "%.4f", postResult.ppSmoothed));
+        values.add(String.format(Locale.getDefault(), "%.4f", postResult.mapCalibrated));
+        values.add(String.format(Locale.getDefault(), "%.4f", postResult.ppCalibrated));
+        values.add(String.format(Locale.getDefault(), "%.2f", postResult.sbpSmoothed));
+        values.add(String.format(Locale.getDefault(), "%.2f", postResult.dbpSmoothed));
+        values.add(String.format(Locale.getDefault(), "%.2f", postResult.sbpCalibrated));
+        values.add(String.format(Locale.getDefault(), "%.2f", postResult.dbpCalibrated));
+        values.add(String.valueOf(postResult.postprocessApplied));
+        values.add(String.format(Locale.getDefault(), "%.6f", postCoefficients[0]));
+        values.add(String.format(Locale.getDefault(), "%.6f", postCoefficients[1]));
+        values.add(String.format(Locale.getDefault(), "%.6f", postCoefficients[2]));
+        values.add(String.format(Locale.getDefault(), "%.6f", postCoefficients[3]));
+        values.add(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaMap()));
+        values.add(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaPp()));
         values.add(formatCoefficients(variant.sbpCoefficients));
         values.add(formatCoefficients(variant.dbpCoefficients));
         values.add(formatValues(variant.sbpTerms));
         values.add(formatValues(variant.dbpTerms));
         csvContent.append(String.join(", ", values));
+    }
+
+    public static BPPostProcessor.Result buildVariantPostprocessResult(
+            BPPostProcessor processor,
+            SinBPDistortionComparison.VariantResult variant) {
+        if (processor == null || variant == null) {
+            return BPPostProcessor.Result.empty();
+        }
+        String rejectReason = normalizeRejectReason(variant.rejectReason);
+        if (variant.outputValid != 1 || !"ok".equals(rejectReason)) {
+            return BPPostProcessor.Result.empty();
+        }
+        if (!Double.isFinite(variant.sbp) || !Double.isFinite(variant.dbp) || variant.sbp <= 0.0 || variant.dbp <= 0.0) {
+            return BPPostProcessor.Result.empty();
+        }
+        return processor.apply(variant.sbp, variant.dbp);
     }
 
     public static double[] computeLinearTerms(double intercept, double[] coefficients, double[] features) {

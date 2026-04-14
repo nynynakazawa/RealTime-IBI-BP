@@ -11,6 +11,9 @@ import java.util.Locale;
  * 2. residual E + E^2
  * 3. amplitude source を beat-local range に置き換えた LocalA
  * を計算する。
+ *
+ * これらは live app の主表示系列ではなく、Training_Data.csv と
+ * offline analysis での説明・比較のために残している。
  */
 public final class SinBPDistortionComparison {
     public static final String METHOD_E_ONLY = "SinBP_D_EOnly";

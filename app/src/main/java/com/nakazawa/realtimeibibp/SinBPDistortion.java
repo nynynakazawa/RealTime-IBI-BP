@@ -2,7 +2,9 @@ package com.nakazawa.realtimeibibp;
 
 import android.util.Log;
 import com.nakazawa.realtimeibibp.bp.FeatureClampUtils;
+import com.nakazawa.realtimeibibp.bp.MapPpPrediction;
 import com.nakazawa.realtimeibibp.bp.PeakInterpolationUtils;
+import com.nakazawa.realtimeibibp.bp.RealtimeMapPpModels;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -169,47 +171,31 @@ public class SinBPDistortion {
     private static final int MAX_ALLOWED_FEATURE_CLAMPS = 1;
 
     public static double[] getSbpCoefficients() {
-        return new double[] {
-                RTBP_SBP_BASE[0] + GAMMA0,
-                RTBP_SBP_BASE[1],
-                RTBP_SBP_BASE[2],
-                RTBP_SBP_BASE[3],
-                RTBP_SBP_BASE[4],
-                GAMMA1,
-                GAMMA2
-        };
+        return RealtimeMapPpModels.getSinBpDCombinedSbpCoefficients();
     }
 
     public static double[] getDbpCoefficients() {
-        return new double[] {
-                RTBP_DBP_BASE[0] + DELTA0,
-                RTBP_DBP_BASE[1],
-                RTBP_DBP_BASE[2],
-                RTBP_DBP_BASE[3],
-                RTBP_DBP_BASE[4],
-                DELTA1,
-                DELTA2
-        };
+        return RealtimeMapPpModels.getSinBpDCombinedDbpCoefficients();
     }
 
     public static double[] getSbpBaseCoefficients() {
-        return new double[] {
-                RTBP_SBP_BASE[0], RTBP_SBP_BASE[1], RTBP_SBP_BASE[2], RTBP_SBP_BASE[3], RTBP_SBP_BASE[4]
-        };
+        return RealtimeMapPpModels.getRtbpSbpCoefficients();
     }
 
     public static double[] getDbpBaseCoefficients() {
-        return new double[] {
-                RTBP_DBP_BASE[0], RTBP_DBP_BASE[1], RTBP_DBP_BASE[2], RTBP_DBP_BASE[3], RTBP_DBP_BASE[4]
-        };
+        return RealtimeMapPpModels.getRtbpDbpCoefficients();
     }
 
     public static double[] getSbpCorrectionCoefficients() {
-        return new double[] { GAMMA0, GAMMA1, GAMMA2 };
+        double[] combined = RealtimeMapPpModels.getSinBpDCombinedSbpCoefficients();
+        double[] base = RealtimeMapPpModels.getRtbpSbpCoefficients();
+        return new double[] { combined[0] - base[0], combined[5], combined[6] };
     }
 
     public static double[] getDbpCorrectionCoefficients() {
-        return new double[] { DELTA0, DELTA1, DELTA2 };
+        double[] combined = RealtimeMapPpModels.getSinBpDCombinedDbpCoefficients();
+        double[] base = RealtimeMapPpModels.getRtbpDbpCoefficients();
+        return new double[] { combined[0] - base[0], combined[5], combined[6] };
     }
 
     // 理想曲線データ（UI表示用）
@@ -871,35 +857,34 @@ public class SinBPDistortion {
             return;
         }
 
-        double sbpBase = RTBP_SBP_BASE[0] + RTBP_SBP_BASE[1] * usedRegressionAmplitude + RTBP_SBP_BASE[2] * usedHr +
-                RTBP_SBP_BASE[3] * usedValleyToPeakRelTTP + RTBP_SBP_BASE[4] * usedPeakToValleyRelTTP;
-        double dbpBase = RTBP_DBP_BASE[0] + RTBP_DBP_BASE[1] * usedRegressionAmplitude + RTBP_DBP_BASE[2] * usedHr +
-                RTBP_DBP_BASE[3] * usedValleyToPeakRelTTP + RTBP_DBP_BASE[4] * usedPeakToValleyRelTTP;
-        double sbpCorrection = GAMMA0 + GAMMA1 * usedStiffnessSin + GAMMA2 * usedE;
-        double dbpCorrection = DELTA0 + DELTA1 * usedStiffnessSin + DELTA2 * usedE;
+        MapPpPrediction basePrediction = RealtimeMapPpModels.predictRtbp(
+                usedRegressionAmplitude,
+                usedHr,
+                usedValleyToPeakRelTTP,
+                usedPeakToValleyRelTTP);
+        MapPpPrediction prediction = RealtimeMapPpModels.predictSinBpD(
+                usedRegressionAmplitude,
+                usedHr,
+                usedValleyToPeakRelTTP,
+                usedPeakToValleyRelTTP,
+                usedStiffnessSin,
+                usedE);
+        double sbpBase = basePrediction.sbpModelRaw;
+        double dbpBase = basePrediction.dbpModelRaw;
+        double sbpCorrection = prediction.sbpModelRaw - sbpBase;
+        double dbpCorrection = prediction.dbpModelRaw - dbpBase;
         currentBaseSbp = sbpBase;
         currentBaseDbp = dbpBase;
         currentSbpCorrection = sbpCorrection;
         currentDbpCorrection = dbpCorrection;
 
-        double sbpRefined = sbpBase + sbpCorrection;
-        double dbpRefined = dbpBase + dbpCorrection;
-        currentRawSbp = sbpRefined;
-        currentRawDbp = dbpRefined;
-
-        // 制約適用
-        currentConstraintApplied = 0;
-        if (sbpRefined < dbpRefined + 20) {
-            sbpRefined = dbpRefined + 20;
-            currentConstraintApplied = 1;
-        }
-        currentConstrainedSbp = sbpRefined;
-        currentConstrainedDbp = dbpRefined;
-        double clampedSbp = SignalProcessingUtils.clamp(sbpRefined, 60, 200);
-        double clampedDbp = SignalProcessingUtils.clamp(dbpRefined, 40, 150);
-        currentClampApplied = (Math.abs(clampedSbp - sbpRefined) > 1e-9 || Math.abs(clampedDbp - dbpRefined) > 1e-9) ? 1 : 0;
-        sbpRefined = clampedSbp;
-        dbpRefined = clampedDbp;
+        double sbpRefined = prediction.sbpFinal;
+        double dbpRefined = prediction.dbpFinal;
+        currentRawSbp = prediction.sbpModelRaw;
+        currentRawDbp = prediction.dbpModelRaw;
+        currentConstraintApplied = prediction.sbpModelRaw < prediction.dbpModelRaw + 20.0 ? 1 : 0;
+        currentClampApplied = (Math.abs(prediction.sbpFinal - prediction.sbpModelRaw) > 1e-9
+                || Math.abs(prediction.dbpFinal - prediction.dbpModelRaw) > 1e-9) ? 1 : 0;
         currentConstrainedSbp = sbpRefined;
         currentConstrainedDbp = dbpRefined;
 
@@ -915,8 +900,10 @@ public class SinBPDistortion {
 
         Log.d(TAG + "-Estimate", String.format(
                 Locale.US,
-                "BP: SBP=%.1f, DBP=%.1f (base=%.1f/%.1f, corr=%.1f/%.1f, A=%.3f->%.3f, HR=%.1f->%.1f, V2P=%.3f->%.3f, P2V=%.3f->%.3f, Stiff=%.3f->%.3f, E=%.3f->%.3f, clamp=%s)",
+                "BP: raw=%.1f/%.1f final=%.1f/%.1f MAP=%.1f PP=%.1f (base=%.1f/%.1f, corr=%.1f/%.1f, A=%.3f->%.3f, HR=%.1f->%.1f, V2P=%.3f->%.3f, P2V=%.3f->%.3f, Stiff=%.3f->%.3f, E=%.3f->%.3f, clamp=%s)",
+                prediction.sbpModelRaw, prediction.dbpModelRaw,
                 sbpRefined, dbpRefined,
+                prediction.mapModelRaw, prediction.ppModelRaw,
                 sbpBase, dbpBase,
                 sbpCorrection, dbpCorrection,
                 regressionAmplitude, usedRegressionAmplitude,

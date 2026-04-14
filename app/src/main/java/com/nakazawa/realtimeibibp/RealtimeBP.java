@@ -5,6 +5,8 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Locale;
 import com.nakazawa.realtimeibibp.bp.FeatureClampUtils;
+import com.nakazawa.realtimeibibp.bp.MapPpPrediction;
+import com.nakazawa.realtimeibibp.bp.RealtimeMapPpModels;
 
 /**
  * Photoplethysmography (PPG) の形態学的特徴量を用いた
@@ -119,11 +121,11 @@ public class RealtimeBP {
     private static final double P2V_SUPPORT_MAX = -0.272260;
 
     public static double[] getSbpCoefficients() {
-        return new double[] { C0, C1, C2, C3, C4 };
+        return RealtimeMapPpModels.getRtbpSbpCoefficients();
     }
 
     public static double[] getDbpCoefficients() {
-        return new double[] { D0, D1, D2, D3, D4 };
+        return RealtimeMapPpModels.getRtbpDbpCoefficients();
     }
 
     /**
@@ -221,31 +223,29 @@ public class RealtimeBP {
         lastFeatureClampApplied = featureClampReason.length() > 0 ? 1 : 0;
         lastFeatureClampReason = featureClampReason.length() > 0 ? featureClampReason.toString() : "ok";
 
-        // 回帰式による血圧推定: SBP = C0 + C1*A + C2*HR + C3*V2P_relTTP + C4*P2V_relTTP
-        double sbp = C0 + C1 * usedAmplitude + C2 * usedHr
-                + C3 * usedValleyToPeakRelTTP + C4 * usedPeakToValleyRelTTP;
-        // DBP = D0 + D1*A + D2*HR + D3*V2P_relTTP + D4*P2V_relTTP
-        double dbp = D0 + D1 * usedAmplitude + D2 * usedHr
-                + D3 * usedValleyToPeakRelTTP + D4 * usedPeakToValleyRelTTP;
-        lastRawSbp = sbp;
-        lastRawDbp = dbp;
+        MapPpPrediction prediction = RealtimeMapPpModels.predictRtbp(
+                usedAmplitude,
+                usedHr,
+                usedValleyToPeakRelTTP,
+                usedPeakToValleyRelTTP);
+        double sbp = prediction.sbpFinal;
+        double dbp = prediction.dbpFinal;
+        lastRawSbp = prediction.sbpModelRaw;
+        lastRawDbp = prediction.dbpModelRaw;
 
         Log.d("RealtimeBP-Estimate", String.format(
                 Locale.US,
-                "RawBP: SBP=%.2f, DBP=%.2f A=%.3f->%.3f, HR=%.2f->%.2f, VtoP_relTTP=%.3f->%.3f, PtoV_relTTP=%.3f->%.3f clamp=%s",
+                "RawBP: SBP=%.2f/%.2f final=%.2f/%.2f MAP=%.2f PP=%.2f A=%.3f->%.3f, HR=%.2f->%.2f, VtoP_relTTP=%.3f->%.3f, PtoV_relTTP=%.3f->%.3f clamp=%s",
+                prediction.sbpModelRaw, prediction.dbpModelRaw,
                 sbp, dbp,
+                prediction.mapModelRaw, prediction.ppModelRaw,
                 amplitude, usedAmplitude,
                 hr, usedHr,
                 valleyToPeakRelTTP, usedValleyToPeakRelTTP,
                 peakToValleyRelTTP, usedPeakToValleyRelTTP,
                 lastFeatureClampReason));
-
-        // 範囲制限
-        double clampedSbp = clamp(sbp, 60, 200);
-        double clampedDbp = clamp(dbp, 40, 150);
-        lastClampApplied = (Math.abs(clampedSbp - sbp) > 1e-9 || Math.abs(clampedDbp - dbp) > 1e-9) ? 1 : 0;
-        sbp = clampedSbp;
-        dbp = clampedDbp;
+        lastClampApplied = (Math.abs(prediction.sbpFinal - prediction.sbpModelRaw) > 1e-9
+                || Math.abs(prediction.dbpFinal - prediction.dbpModelRaw) > 1e-9) ? 1 : 0;
         lastOutputValid = 1;
         lastRejectReason = "ok";
 

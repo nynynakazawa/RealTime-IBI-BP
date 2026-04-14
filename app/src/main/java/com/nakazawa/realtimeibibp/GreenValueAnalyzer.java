@@ -32,6 +32,7 @@ import com.github.mikephil.charting.components.XAxis;
 import com.github.mikephil.charting.components.YAxis;
 import com.github.mikephil.charting.data.*;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.nakazawa.realtimeibibp.bp.RealtimeMapPpModels;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
@@ -2223,6 +2224,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 recM2_OutputValid,
                 recM2_RejectReason);
         double[] postCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.SIN_BP_D);
+        BPPostProcessor eOnlyPostProcessor = new BPPostProcessor(BPPostProcessor.Method.SIN_BP_D);
+        BPPostProcessor e2PostProcessor = new BPPostProcessor(BPPostProcessor.Method.SIN_BP_D);
+        BPPostProcessor localAPostProcessor = new BPPostProcessor(BPPostProcessor.Method.SIN_BP_D);
         double[] m2SbpCoefficients = SinBPDistortion.getSbpCoefficients();
         double[] m2DbpCoefficients = SinBPDistortion.getDbpCoefficients();
         double[] m2SbpBaseCoefficients = SinBPDistortion.getSbpBaseCoefficients();
@@ -2321,6 +2325,12 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     SinBPDistortionComparison.estimateE2(m2A, m2Hr, m2V2p, m2P2v, m2E);
             SinBPDistortionComparison.VariantResult m2LocalAVariant =
                     SinBPDistortionComparison.estimateLocalA(m2BeatRange, m2Hr, m2V2p, m2P2v, m2E);
+            BPPostProcessor.Result m2EOnlyPostResult =
+                    CsvFormatUtils.buildVariantPostprocessResult(eOnlyPostProcessor, m2EOnlyVariant);
+            BPPostProcessor.Result m2E2PostResult =
+                    CsvFormatUtils.buildVariantPostprocessResult(e2PostProcessor, m2E2Variant);
+            BPPostProcessor.Result m2LocalAPostResult =
+                    CsvFormatUtils.buildVariantPostprocessResult(localAPostProcessor, m2LocalAVariant);
 
             csvContent.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", m2A)).append(", ")
@@ -2392,11 +2402,11 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(String.format(Locale.getDefault(), "%.6f", postCoefficients[3])).append(", ")
                     .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaMap())).append(", ")
                     .append(String.format(Locale.getDefault(), "%.6f", BPPostProcessor.getAlphaPp())).append(", ");
-            CsvFormatUtils.appendVariantValues(csvContent, m2EOnlyVariant);
+            CsvFormatUtils.appendVariantValues(csvContent, m2EOnlyVariant, m2EOnlyPostResult, postCoefficients);
             csvContent.append(", ");
-            CsvFormatUtils.appendVariantValues(csvContent, m2E2Variant);
+            CsvFormatUtils.appendVariantValues(csvContent, m2E2Variant, m2E2PostResult, postCoefficients);
             csvContent.append(", ");
-            CsvFormatUtils.appendVariantValues(csvContent, m2LocalAVariant);
+            CsvFormatUtils.appendVariantValues(csvContent, m2LocalAVariant, m2LocalAPostResult, postCoefficients);
             csvContent
                     .append("\n");
         }
@@ -2674,14 +2684,20 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         synchronized (trainingCsvSaveLock) {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_Training_Data.csv");
+        double[] m1MapCoefficients = RealtimeMapPpModels.getRtbpMapCoefficients();
+        double[] m1PpCoefficients = RealtimeMapPpModels.getRtbpPpCoefficients();
         double[] m1SbpCoefficients = RealtimeBP.getSbpCoefficients();
         double[] m1DbpCoefficients = RealtimeBP.getDbpCoefficients();
+        double[] m2MapCoefficients = RealtimeMapPpModels.getSinBpDCombinedMapCoefficients();
+        double[] m2PpCoefficients = RealtimeMapPpModels.getSinBpDCombinedPpCoefficients();
         double[] m2SbpCoefficients = SinBPDistortion.getSbpCoefficients();
         double[] m2DbpCoefficients = SinBPDistortion.getDbpCoefficients();
         double[] m2SbpBaseCoefficients = SinBPDistortion.getSbpBaseCoefficients();
         double[] m2DbpBaseCoefficients = SinBPDistortion.getDbpBaseCoefficients();
         double[] m2SbpCorrectionCoefficients = SinBPDistortion.getSbpCorrectionCoefficients();
         double[] m2DbpCorrectionCoefficients = SinBPDistortion.getDbpCorrectionCoefficients();
+        double[] m3MapCoefficients = RealtimeMapPpModels.getSinBpMMapCoefficients();
+        double[] m3PpCoefficients = RealtimeMapPpModels.getSinBpMPpCoefficients();
         double[] m3SbpCoefficients = SinBPModel.getSbpCoefficients();
         double[] m3DbpCoefficients = SinBPModel.getDbpCoefficients();
         List<BPPostProcessor.Result> m1PostResults = BPPostprocessReplay.buildSeries(
@@ -2708,6 +2724,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         double[] m1PostCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.RTBP);
         double[] m2PostCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.SIN_BP_D);
         double[] m3PostCoefficients = BPPostProcessor.getCalibrationCoefficients(BPPostProcessor.Method.SIN_BP_M);
+        BPPostProcessor eOnlyPostProcessor = new BPPostProcessor(BPPostProcessor.Method.SIN_BP_D);
+        BPPostProcessor e2PostProcessor = new BPPostProcessor(BPPostProcessor.Method.SIN_BP_D);
+        BPPostProcessor localAPostProcessor = new BPPostProcessor(BPPostProcessor.Method.SIN_BP_D);
         RealtimeBaselineReplay.ResultSet baselineResults = buildRealtimeBaselineResults(
                 m1PostResults,
                 m2PostResults,
@@ -2736,6 +2755,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("M1_SBP_C0, M1_SBP_C1, M1_SBP_C2, M1_SBP_C3, M1_SBP_C4, M1_DBP_D0, M1_DBP_D1, M1_DBP_D2, M1_DBP_D3, M1_DBP_D4, ")
                 .append("M1_SBP_term_intercept, M1_SBP_term_A, M1_SBP_term_HR, M1_SBP_term_V2P_relTTP, M1_SBP_term_P2V_relTTP, ")
                 .append("M1_DBP_term_intercept, M1_DBP_term_A, M1_DBP_term_HR, M1_DBP_term_V2P_relTTP, M1_DBP_term_P2V_relTTP, ")
+                .append("M1_MAP_coef_intercept, M1_MAP_coef_A, M1_MAP_coef_HR, M1_MAP_coef_V2P_relTTP, M1_MAP_coef_P2V_relTTP, ")
+                .append("M1_PP_coef_intercept, M1_PP_coef_A, M1_PP_coef_HR, M1_PP_coef_V2P_relTTP, M1_PP_coef_P2V_relTTP, ")
+                .append("M1_MAP_term_intercept, M1_MAP_term_A, M1_MAP_term_HR, M1_MAP_term_V2P_relTTP, M1_MAP_term_P2V_relTTP, ")
+                .append("M1_PP_term_intercept, M1_PP_term_A, M1_PP_term_HR, M1_PP_term_V2P_relTTP, M1_PP_term_P2V_relTTP, ")
                 .append("M2_A, M2_HR, M2_V2P_relTTP, M2_P2V_relTTP, M2_E, M2_Stiffness, M2_SBP, M2_DBP, ")
                 .append("M2_Mean, M2_Phi, M2_sinPhi, M2_cosPhi, M2_fit_a, M2_fit_b, M2_IBI_current_ms, M2_IBI_smoothed_ms, M2_used_smoothed_ibi, ")
                 .append("M2_A_used, M2_HR_used, M2_V2P_relTTP_used, M2_P2V_relTTP_used, M2_E_used, M2_Stiffness_used, ")
@@ -2748,7 +2771,11 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("M2_SBP_CORR_G0, M2_SBP_CORR_G1, M2_SBP_CORR_G2, ")
                 .append("M2_DBP_CORR_H0, M2_DBP_CORR_H1, M2_DBP_CORR_H2, ")
                 .append("M2_SBP_term_intercept, M2_SBP_term_A, M2_SBP_term_HR, M2_SBP_term_V2P_relTTP, M2_SBP_term_P2V_relTTP, M2_SBP_term_Stiffness, M2_SBP_term_E, ")
-                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E, ");
+                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E, ")
+                .append("M2_MAP_coef_intercept, M2_MAP_coef_A, M2_MAP_coef_HR, M2_MAP_coef_V2P_relTTP, M2_MAP_coef_P2V_relTTP, M2_MAP_coef_Stiffness, M2_MAP_coef_E, ")
+                .append("M2_PP_coef_intercept, M2_PP_coef_A, M2_PP_coef_HR, M2_PP_coef_V2P_relTTP, M2_PP_coef_P2V_relTTP, M2_PP_coef_Stiffness, M2_PP_coef_E, ")
+                .append("M2_MAP_term_intercept, M2_MAP_term_A, M2_MAP_term_HR, M2_MAP_term_V2P_relTTP, M2_MAP_term_P2V_relTTP, M2_MAP_term_Stiffness, M2_MAP_term_E, ")
+                .append("M2_PP_term_intercept, M2_PP_term_A, M2_PP_term_HR, M2_PP_term_V2P_relTTP, M2_PP_term_P2V_relTTP, M2_PP_term_Stiffness, M2_PP_term_E, ");
         CsvFormatUtils.appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E_ONLY, SinBPDistortionComparison.E_ONLY_LABELS);
         csvContent.append(", ");
         CsvFormatUtils.appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E2, SinBPDistortionComparison.E2_LABELS);
@@ -2763,7 +2790,11 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("M3_SBP_ALPHA0, M3_SBP_ALPHA1, M3_SBP_ALPHA2, M3_SBP_ALPHA3, M3_SBP_ALPHA4, M3_SBP_ALPHA5, ")
                 .append("M3_DBP_BETA0, M3_DBP_BETA1, M3_DBP_BETA2, M3_DBP_BETA3, M3_DBP_BETA4, M3_DBP_BETA5, ")
                 .append("M3_SBP_term_intercept, M3_SBP_term_A, M3_SBP_term_HR, M3_SBP_term_Mean, M3_SBP_term_sinPhi, M3_SBP_term_cosPhi, ")
-                .append("M3_DBP_term_intercept, M3_DBP_term_A, M3_DBP_term_HR, M3_DBP_term_Mean, M3_DBP_term_sinPhi, M3_DBP_term_cosPhi, ");
+                .append("M3_DBP_term_intercept, M3_DBP_term_A, M3_DBP_term_HR, M3_DBP_term_Mean, M3_DBP_term_sinPhi, M3_DBP_term_cosPhi, ")
+                .append("M3_MAP_coef_intercept, M3_MAP_coef_A, M3_MAP_coef_HR, M3_MAP_coef_Mean, M3_MAP_coef_sinPhi, M3_MAP_coef_cosPhi, ")
+                .append("M3_PP_coef_intercept, M3_PP_coef_A, M3_PP_coef_HR, M3_PP_coef_Mean, M3_PP_coef_sinPhi, M3_PP_coef_cosPhi, ")
+                .append("M3_MAP_term_intercept, M3_MAP_term_A, M3_MAP_term_HR, M3_MAP_term_Mean, M3_MAP_term_sinPhi, M3_MAP_term_cosPhi, ")
+                .append("M3_PP_term_intercept, M3_PP_term_A, M3_PP_term_HR, M3_PP_term_Mean, M3_PP_term_sinPhi, M3_PP_term_cosPhi, ");
         RealtimeBaselineReplay.appendHeader(csvContent);
         csvContent.append("\n");
 
@@ -2797,6 +2828,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             String m1FeatureClampReason = i < recM1_FeatureClampReason.size() ? recM1_FeatureClampReason.get(i) : "missing";
             String m1RejectReason = i < recM1_RejectReason.size() ? recM1_RejectReason.get(i) : "missing";
             double[] m1Features = new double[] { m1AUsed, m1HrUsed, m1V2pUsed, m1P2vUsed };
+            double[] m1MapTerms = CsvFormatUtils.computeLinearTerms(m1MapCoefficients[0], Arrays.copyOfRange(m1MapCoefficients, 1, m1MapCoefficients.length), m1Features);
+            double[] m1PpTerms = CsvFormatUtils.computeLinearTerms(m1PpCoefficients[0], Arrays.copyOfRange(m1PpCoefficients, 1, m1PpCoefficients.length), m1Features);
             double[] m1SbpTerms = CsvFormatUtils.computeLinearTerms(m1SbpCoefficients[0], Arrays.copyOfRange(m1SbpCoefficients, 1, m1SbpCoefficients.length), m1Features);
             double[] m1DbpTerms = CsvFormatUtils.computeLinearTerms(m1DbpCoefficients[0], Arrays.copyOfRange(m1DbpCoefficients, 1, m1DbpCoefficients.length), m1Features);
             BPPostProcessor.Result m1PostResult = BPPostprocessReplay.getResult(m1PostResults, i);
@@ -2846,6 +2879,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             String m2FeatureClampReason = i < recM2_FeatureClampReason.size() ? recM2_FeatureClampReason.get(i) : "missing";
             String m2RejectReason = i < recM2_RejectReason.size() ? recM2_RejectReason.get(i) : "missing";
             double[] m2Features = new double[] { m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2StiffnessUsed, m2EUsed };
+            double[] m2MapTerms = CsvFormatUtils.computeLinearTerms(m2MapCoefficients[0], Arrays.copyOfRange(m2MapCoefficients, 1, m2MapCoefficients.length), m2Features);
+            double[] m2PpTerms = CsvFormatUtils.computeLinearTerms(m2PpCoefficients[0], Arrays.copyOfRange(m2PpCoefficients, 1, m2PpCoefficients.length), m2Features);
             double[] m2SbpTerms = CsvFormatUtils.computeLinearTerms(m2SbpCoefficients[0], Arrays.copyOfRange(m2SbpCoefficients, 1, m2SbpCoefficients.length), m2Features);
             double[] m2DbpTerms = CsvFormatUtils.computeLinearTerms(m2DbpCoefficients[0], Arrays.copyOfRange(m2DbpCoefficients, 1, m2DbpCoefficients.length), m2Features);
             BPPostProcessor.Result m2PostResult = BPPostprocessReplay.getResult(m2PostResults, i);
@@ -2855,6 +2890,12 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     SinBPDistortionComparison.estimateE2(m2A, m2Hr, m2V2p, m2P2v, m2E);
             SinBPDistortionComparison.VariantResult m2LocalAVariant =
                     SinBPDistortionComparison.estimateLocalA(m2BeatRange, m2Hr, m2V2p, m2P2v, m2E);
+            BPPostProcessor.Result m2EOnlyPostResult =
+                    CsvFormatUtils.buildVariantPostprocessResult(eOnlyPostProcessor, m2EOnlyVariant);
+            BPPostProcessor.Result m2E2PostResult =
+                    CsvFormatUtils.buildVariantPostprocessResult(e2PostProcessor, m2E2Variant);
+            BPPostProcessor.Result m2LocalAPostResult =
+                    CsvFormatUtils.buildVariantPostprocessResult(localAPostProcessor, m2LocalAVariant);
 
             double m3A = i < recM3_A.size() ? recM3_A.get(i) : 0.0;
             double m3Hr = i < recM3_HR.size() ? recM3_HR.get(i) : 0.0;
@@ -2893,6 +2934,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             String m3FeatureClampReason = i < recM3_FeatureClampReason.size() ? recM3_FeatureClampReason.get(i) : "missing";
             String m3RejectReason = i < recM3_RejectReason.size() ? recM3_RejectReason.get(i) : "missing";
             double[] m3Features = new double[] { m3AUsed, m3HrUsed, m3MeanUsed, m3SinPhiUsed, m3CosPhiUsed };
+            double[] m3MapTerms = CsvFormatUtils.computeLinearTerms(m3MapCoefficients[0], Arrays.copyOfRange(m3MapCoefficients, 1, m3MapCoefficients.length), m3Features);
+            double[] m3PpTerms = CsvFormatUtils.computeLinearTerms(m3PpCoefficients[0], Arrays.copyOfRange(m3PpCoefficients, 1, m3PpCoefficients.length), m3Features);
             double[] m3SbpTerms = CsvFormatUtils.computeLinearTerms(m3SbpCoefficients[0], Arrays.copyOfRange(m3SbpCoefficients, 1, m3SbpCoefficients.length), m3Features);
             double[] m3DbpTerms = CsvFormatUtils.computeLinearTerms(m3DbpCoefficients[0], Arrays.copyOfRange(m3DbpCoefficients, 1, m3DbpCoefficients.length), m3Features);
             BPPostProcessor.Result m3PostResult = BPPostprocessReplay.getResult(m3PostResults, i);
@@ -2963,6 +3006,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(CsvFormatUtils.formatCoefficients(m1DbpCoefficients)).append(", ")
                     .append(CsvFormatUtils.formatValues(m1SbpTerms)).append(", ")
                     .append(CsvFormatUtils.formatValues(m1DbpTerms)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m1MapCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m1PpCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m1MapTerms)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m1PpTerms)).append(", ")
                     // Method2
                     .append(String.format(Locale.getDefault(), "%.4f", m2A)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.4f", m2Hr)).append(", ")
@@ -3032,12 +3079,16 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(CsvFormatUtils.formatCoefficients(m2SbpCorrectionCoefficients)).append(", ")
                     .append(CsvFormatUtils.formatCoefficients(m2DbpCorrectionCoefficients)).append(", ")
                     .append(CsvFormatUtils.formatValues(m2SbpTerms)).append(", ")
-                    .append(CsvFormatUtils.formatValues(m2DbpTerms)).append(", ");
-            CsvFormatUtils.appendVariantValues(csvContent, m2EOnlyVariant);
+                    .append(CsvFormatUtils.formatValues(m2DbpTerms)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2MapCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m2PpCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m2MapTerms)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m2PpTerms)).append(", ");
+            CsvFormatUtils.appendVariantValues(csvContent, m2EOnlyVariant, m2EOnlyPostResult, m2PostCoefficients);
             csvContent.append(", ");
-            CsvFormatUtils.appendVariantValues(csvContent, m2E2Variant);
+            CsvFormatUtils.appendVariantValues(csvContent, m2E2Variant, m2E2PostResult, m2PostCoefficients);
             csvContent.append(", ");
-            CsvFormatUtils.appendVariantValues(csvContent, m2LocalAVariant);
+            CsvFormatUtils.appendVariantValues(csvContent, m2LocalAVariant, m2LocalAPostResult, m2PostCoefficients);
             csvContent.append(", ")
                     // Method3 (SinBP_M)
                     .append(String.format(Locale.getDefault(), "%.4f", m3A)).append(", ")
@@ -3096,7 +3147,11 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(CsvFormatUtils.formatCoefficients(m3SbpCoefficients)).append(", ")
                     .append(CsvFormatUtils.formatCoefficients(m3DbpCoefficients)).append(", ")
                     .append(CsvFormatUtils.formatValues(m3SbpTerms)).append(", ")
-                    .append(CsvFormatUtils.formatValues(m3DbpTerms)).append(", ");
+                    .append(CsvFormatUtils.formatValues(m3DbpTerms)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m3MapCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatCoefficients(m3PpCoefficients)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m3MapTerms)).append(", ")
+                    .append(CsvFormatUtils.formatValues(m3PpTerms)).append(", ");
             RealtimeBaselineReplay.appendValues(csvContent, baselineResults, i);
             csvContent
                     .append("\n");

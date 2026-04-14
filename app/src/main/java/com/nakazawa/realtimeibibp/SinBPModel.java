@@ -2,7 +2,9 @@ package com.nakazawa.realtimeibibp;
 
 import android.util.Log;
 import com.nakazawa.realtimeibibp.bp.FeatureClampUtils;
+import com.nakazawa.realtimeibibp.bp.MapPpPrediction;
 import com.nakazawa.realtimeibibp.bp.PeakInterpolationUtils;
+import com.nakazawa.realtimeibibp.bp.RealtimeMapPpModels;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -166,11 +168,11 @@ public class SinBPModel {
     private static final int MAX_ALLOWED_FEATURE_CLAMPS = 1;
 
     public static double[] getSbpCoefficients() {
-        return new double[] { ALPHA0, ALPHA1, ALPHA2, ALPHA3, ALPHA4, ALPHA5 };
+        return RealtimeMapPpModels.getSinBpMSbpCoefficients();
     }
 
     public static double[] getDbpCoefficients() {
-        return new double[] { BETA0, BETA1, BETA2, BETA3, BETA4, BETA5 };
+        return RealtimeMapPpModels.getSinBpMDbpCoefficients();
     }
 
     // リスナー
@@ -559,31 +561,21 @@ public class SinBPModel {
             return;
         }
 
-        // Treat phase as a circular variable. Using sin/cos avoids the artificial
-        // discontinuity between Phi ~= 0 and Phi ~= 2π.
-        double sbp = ALPHA0 + ALPHA1 * usedA + ALPHA2 * usedHr +
-                ALPHA3 * usedMean + ALPHA4 * usedSinPhi + ALPHA5 * usedCosPhi;
-
-        // 線形回帰式：DBP = β0 + β1*A + β2*HR + β3*Mean + β4*sinPhi + β5*cosPhi
-        double dbp = BETA0 + BETA1 * usedA + BETA2 * usedHr +
-                BETA3 * usedMean + BETA4 * usedSinPhi + BETA5 * usedCosPhi;
-        currentRawSbp = sbp;
-        currentRawDbp = dbp;
-
-        // 制約適用
-        currentConstraintApplied = 0;
-        if (sbp < dbp + 20) {
-            sbp = dbp + 20;
-            currentConstraintApplied = 1;
-        }
+        MapPpPrediction prediction = RealtimeMapPpModels.predictSinBpM(
+                usedA,
+                usedHr,
+                usedMean,
+                usedSinPhi,
+                usedCosPhi);
+        double sbp = prediction.sbpFinal;
+        double dbp = prediction.dbpFinal;
+        currentRawSbp = prediction.sbpModelRaw;
+        currentRawDbp = prediction.dbpModelRaw;
+        currentConstraintApplied = prediction.sbpModelRaw < prediction.dbpModelRaw + 20.0 ? 1 : 0;
+        currentClampApplied = (Math.abs(prediction.sbpFinal - prediction.sbpModelRaw) > 1e-9
+                || Math.abs(prediction.dbpFinal - prediction.dbpModelRaw) > 1e-9) ? 1 : 0;
         currentConstrainedSbp = sbp;
         currentConstrainedDbp = dbp;
-
-        double clampedSbp = SignalProcessingUtils.clamp(sbp, 60, 200);
-        double clampedDbp = SignalProcessingUtils.clamp(dbp, 40, 150);
-        currentClampApplied = (Math.abs(clampedSbp - sbp) > 1e-9 || Math.abs(clampedDbp - dbp) > 1e-9) ? 1 : 0;
-        sbp = clampedSbp;
-        dbp = clampedDbp;
 
         // 生理学的妥当性チェック
         String invalidBpReason = SignalProcessingUtils.getInvalidBPReason(sbp, dbp);
@@ -599,8 +591,10 @@ public class SinBPModel {
 
         Log.d(TAG + "-Estimate", String.format(
                 Locale.US,
-                "BP from Model: SBP=%.1f, DBP=%.1f (A=%.2f->%.2f, HR=%.1f->%.1f, Mean=%.2f->%.2f, sinPhi=%.3f->%.3f, cosPhi=%.3f->%.3f, clamp=%s)",
+                "BP from Model: raw=%.1f/%.1f final=%.1f/%.1f MAP=%.1f PP=%.1f (A=%.2f->%.2f, HR=%.1f->%.1f, Mean=%.2f->%.2f, sinPhi=%.3f->%.3f, cosPhi=%.3f->%.3f, clamp=%s)",
+                prediction.sbpModelRaw, prediction.dbpModelRaw,
                 sbp, dbp,
+                prediction.mapModelRaw, prediction.ppModelRaw,
                 currentA, usedA,
                 hr, usedHr,
                 currentMean, usedMean,
