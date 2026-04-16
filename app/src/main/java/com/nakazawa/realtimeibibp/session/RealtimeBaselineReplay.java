@@ -242,6 +242,27 @@ public final class RealtimeBaselineReplay {
     private static final class Config {
         final Map<String, AdaptiveModel> adaptiveModels = new HashMap<>();
         final Map<String, DynamicModel> dynamicModels = new HashMap<>();
+        int dynamicAnchorBeats = 30;
+        double dynamicGainMapDefault = DEFAULT_DYNAMIC_GAIN_MAP;
+        double dynamicGainPpDefault = DEFAULT_DYNAMIC_GAIN_PP;
+        final Map<String, Double> dynamicGainMapByMethod = new HashMap<>();
+        final Map<String, Double> dynamicGainPpByMethod = new HashMap<>();
+
+        double gainMap(String method) {
+            Double methodGain = dynamicGainMapByMethod.get(method);
+            if (methodGain != null && Double.isFinite(methodGain)) {
+                return methodGain;
+            }
+            return dynamicGainMapDefault;
+        }
+
+        double gainPp(String method) {
+            Double methodGain = dynamicGainPpByMethod.get(method);
+            if (methodGain != null && Double.isFinite(methodGain)) {
+                return methodGain;
+            }
+            return dynamicGainPpDefault;
+        }
     }
 
     private static final class AdaptiveModel {
@@ -559,7 +580,9 @@ public final class RealtimeBaselineReplay {
         if (smoothedValidMaps.isEmpty()) {
             return emptySeries(rows.size());
         }
-        int anchorCount = Math.min(30, smoothedValidMaps.size());
+        int anchorCount = Math.min(Math.max(1, config.dynamicAnchorBeats), smoothedValidMaps.size());
+        double dynamicGainMap = config.gainMap(method);
+        double dynamicGainPp = config.gainPp(method);
         double rawAnchorMap = median(rawValidMaps.subList(0, anchorCount));
         double rawAnchorPp = median(rawValidPps.subList(0, anchorCount));
         double anchorMap = median(smoothedValidMaps.subList(0, anchorCount));
@@ -581,10 +604,10 @@ public final class RealtimeBaselineReplay {
             lastMap = dynamicMap;
             lastPp = dynamicPp;
 
-            double mapRaw = rich.mapRaw + DEFAULT_DYNAMIC_GAIN_MAP * (dynamic.map - rawAnchorMap);
-            double ppRaw = rich.ppRaw + DEFAULT_DYNAMIC_GAIN_PP * (dynamic.pp - rawAnchorPp);
-            double map = rich.map + DEFAULT_DYNAMIC_GAIN_MAP * (dynamicMap - anchorMap);
-            double pp = rich.pp + DEFAULT_DYNAMIC_GAIN_PP * (dynamicPp - anchorPp);
+            double mapRaw = rich.mapRaw + dynamicGainMap * (dynamic.map - rawAnchorMap);
+            double ppRaw = rich.ppRaw + dynamicGainPp * (dynamic.pp - rawAnchorPp);
+            double map = rich.map + dynamicGainMap * (dynamicMap - anchorMap);
+            double pp = rich.pp + dynamicGainPp * (dynamicPp - anchorPp);
             results.add(new Result(
                     mapRaw,
                     ppRaw,
@@ -602,8 +625,8 @@ public final class RealtimeBaselineReplay {
                     dynamicPp,
                     dynamicMap - anchorMap,
                     dynamicPp - anchorPp,
-                    DEFAULT_DYNAMIC_GAIN_MAP,
-                    DEFAULT_DYNAMIC_GAIN_PP,
+                    dynamicGainMap,
+                    dynamicGainPp,
                     rich.initialBaselineBeats,
                     rich.baselineShrinkage,
                     1,
@@ -732,7 +755,46 @@ public final class RealtimeBaselineReplay {
                 readStringArray(sinM.getJSONArray("features")),
                 readDoubleArray(sinM.getJSONArray("MAP")),
                 readDoubleArray(sinM.getJSONArray("PP"))));
+
+        JSONObject blend = root.optJSONObject("experimental_smartphone_rich_dynamic_blend");
+        if (blend != null) {
+            config.dynamicAnchorBeats = Math.max(1, blend.optInt("dynamic_anchor_beats", config.dynamicAnchorBeats));
+            config.dynamicGainMapDefault = finiteOrDefault(
+                    blend.optDouble("dynamic_gain_MAP", config.dynamicGainMapDefault),
+                    config.dynamicGainMapDefault);
+            config.dynamicGainPpDefault = finiteOrDefault(
+                    blend.optDouble("dynamic_gain_PP", config.dynamicGainPpDefault),
+                    config.dynamicGainPpDefault);
+            readMethodGainOverrides(
+                    blend.optJSONObject("dynamic_gain_MAP_by_method"),
+                    config.dynamicGainMapByMethod,
+                    config.dynamicGainMapDefault);
+            readMethodGainOverrides(
+                    blend.optJSONObject("dynamic_gain_PP_by_method"),
+                    config.dynamicGainPpByMethod,
+                    config.dynamicGainPpDefault);
+        }
         return config;
+    }
+
+    private static void readMethodGainOverrides(
+            JSONObject json,
+            Map<String, Double> out,
+            double fallback) {
+        if (json == null) {
+            return;
+        }
+        for (String method : METHODS) {
+            if (!json.has(method)) {
+                continue;
+            }
+            double value = finiteOrDefault(json.optDouble(method, fallback), fallback);
+            out.put(method, value);
+        }
+    }
+
+    private static double finiteOrDefault(double value, double fallback) {
+        return Double.isFinite(value) ? value : fallback;
     }
 
     private static String readRawResource(Context context, int resourceId) throws IOException {

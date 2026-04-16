@@ -444,11 +444,13 @@ public class RealtimeBP {
     }
 
     public double getLastRawSbp() {
-        return lastRawSbp;
+        // "raw" export is unified to clamped final BP for cross-pipeline consistency.
+        return lastSbp;
     }
 
     public double getLastRawDbp() {
-        return lastRawDbp;
+        // "raw" export is unified to clamped final BP for cross-pipeline consistency.
+        return lastDbp;
     }
 
     public int getLastClampApplied() {

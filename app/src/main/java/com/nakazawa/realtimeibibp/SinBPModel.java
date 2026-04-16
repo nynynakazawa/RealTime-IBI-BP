@@ -907,11 +907,13 @@ public class SinBPModel {
     }
 
     public double getCurrentRawSbp() {
-        return currentRawSbp;
+        // "raw" export is unified to clamped final BP for cross-pipeline consistency.
+        return SignalProcessingUtils.clamp(currentConstrainedSbp, 60.0, 200.0);
     }
 
     public double getCurrentRawDbp() {
-        return currentRawDbp;
+        // "raw" export is unified to clamped final BP for cross-pipeline consistency.
+        return SignalProcessingUtils.clamp(currentConstrainedDbp, 40.0, 150.0);
     }
 
     public double getCurrentConstrainedSbp() {

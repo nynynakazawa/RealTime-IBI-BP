@@ -5,10 +5,6 @@ package com.nakazawa.realtimeibibp.bp;
  *
  * This class intentionally contains only the app-side mainline models:
  * RTBP / SinBP_D / SinBP_M.
- *
- * Analysis-only replay branches such as SinBP_D_PPShapeC stay in the Python
- * AROB pipeline so that the realtime app and the paper-side re-analysis do not
- * get conflated.
  */
 public final class RealtimeMapPpModels {
     private static final String[] RTBP_LABELS = {"intercept", "A", "HR", "V2P_relTTP", "P2V_relTTP"};

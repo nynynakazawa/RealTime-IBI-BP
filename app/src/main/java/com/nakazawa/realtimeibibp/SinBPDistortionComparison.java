@@ -262,8 +262,6 @@ public final class SinBPDistortionComparison {
 
         double sbp = sbpBase + sbpCorrection;
         double dbp = dbpBase + dbpCorrection;
-        double rawSbp = sbp;
-        double rawDbp = dbp;
         int constraintApplied = 0;
         if (sbp < dbp + 20.0) {
             sbp = dbp + 20.0;
@@ -273,6 +271,9 @@ public final class SinBPDistortionComparison {
         double constrainedDbp = dbp;
         double clampedSbp = SignalProcessingUtils.clamp(sbp, 60.0, 200.0);
         double clampedDbp = SignalProcessingUtils.clamp(dbp, 40.0, 150.0);
+        // Keep "raw" columns aligned with clamp-applied runtime outputs.
+        double rawSbp = clampedSbp;
+        double rawDbp = clampedDbp;
         int clampApplied =
                 (Math.abs(clampedSbp - sbp) > 1e-9 || Math.abs(clampedDbp - dbp) > 1e-9) ? 1 : 0;
 
