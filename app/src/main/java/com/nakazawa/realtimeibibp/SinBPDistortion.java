@@ -12,22 +12,23 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 非対称サイン波モデル残差に基づくリアルタイム血圧推定器（SBP/DBP）
+ * 非対称 Sin 波モデル残差に基づくリアルタイム血圧推定器。
  * 【SinBP(D) - Distortion based】
- * 
- * アルゴリズムの要点：
- * 1. PPG波形を非対称サイン波モデルで近似（収縮期1/3:拡張期2/3の時間比）
- * 2. 振幅A、周期IBI（実測peak-to-peak）を抽出
- * 3. 歪み指標Eで理想非対称サイン波形からの外れを評価
- * 4. BaseLogicからRTBP特徴量（A・HR・relTTP）を取得
- * 5. Stiffness_sin = E√A を計算し、RTBP base を残差補正する
- * 
- * 非対称サイン波モデル（理論的背景）：
- * - t=0でピーク、谷までが2/3T（拡張期）、谷から次のピークまでが1/3T（収縮期）
- * - 三角関数の合成により非対称性を実現
- * - ピーク位置をt=0, T（IBI）に整列
- * - 実測IBIと毎拍同期し、PPG/動脈波の生理学的非対称性を反映
- * - 周波数分解に依存せず、低FPS環境（30fps）やノイズに対して頑健
+ *
+ * 現在の実装は 2 段構成である。
+ * 1. RTBP と同じ morphology 特徴量から base の MAP/PP を推定する。
+ * 2. 非対称 Sin 波フィットから得た残差特徴量 E と Stiffness_sin = E√A を加えて
+ *    MAP/PP 残差を補正する。
+ *
+ * 補正後の MAP/PP から
+ *   DBP = MAP - PP / 3
+ *   SBP = DBP + PP
+ * を再構成し、さらに共有の MAP/PP postprocess を通したものを表示値と process 系列に使う。
+ * raw 系列は postprocess 前の再構成 SBP/DBP を保持する。
+ *
+ * 非対称 Sin 波モデル自体は、低 FPS 環境でも beat 全体の形状差を 1 つの whole-wave descriptor
+ * として扱えるように導入している。したがって、このクラスの source of truth は
+ * RealtimeMapPpModels.predictSinBpD(...) と BPPostProcessor である。
  */
 public class SinBPDistortion {
     private static final String TAG = "SinBPDistortion";

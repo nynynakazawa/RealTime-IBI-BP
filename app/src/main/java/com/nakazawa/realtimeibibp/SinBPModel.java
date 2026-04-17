@@ -12,23 +12,19 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Sin波モデルベースのリアルタイム血圧推定器（SBP/DBP）
- * 【SinBP(M) - Model based Linear Regression】
- * 
- * アルゴリズムの要点：
- * 1. Sin波のパラメータ（振幅A、平均値Mean、IBI、位相Phi）を一拍ごとに抽出
- * 2. Sin波パラメータのみを使用した線形回帰モデルでBP推定
- * 3. rPPGの情報は使用せず、Sin波モデルのみに基づく推定
- * 
- * 線形回帰式：
- * SBP = α0 + α1*A + α2*HR + α3*Mean + α4*sin(Phi) + α5*cos(Phi)
- * DBP = β0 + β1*A + β2*HR + β3*Mean + β4*sin(Phi) + β5*cos(Phi)
- * 
- * 参考：一般的なPPGベースのBP推定研究
- * - 振幅と心拍数は血圧と強い相関がある
- * - 平均値（DC成分）も血圧推定に有効
- * - 位相情報は血管特性を反映
- * - ただし位相は円周量なので、回帰には Phi そのものではなく sin/cos 展開を用いる
+ * Sin 波モデルベースのリアルタイム血圧推定器。
+ * 【SinBP(M) - Model based】
+ *
+ * 現在の実装では SBP/DBP を直接回帰していない。各拍で非対称 Sin 波をフィットし、
+ * 振幅 A、平均値 Mean、心拍数 HR、位相の sin/cos 展開を使って MAP と PP を別々に推定する。
+ * その後、
+ *   DBP = MAP - PP / 3
+ *   SBP = DBP + PP
+ * で再構成し、さらに共有の MAP/PP postprocess を通して表示値と CSV 出力の process 系列を作る。
+ *
+ * raw 系列は postprocess 前の再構成 SBP/DBP を保持し、表示と realtime log は process 系列を使う。
+ * したがって、このクラスの source of truth は旧来の SBP/DBP 係数ではなく
+ * RealtimeMapPpModels.predictSinBpM(...) と BPPostProcessor である。
  */
 public class SinBPModel {
     private static final String TAG = "SinBPModel";

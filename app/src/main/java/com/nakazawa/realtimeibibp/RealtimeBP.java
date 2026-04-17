@@ -10,15 +10,13 @@ import com.nakazawa.realtimeibibp.bp.RealtimeMapPpModels;
 
 /**
  * Photoplethysmography (PPG) の形態学的特徴量を用いた
- * リアルタイム血圧推定器（SBP/DBP）。
+ * リアルタイム血圧推定器。
  *
  * ─ アルゴリズムの要点 ─
  * 1. BaseLogicから振幅（A）、心拍数（HR）、相対TTP（V2P_relTTP, P2V_relTTP）を取得
- * 2. 線形回帰モデルで SBP / DBP を推定
- * 
- * 回帰式:
- * SBP = C0 + C1*A + C2*HR + C3*V2P_relTTP + C4*P2V_relTTP
- * DBP = D0 + D1*A + D2*HR + D3*V2P_relTTP + D4*P2V_relTTP
+ * 2. MAP / PP を別々に線形回帰
+ * 3. DBP = MAP - PP/3, SBP = DBP + PP で再構成
+ * 4. 共通の MAP/PP postprocess を通して表示用 process 値を得る
  */
 public class RealtimeBP {
 
@@ -94,20 +92,9 @@ public class RealtimeBP {
     private String lastFeatureClampReason = "init";
     private String lastRejectReason = "init";
 
-    // 2026-04-10: realtime session 3件から MAP/PP を別々に再学習し、SBP/DBP 係数へ変換。
-    // CNAP はオフライン教師ラベルとしてのみ使用し、アプリ実行時の補正入力には使わない。
-    // SBP: C0 + C1*A + C2*HR + C3*V2P_relTTP + C4*P2V_relTTP
-    private static final double C0 = 120.17891432255932;  // intercept
-    private static final double C1 = -0.8591241817045703; // M1_A
-    private static final double C2 = 0.17319093422811827; // M1_HR
-    private static final double C3 = 0.5477678810080552;  // M1_V2P_relTTP
-    private static final double C4 = 11.021048362406805;  // M1_P2V_relTTP
-    // DBP: D0 + D1*A + D2*HR + D3*V2P_relTTP + D4*P2V_relTTP
-    private static final double D0 = 87.20713989383975;   // intercept
-    private static final double D1 = 0.431515602257126;   // M1_A
-    private static final double D2 = -0.0888642718739695; // M1_HR
-    private static final double D3 = -0.3713417153679063; // M1_V2P_relTTP
-    private static final double D4 = -5.5791444452849595; // M1_P2V_relTTP
+    // NOTE:
+    // 現在の app 本体は RealtimeMapPpModels の MAP/PP 係数を source of truth とする。
+    // 下の旧 SBP/DBP 直回帰係数コメントは歴史的メモであり、実行経路では使用しない。
 
     // prepared_training_data.csv の 1-99 percentile で支持域を定義。
     // 線形係数の外挿を避け、実機で異常特徴量が入ったときの暴走を抑える。
