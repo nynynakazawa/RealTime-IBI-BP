@@ -139,6 +139,9 @@ public class MainActivity extends AppCompatActivity
                 if (sinBPDistortion != null) {
                     sinBPDistortion.updateISO(iso);
                 }
+                if (sinBPModel != null) {
+                    sinBPModel.updateISO(iso);
+                }
             });
         });
         

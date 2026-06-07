@@ -8,50 +8,48 @@ package com.nakazawa.realtimeibibp.bp;
  */
 public final class RealtimeMapPpModels {
     private static final String[] RTBP_LABELS = {"intercept", "A", "HR", "V2P_relTTP", "P2V_relTTP"};
-    private static final String[] SINBPD_LABELS = {"intercept", "A", "HR", "V2P_relTTP", "P2V_relTTP", "Stiffness", "E"};
+    private static final String[] SINBPD_LABELS = {"intercept", "A", "HR", "V2P_relTTP", "P2V_relTTP", "E"};
     private static final String[] SINBPM_LABELS = {"intercept", "A", "HR", "Mean", "sinPhi", "cosPhi"};
 
     private static final double[] RTBP_MAP = {
-            98.08688269140994,
-            0.002965635095376108,
-            0.00032353116840502143,
-            0.04987753444398114,
-            -0.11836984277992194
+            98.17933671736458,
+            0.00517585270648243,
+            -0.0011788672226907752,
+            0.04921591953183601,
+            -0.12096408757505715
     };
     private static final double[] RTBP_PP = {
-            29.274858157485745,
-            0.053067232129562936,
-            -0.018849409364261306,
-            14.181843619640842,
-            -31.013481286966044
+            36.93711538452443,
+            1.7028474361413386,
+            -0.37065794721668943,
+            8.653490892925587,
+            -33.7685987171883
     };
 
     private static final double[] SINBPD_RESIDUAL_MAP = {
-            0.0018108361514461314,
-            0.004785206984238616,
-            -0.008775274758135023
+            -0.0019547906819300243,
+            0.006434048607158859
     };
     private static final double[] SINBPD_RESIDUAL_PP = {
-            3.7641981371729827,
-            2.7863673071152406,
-            -7.537033293641209
+            0.43101704424653153,
+            1.8230015472167056
     };
 
     private static final double[] SINBPM_MAP = {
-            98.0927217680995,
-            0.007178979670796855,
-            -0.000028845998853111546,
-            0.010336498127541083,
-            -0.010449744520172211,
-            -0.056991738552018334
+            98.11484641408586,
+            0.019010642113272858,
+            -0.0011211410980227579,
+            0.014776920392505458,
+            -0.025498238054972498,
+            -0.05445725490886895
     };
     private static final double[] SINBPM_PP = {
-            31.876001152054585,
-            -0.48797460623521965,
-            -0.08521598306987167,
-            1.867867139138918,
-            1.0644448324112812,
-            -13.556532472597219
+            21.41909245667339,
+            5.991918366443132,
+            -0.2912741893542163,
+            3.3541096069693386,
+            -9.002646049541775,
+            -11.165543654161441
     };
 
     private RealtimeMapPpModels() {
@@ -67,10 +65,9 @@ public final class RealtimeMapPpModels {
             double hr,
             double v2pRelTtp,
             double p2vRelTtp,
-            double stiffness,
             double e) {
         double[] baseFeatures = {amplitude, hr, v2pRelTtp, p2vRelTtp};
-        double[] residualFeatures = {stiffness, e};
+        double[] residualFeatures = {e};
 
         double[] mapCoefficients = new double[SINBPD_LABELS.length];
         double[] ppCoefficients = new double[SINBPD_LABELS.length];
@@ -79,9 +76,7 @@ public final class RealtimeMapPpModels {
         System.arraycopy(RTBP_MAP, 1, mapCoefficients, 1, RTBP_MAP.length - 1);
         System.arraycopy(RTBP_PP, 1, ppCoefficients, 1, RTBP_PP.length - 1);
         mapCoefficients[5] = SINBPD_RESIDUAL_MAP[1];
-        mapCoefficients[6] = SINBPD_RESIDUAL_MAP[2];
         ppCoefficients[5] = SINBPD_RESIDUAL_PP[1];
-        ppCoefficients[6] = SINBPD_RESIDUAL_PP[2];
 
         double[] mapTerms = new double[SINBPD_LABELS.length];
         double[] ppTerms = new double[SINBPD_LABELS.length];
@@ -92,9 +87,7 @@ public final class RealtimeMapPpModels {
             ppTerms[i + 1] = ppCoefficients[i + 1] * baseFeatures[i];
         }
         mapTerms[5] = mapCoefficients[5] * residualFeatures[0];
-        mapTerms[6] = mapCoefficients[6] * residualFeatures[1];
         ppTerms[5] = ppCoefficients[5] * residualFeatures[0];
-        ppTerms[6] = ppCoefficients[6] * residualFeatures[1];
         return buildPrediction(SINBPD_LABELS, mapCoefficients, ppCoefficients, mapTerms, ppTerms, true);
     }
 
@@ -129,7 +122,6 @@ public final class RealtimeMapPpModels {
         coefficients[0] = RTBP_MAP[0] + SINBPD_RESIDUAL_MAP[0];
         System.arraycopy(RTBP_MAP, 1, coefficients, 1, RTBP_MAP.length - 1);
         coefficients[5] = SINBPD_RESIDUAL_MAP[1];
-        coefficients[6] = SINBPD_RESIDUAL_MAP[2];
         return coefficients;
     }
 
@@ -138,7 +130,6 @@ public final class RealtimeMapPpModels {
         coefficients[0] = RTBP_PP[0] + SINBPD_RESIDUAL_PP[0];
         System.arraycopy(RTBP_PP, 1, coefficients, 1, RTBP_PP.length - 1);
         coefficients[5] = SINBPD_RESIDUAL_PP[1];
-        coefficients[6] = SINBPD_RESIDUAL_PP[2];
         return coefficients;
     }
 

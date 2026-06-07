@@ -90,6 +90,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private final List<Double> recSinMean = new ArrayList<>();  // 平均値
     private final List<Double> recSinIBI = new ArrayList<>();  // IBI
     private final List<Long> recSinTs = new ArrayList<>();  // タイムスタンプ
+    private long lastRecordedSinCurveEndTime = 0;
 
     // ===== 学習用データ記録 =====
     private final List<Long> recTrainingTs = new ArrayList<>();  // タイムスタンプ
@@ -270,6 +271,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         if (estimator != null) {
             Logic1 l1 = (Logic1) logicMap.computeIfAbsent("Logic1", k -> new Logic1());
             Logic2 l2 = (Logic2) logicMap.computeIfAbsent("Logic2", k -> new Logic2());
+            l1.setBPFrameCallback(estimator::update);
+            l2.setBPFrameCallback(estimator::update);
             estimator.setLogicRef(l1);  // デフォルトでLogic1を設定
         }
     }
@@ -281,6 +284,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         if (estimator != null) {
             Logic1 l1 = (Logic1) logicMap.computeIfAbsent("Logic1", k -> new Logic1());
             Logic2 l2 = (Logic2) logicMap.computeIfAbsent("Logic2", k -> new Logic2());
+            l1.setSinBPCallback(estimator::update);
+            l2.setSinBPCallback(estimator::update);
             estimator.setLogicRef(l1);  // デフォルトでLogic1を設定
         }
     }
@@ -292,6 +297,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         if (estimator != null) {
             Logic1 l1 = (Logic1) logicMap.computeIfAbsent("Logic1", k -> new Logic1());
             Logic2 l2 = (Logic2) logicMap.computeIfAbsent("Logic2", k -> new Logic2());
+            l1.setSinBPModelCallback(estimator::update);
+            l2.setSinBPModelCallback(estimator::update);
             estimator.setLogicRef(l1);  // デフォルトでLogic1を設定
         }
     }
@@ -395,6 +402,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             }
             if (sinBPDistortion != null) {
                 sinBPDistortion.setLogicRef(logic);
+            }
+            if (sinBPModel != null) {
+                sinBPModel.setLogicRef(logic);
             }
         }
     }
@@ -682,9 +692,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             }
 
             double g = getGreen(img);
+            long frameTimestampMs = System.currentTimeMillis();
             LogicProcessor lp = logicMap.get(activeLogic);
 
             if (lp != null) {
+                if (lp instanceof BaseLogic) {
+                    ((BaseLogic) lp).setCurrentFrameTimestampMs(frameTimestampMs);
+                }
                 LogicResult r = lp.processGreenValueData(g);
                 
                 // ISOが300未満の場合でもUI更新とチャート表示は行う
@@ -704,8 +718,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                         recValue.add(r.getCorrectedGreenValue());
                         recIbi.add(r.getIbi());
                         recSd.add(r.getBpmSd());
-                        recValTs.add(System.currentTimeMillis());
-                        long currentTimestamp = System.currentTimeMillis();
+                        recValTs.add(frameTimestampMs);
+                        long currentTimestamp = frameTimestampMs;
                         recIbiTs.add(currentTimestamp);
                         
                         // 学習用データの記録（IBIが更新されたタイミングで記録）
@@ -958,54 +972,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                         recSmIbi.add(smI);
                         recSmBpm.add(smB);
                         
-                        // Sin波データの記録
-                        long currentTime = System.currentTimeMillis();
-                        double sinWaveValue = 0.0;
-                        if (sinBPDistortion != null && sinBPDistortion.hasIdealCurve()) {
-                            // 理想曲線パラメータを使って相対位置から値を計算
-                            long idealStartTime = sinBPDistortion.getIdealCurveStartTime();
-                            long idealEndTime = sinBPDistortion.getIdealCurveEndTime();
-                            
-                            if (idealStartTime > 0 && idealEndTime > 0 && idealEndTime > idealStartTime) {
-                                long duration = idealEndTime - idealStartTime;
-                                
-                                // 現在時刻を理想曲線の周期内に折り返し（繰り返し波形として扱う）
-                                long relativeTime = currentTime - idealStartTime;
-                                long wrappedTime = relativeTime % duration;
-                                if (wrappedTime < 0) {
-                                    wrappedTime += duration;
-                                }
-                                
-                                // 相対位置を計算（0.0～1.0）
-                                double relativePosition = (double) wrappedTime / duration;
-                                
-                                // チャートと同じ位相補正を適用
-                                double adjustedRelativePosition = relativePosition + sinPhaseOffset;
-                                if (adjustedRelativePosition < 0.0) {
-                                    adjustedRelativePosition += 1.0;
-                                } else if (adjustedRelativePosition > 1.0) {
-                                    adjustedRelativePosition -= 1.0;
-                                }
-                                
-                                // 相対位置から理想曲線の値を取得
-                                double valueByPosition = sinBPDistortion.getScaledIdealCurveValueByRelativePosition(adjustedRelativePosition);
-                                if (!Double.isNaN(valueByPosition)) {
-                                    sinWaveValue = valueByPosition;
-                                }
-                            }
-                            recSinWave.add(sinWaveValue);
-                            recSinAmplitude.add(sinBPDistortion.getCurrentAmplitude());
-                            recSinMean.add(sinBPDistortion.getCurrentMean());
-                            recSinIBI.add(sinBPDistortion.getCurrentIBI());
-                            recSinTs.add(currentTime);
-                        } else {
-                            // SinBPDistortionが利用できない場合は0を記録
-                            recSinWave.add(0.0);
-                            recSinAmplitude.add(0.0);
-                            recSinMean.add(0.0);
-                            recSinIBI.add(0.0);
-                            recSinTs.add(currentTime);
-                        }
+                        // Sin波は1拍遅延で確定するため、現在フレームには仮値を置き、
+                        // 確定済みbeatのtimestamp範囲へ後から同じindexで埋め戻す。
+                        appendPendingSinWaveRecord(frameTimestampMs);
+                        backfillCompletedSinWaveRecords();
                     } else if (isRecordingActive && !isDetectionValid()) {
                         Log.d("GreenValueAnalyzer-ISO", "CSV recording skipped: ISO=" + currentISO);
                     }
@@ -1034,6 +1004,95 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             }
         }
         proxy.close();
+    }
+
+    private void appendPendingSinWaveRecord(long frameTimestampMs) {
+        recSinWave.add(0.0);
+        recSinAmplitude.add(0.0);
+        recSinMean.add(0.0);
+        recSinIBI.add(0.0);
+        recSinTs.add(frameTimestampMs);
+    }
+
+    private void backfillCompletedSinWaveRecords() {
+        if (sinBPDistortion == null || !sinBPDistortion.hasIdealCurve()) {
+            return;
+        }
+
+        long startTime = sinBPDistortion.getIdealCurveStartTime();
+        long endTime = sinBPDistortion.getIdealCurveEndTime();
+        if (startTime <= 0 || endTime <= startTime || endTime == lastRecordedSinCurveEndTime) {
+            return;
+        }
+
+        double minGreen = Double.POSITIVE_INFINITY;
+        double maxGreen = Double.NEGATIVE_INFINITY;
+        double minIdeal = Double.POSITIVE_INFINITY;
+        double maxIdeal = Double.NEGATIVE_INFINITY;
+        int validCount = 0;
+
+        int size = Math.min(Math.min(recValTs.size(), recValue.size()), recSinWave.size());
+        for (int i = 0; i < size; i++) {
+            long timestamp = recValTs.get(i);
+            if (timestamp < startTime || timestamp > endTime) {
+                continue;
+            }
+            double idealValue = getOffsetIdealCurveValue(timestamp, startTime, endTime);
+            if (Double.isNaN(idealValue)) {
+                continue;
+            }
+            double greenValue = recValue.get(i);
+            minGreen = Math.min(minGreen, greenValue);
+            maxGreen = Math.max(maxGreen, greenValue);
+            minIdeal = Math.min(minIdeal, idealValue);
+            maxIdeal = Math.max(maxIdeal, idealValue);
+            validCount++;
+        }
+
+        if (validCount == 0) {
+            lastRecordedSinCurveEndTime = endTime;
+            return;
+        }
+
+        boolean canScale = maxGreen > minGreen && maxIdeal > minIdeal;
+        for (int i = 0; i < size; i++) {
+            long timestamp = recValTs.get(i);
+            if (timestamp < startTime || timestamp > endTime) {
+                continue;
+            }
+            double idealValue = getOffsetIdealCurveValue(timestamp, startTime, endTime);
+            if (Double.isNaN(idealValue)) {
+                continue;
+            }
+            double alignedValue = canScale
+                    ? minGreen + (idealValue - minIdeal) * (maxGreen - minGreen) / (maxIdeal - minIdeal)
+                    : idealValue;
+            recSinWave.set(i, alignedValue);
+            recSinAmplitude.set(i, sinBPDistortion.getCurrentAmplitude());
+            recSinMean.set(i, sinBPDistortion.getCurrentMean());
+            recSinIBI.set(i, sinBPDistortion.getCurrentIBI());
+            recSinTs.set(i, timestamp);
+        }
+
+        lastRecordedSinCurveEndTime = endTime;
+        Log.d("GreenValueAnalyzer-SinSync", String.format(Locale.getDefault(),
+                "Backfilled SinWave: timeRange=[%d-%d], samples=%d, scaled=%b",
+                startTime, endTime, validCount, canScale));
+    }
+
+    private double getOffsetIdealCurveValue(long timestamp, long startTime, long endTime) {
+        long duration = endTime - startTime;
+        if (duration <= 0) {
+            return Double.NaN;
+        }
+        double relativePosition = (timestamp - startTime) / (double) duration;
+        return sinBPDistortion.getIdealCurveValueByRelativePosition(
+                wrapRelativePosition(relativePosition + sinPhaseOffset));
+    }
+
+    private double wrapRelativePosition(double relativePosition) {
+        double wrapped = relativePosition % 1.0;
+        return wrapped < 0.0 ? wrapped + 1.0 : wrapped;
     }
 
 
@@ -1490,6 +1549,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         recSinMean.clear();
         recSinIBI.clear();
         recSinTs.clear();
+        lastRecordedSinCurveEndTime = 0;
         
         // 学習用データのクリア
         recTrainingTs.clear();
@@ -2263,14 +2323,14 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("beat_sample_count, beat_min, beat_max, beat_range, beat_std, systole_ratio, diastole_ratio, ")
                 .append("SBP_raw, DBP_raw, SBP_base, DBP_base, SBP_correction, DBP_correction, SBP_attempt_final, DBP_attempt_final, ")
                 .append("constraint_applied, clamp_applied, feature_clamp_applied, output_valid, feature_clamp_reason, reject_reason, ")
-                .append("M2_SBP_ALPHA0, M2_SBP_ALPHA1, M2_SBP_ALPHA2, M2_SBP_ALPHA3, M2_SBP_ALPHA4, M2_SBP_ALPHA5, M2_SBP_ALPHA6, ")
-                .append("M2_DBP_BETA0, M2_DBP_BETA1, M2_DBP_BETA2, M2_DBP_BETA3, M2_DBP_BETA4, M2_DBP_BETA5, M2_DBP_BETA6, ")
+                .append("M2_SBP_ALPHA0, M2_SBP_ALPHA1, M2_SBP_ALPHA2, M2_SBP_ALPHA3, M2_SBP_ALPHA4, M2_SBP_ALPHA5, ")
+                .append("M2_DBP_BETA0, M2_DBP_BETA1, M2_DBP_BETA2, M2_DBP_BETA3, M2_DBP_BETA4, M2_DBP_BETA5, ")
                 .append("M2_SBP_BASE_C0, M2_SBP_BASE_C1, M2_SBP_BASE_C2, M2_SBP_BASE_C3, M2_SBP_BASE_C4, ")
                 .append("M2_DBP_BASE_D0, M2_DBP_BASE_D1, M2_DBP_BASE_D2, M2_DBP_BASE_D3, M2_DBP_BASE_D4, ")
-                .append("M2_SBP_CORR_G0, M2_SBP_CORR_G1, M2_SBP_CORR_G2, ")
-                .append("M2_DBP_CORR_H0, M2_DBP_CORR_H1, M2_DBP_CORR_H2, ")
-                .append("M2_SBP_term_intercept, M2_SBP_term_A, M2_SBP_term_HR, M2_SBP_term_V2P_relTTP, M2_SBP_term_P2V_relTTP, M2_SBP_term_Stiffness, M2_SBP_term_E, ")
-                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E, ")
+                .append("M2_SBP_CORR_G0, M2_SBP_CORR_G1, ")
+                .append("M2_DBP_CORR_H0, M2_DBP_CORR_H1, ")
+                .append("M2_SBP_term_intercept, M2_SBP_term_A, M2_SBP_term_HR, M2_SBP_term_V2P_relTTP, M2_SBP_term_P2V_relTTP, M2_SBP_term_E, ")
+                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_E, ")
                 .append("MAP_raw, PP_raw, MAP_smoothed, PP_smoothed, MAP_calibrated, PP_calibrated, SBP_smoothed, DBP_smoothed, SBP_calibrated, DBP_calibrated, postprocess_applied, POST_map_a, POST_map_b, POST_pp_a, POST_pp_b, POST_alpha_map, POST_alpha_pp, ");
         CsvFormatUtils.appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E_ONLY, SinBPDistortionComparison.E_ONLY_LABELS);
         csvContent.append(", ");
@@ -2330,7 +2390,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             int m2OutputValid = i < recM2_OutputValid.size() ? recM2_OutputValid.get(i) : 0;
             String m2FeatureClampReason = i < recM2_FeatureClampReason.size() ? recM2_FeatureClampReason.get(i) : "missing";
             String m2RejectReason = i < recM2_RejectReason.size() ? recM2_RejectReason.get(i) : "missing";
-            double[] m2Features = new double[] { m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2StiffnessUsed, m2EUsed };
+            double[] m2Features = new double[] { m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2EUsed };
             double[] m2SbpTerms = CsvFormatUtils.computeLinearTerms(
                     m2SbpCoefficients[0], Arrays.copyOfRange(m2SbpCoefficients, 1, m2SbpCoefficients.length), m2Features);
             double[] m2DbpTerms = CsvFormatUtils.computeLinearTerms(
@@ -2535,7 +2595,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             double m2StiffnessUsed = doubleAt(recM2_Stiffness_Used, i, m2Stiffness);
             double m2SbpRaw = doubleAt(recM2_SBP_Raw, i, 0.0);
             double m2DbpRaw = doubleAt(recM2_DBP_Raw, i, 0.0);
-            double[] m2Features = new double[] {m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2StiffnessUsed, m2EUsed};
+            double[] m2Features = new double[] {m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2EUsed};
             putCoreBp(row, "M2", m2Sbp, m2Dbp, m2SbpRaw, m2DbpRaw, BPPostprocessReplay.getResult(m2PostResults, i));
             row.put("M2_A", m2A)
                     .put("M2_A_used", m2AUsed)
@@ -2557,9 +2617,9 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .put("M2_beat_std", doubleAt(recM2_BeatStd, i, 0.0))
                     .put("M2_systole_ratio", doubleAt(recM2_SystoleRatio, i, 0.0))
                     .put("M2_diastole_ratio", doubleAt(recM2_DiastoleRatio, i, 0.0));
-            putTerms(row, "M2_SBP_term_", new String[] {"intercept", "A", "HR", "V2P_relTTP", "P2V_relTTP", "Stiffness", "E"},
+            putTerms(row, "M2_SBP_term_", new String[] {"intercept", "A", "HR", "V2P_relTTP", "P2V_relTTP", "E"},
                     CsvFormatUtils.computeLinearTerms(m2SbpCoefficients[0], Arrays.copyOfRange(m2SbpCoefficients, 1, m2SbpCoefficients.length), m2Features));
-            putTerms(row, "M2_DBP_term_", new String[] {"intercept", "A", "HR", "V2P_relTTP", "P2V_relTTP", "Stiffness", "E"},
+            putTerms(row, "M2_DBP_term_", new String[] {"intercept", "A", "HR", "V2P_relTTP", "P2V_relTTP", "E"},
                     CsvFormatUtils.computeLinearTerms(m2DbpCoefficients[0], Arrays.copyOfRange(m2DbpCoefficients, 1, m2DbpCoefficients.length), m2Features));
 
             putVariant(row, SinBPDistortionComparison.METHOD_E_ONLY, eOnlyVariants.get(i), BPPostprocessReplay.getResult(eOnlyPostResults, i));
@@ -2784,18 +2844,18 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("M2_A_used, M2_HR_used, M2_V2P_relTTP_used, M2_P2V_relTTP_used, M2_E_used, M2_Stiffness_used, ")
                 .append("M2_beat_sample_count, M2_beat_min, M2_beat_max, M2_beat_range, M2_beat_std, M2_systole_ratio, M2_diastole_ratio, ")
                 .append("M2_SBP_raw, M2_DBP_raw, M2_SBP_base, M2_DBP_base, M2_SBP_correction, M2_DBP_correction, M2_SBP_attempt_final, M2_DBP_attempt_final, M2_constraint_applied, M2_clamp_applied, M2_feature_clamp_applied, M2_output_valid, M2_feature_clamp_reason, M2_reject_reason, M2_MAP_raw, M2_PP_raw, M2_MAP_smoothed, M2_PP_smoothed, M2_MAP_calibrated, M2_PP_calibrated, M2_SBP_smoothed, M2_DBP_smoothed, M2_SBP_calibrated, M2_DBP_calibrated, M2_postprocess_applied, M2_POST_map_a, M2_POST_map_b, M2_POST_pp_a, M2_POST_pp_b, M2_POST_alpha_map, M2_POST_alpha_pp, ")
-                .append("M2_SBP_ALPHA0, M2_SBP_ALPHA1, M2_SBP_ALPHA2, M2_SBP_ALPHA3, M2_SBP_ALPHA4, M2_SBP_ALPHA5, M2_SBP_ALPHA6, ")
-                .append("M2_DBP_BETA0, M2_DBP_BETA1, M2_DBP_BETA2, M2_DBP_BETA3, M2_DBP_BETA4, M2_DBP_BETA5, M2_DBP_BETA6, ")
+                .append("M2_SBP_ALPHA0, M2_SBP_ALPHA1, M2_SBP_ALPHA2, M2_SBP_ALPHA3, M2_SBP_ALPHA4, M2_SBP_ALPHA5, ")
+                .append("M2_DBP_BETA0, M2_DBP_BETA1, M2_DBP_BETA2, M2_DBP_BETA3, M2_DBP_BETA4, M2_DBP_BETA5, ")
                 .append("M2_SBP_BASE_C0, M2_SBP_BASE_C1, M2_SBP_BASE_C2, M2_SBP_BASE_C3, M2_SBP_BASE_C4, ")
                 .append("M2_DBP_BASE_D0, M2_DBP_BASE_D1, M2_DBP_BASE_D2, M2_DBP_BASE_D3, M2_DBP_BASE_D4, ")
-                .append("M2_SBP_CORR_G0, M2_SBP_CORR_G1, M2_SBP_CORR_G2, ")
-                .append("M2_DBP_CORR_H0, M2_DBP_CORR_H1, M2_DBP_CORR_H2, ")
-                .append("M2_SBP_term_intercept, M2_SBP_term_A, M2_SBP_term_HR, M2_SBP_term_V2P_relTTP, M2_SBP_term_P2V_relTTP, M2_SBP_term_Stiffness, M2_SBP_term_E, ")
-                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_Stiffness, M2_DBP_term_E, ")
-                .append("M2_MAP_coef_intercept, M2_MAP_coef_A, M2_MAP_coef_HR, M2_MAP_coef_V2P_relTTP, M2_MAP_coef_P2V_relTTP, M2_MAP_coef_Stiffness, M2_MAP_coef_E, ")
-                .append("M2_PP_coef_intercept, M2_PP_coef_A, M2_PP_coef_HR, M2_PP_coef_V2P_relTTP, M2_PP_coef_P2V_relTTP, M2_PP_coef_Stiffness, M2_PP_coef_E, ")
-                .append("M2_MAP_term_intercept, M2_MAP_term_A, M2_MAP_term_HR, M2_MAP_term_V2P_relTTP, M2_MAP_term_P2V_relTTP, M2_MAP_term_Stiffness, M2_MAP_term_E, ")
-                .append("M2_PP_term_intercept, M2_PP_term_A, M2_PP_term_HR, M2_PP_term_V2P_relTTP, M2_PP_term_P2V_relTTP, M2_PP_term_Stiffness, M2_PP_term_E, ");
+                .append("M2_SBP_CORR_G0, M2_SBP_CORR_G1, ")
+                .append("M2_DBP_CORR_H0, M2_DBP_CORR_H1, ")
+                .append("M2_SBP_term_intercept, M2_SBP_term_A, M2_SBP_term_HR, M2_SBP_term_V2P_relTTP, M2_SBP_term_P2V_relTTP, M2_SBP_term_E, ")
+                .append("M2_DBP_term_intercept, M2_DBP_term_A, M2_DBP_term_HR, M2_DBP_term_V2P_relTTP, M2_DBP_term_P2V_relTTP, M2_DBP_term_E, ")
+                .append("M2_MAP_coef_intercept, M2_MAP_coef_A, M2_MAP_coef_HR, M2_MAP_coef_V2P_relTTP, M2_MAP_coef_P2V_relTTP, M2_MAP_coef_E, ")
+                .append("M2_PP_coef_intercept, M2_PP_coef_A, M2_PP_coef_HR, M2_PP_coef_V2P_relTTP, M2_PP_coef_P2V_relTTP, M2_PP_coef_E, ")
+                .append("M2_MAP_term_intercept, M2_MAP_term_A, M2_MAP_term_HR, M2_MAP_term_V2P_relTTP, M2_MAP_term_P2V_relTTP, M2_MAP_term_E, ")
+                .append("M2_PP_term_intercept, M2_PP_term_A, M2_PP_term_HR, M2_PP_term_V2P_relTTP, M2_PP_term_P2V_relTTP, M2_PP_term_E, ");
         CsvFormatUtils.appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E_ONLY, SinBPDistortionComparison.E_ONLY_LABELS);
         csvContent.append(", ");
         CsvFormatUtils.appendVariantHeader(csvContent, SinBPDistortionComparison.METHOD_E2, SinBPDistortionComparison.E2_LABELS);
@@ -2898,7 +2958,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             int m2OutputValid = i < recM2_OutputValid.size() ? recM2_OutputValid.get(i) : 0;
             String m2FeatureClampReason = i < recM2_FeatureClampReason.size() ? recM2_FeatureClampReason.get(i) : "missing";
             String m2RejectReason = i < recM2_RejectReason.size() ? recM2_RejectReason.get(i) : "missing";
-            double[] m2Features = new double[] { m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2StiffnessUsed, m2EUsed };
+            double[] m2Features = new double[] { m2AUsed, m2HrUsed, m2V2pUsed, m2P2vUsed, m2EUsed };
             double[] m2MapTerms = CsvFormatUtils.computeLinearTerms(m2MapCoefficients[0], Arrays.copyOfRange(m2MapCoefficients, 1, m2MapCoefficients.length), m2Features);
             double[] m2PpTerms = CsvFormatUtils.computeLinearTerms(m2PpCoefficients[0], Arrays.copyOfRange(m2PpCoefficients, 1, m2PpCoefficients.length), m2Features);
             double[] m2SbpTerms = CsvFormatUtils.computeLinearTerms(m2SbpCoefficients[0], Arrays.copyOfRange(m2SbpCoefficients, 1, m2SbpCoefficients.length), m2Features);

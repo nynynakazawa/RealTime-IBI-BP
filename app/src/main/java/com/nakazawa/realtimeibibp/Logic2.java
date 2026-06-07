@@ -71,13 +71,14 @@ public class Logic2 extends BaseLogic {
         updateChart(correctedGreenValue);
         
         // SinBPDistortionコールバック呼び出し
+        long frameTimestampMs = getCurrentFrameTimestampMs();
         if (sinBPCallback != null && isDetectionValid()) {
-            sinBPCallback.onFrame(correctedGreenValue, System.currentTimeMillis());
+            sinBPCallback.onFrame(correctedGreenValue, frameTimestampMs);
         }
         
         // SinBPModelコールバック呼び出し
         if (sinBPModelCallback != null && isDetectionValid()) {
-            sinBPModelCallback.onFrame(correctedGreenValue, System.currentTimeMillis());
+            sinBPModelCallback.onFrame(correctedGreenValue, frameTimestampMs);
         }
 
         // ISO値を更新（実際のISO値は外部から設定される想定）

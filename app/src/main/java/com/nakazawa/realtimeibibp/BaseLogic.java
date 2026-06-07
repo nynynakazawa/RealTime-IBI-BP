@@ -38,6 +38,7 @@ public abstract class BaseLogic implements LogicProcessor {
     protected int framesSinceLastPeak = REFRACTORY_FRAMES;
     protected double bpmValue = 0.0;
     protected double IBI = 0.0;
+    protected long currentFrameTimestampMs = 0;
 
     // ----- UI更新用コールバック -----
     public interface UIUpdateCallback {
@@ -70,6 +71,14 @@ public abstract class BaseLogic implements LogicProcessor {
     }
     protected SinBPModelCallback sinBPModelCallback;
     public void setSinBPModelCallback(SinBPModelCallback cb){ this.sinBPModelCallback = cb; }
+
+    public void setCurrentFrameTimestampMs(long timestampMs) {
+        this.currentFrameTimestampMs = timestampMs;
+    }
+
+    protected long getCurrentFrameTimestampMs() {
+        return currentFrameTimestampMs > 0 ? currentFrameTimestampMs : System.currentTimeMillis();
+    }
 
     // 共通: リアルタイム平滑化補間
     @Override

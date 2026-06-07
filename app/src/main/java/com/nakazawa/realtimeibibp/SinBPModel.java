@@ -293,19 +293,28 @@ public class SinBPModel {
     }
 
     private long getAdaptiveRefractoryPeriodMs() {
-        double referenceIbiMs = 0.0;
-        if (lastValidIBI > 0) {
-            referenceIbiMs = lastValidIBI;
-        } else if (logicRef != null && !logicRef.smoothedIbi.isEmpty()) {
-            referenceIbiMs = logicRef.getLastSmoothedIbi();
-        } else if (currentIBI > 0) {
-            referenceIbiMs = currentIBI;
-        }
+        double referenceIbiMs = getStableIbiReferenceMs();
         if (referenceIbiMs <= 0) {
             return REFRACTORY_PERIOD_MS;
         }
         long adaptiveMs = Math.round(referenceIbiMs * ADAPTIVE_REFRACTORY_RATIO);
         return Math.max(REFRACTORY_PERIOD_MS, Math.min(MAX_REFRACTORY_PERIOD_MS, adaptiveMs));
+    }
+
+    private double getStableIbiReferenceMs() {
+        if (logicRef != null && !logicRef.smoothedIbi.isEmpty()) {
+            double lastSmoothedIbi = logicRef.getLastSmoothedIbi();
+            if (lastSmoothedIbi > 0) {
+                return lastSmoothedIbi;
+            }
+        }
+        if (lastValidIBI > 0) {
+            return lastValidIBI;
+        }
+        if (currentIBI > 0) {
+            return currentIBI;
+        }
+        return 0.0;
     }
 
     private boolean isProminentPeak(Double[] recent, int peakIndex) {
@@ -395,7 +404,8 @@ public class SinBPModel {
         extractSinParameters(beatSamples, ibi);
 
         // 異常値チェック
-        String invalidBeatReason = SignalProcessingUtils.getInvalidBeatReason(ibi, currentA, lastValidIBI);
+        double stableReferenceIbi = getStableIbiReferenceMs();
+        String invalidBeatReason = SignalProcessingUtils.getInvalidBeatReason(ibi, currentA, stableReferenceIbi);
         if (!"ok".equals(invalidBeatReason)) {
             currentRejectReason = invalidBeatReason;
             // データを更新して次の拍に備える

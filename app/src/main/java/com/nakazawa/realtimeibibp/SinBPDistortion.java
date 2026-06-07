@@ -17,7 +17,7 @@ import java.util.Locale;
  *
  * 現在の実装は 2 段構成である。
  * 1. RTBP と同じ morphology 特徴量から base の MAP/PP を推定する。
- * 2. 非対称 Sin 波フィットから得た残差特徴量 E と Stiffness_sin = E√A を加えて
+ * 2. 非対称 Sin 波フィットから得た残差特徴量 E で
  *    MAP/PP 残差を補正する。
  *
  * 補正後の MAP/PP から
@@ -143,18 +143,9 @@ public class SinBPDistortion {
     private int frameRate = 30;
 
     // 固定係数（2026-04-10時点）
-    // SinBP(D) は RTBP を第1段の base とし、第2段で Stiffness_sin = E√A と E を加える。
-    // 補正係数は realtime session 3件で MAP/PP 残差を再学習し、SBP/DBP 補正へ変換した。
+    // SinBP(D) は RTBP を第1段の base とし、第2段で residual E のみを加える。
+    // 補正係数は past session を教師として MAP/PP 残差を再学習した。
     // CNAP はオフライン教師ラベルとしてのみ使用し、アプリ実行時の補正入力には使わない。
-    private static final double[] RTBP_SBP_BASE = RealtimeBP.getSbpCoefficients();
-    private static final double[] RTBP_DBP_BASE = RealtimeBP.getDbpCoefficients();
-    private static final double GAMMA0 = 3.5220794727967157;
-    private static final double GAMMA1 = 0.30302301356597755;
-    private static final double GAMMA2 = -2.7151679532747397;
-    private static final double DELTA0 = -1.7222820086086568;
-    private static final double DELTA1 = -0.14883020270567043;
-    private static final double DELTA2 = 1.3424399508896214;
-
     // prepared_training_data.csv から求めた支持域。
     // A / HR / relTTP は 1-99 percentile を使用する。
     // E は「残差が大きすぎる拍だけを抑える」ため上限のみ使う。低残差拍を下から押し上げると
@@ -168,7 +159,6 @@ public class SinBPDistortion {
     private static final double P2V_SUPPORT_MIN = -0.859316;
     private static final double P2V_SUPPORT_MAX = -0.272260;
     private static final double E_SUPPORT_MAX = 4.810248;
-    private static final double STIFFNESS_SUPPORT_MAX = 10.860692;
     private static final int MAX_ALLOWED_FEATURE_CLAMPS = 1;
 
     public static double[] getSbpCoefficients() {
@@ -190,13 +180,13 @@ public class SinBPDistortion {
     public static double[] getSbpCorrectionCoefficients() {
         double[] combined = RealtimeMapPpModels.getSinBpDCombinedSbpCoefficients();
         double[] base = RealtimeMapPpModels.getRtbpSbpCoefficients();
-        return new double[] { combined[0] - base[0], combined[5], combined[6] };
+        return new double[] { combined[0] - base[0], combined[5] };
     }
 
     public static double[] getDbpCorrectionCoefficients() {
         double[] combined = RealtimeMapPpModels.getSinBpDCombinedDbpCoefficients();
         double[] base = RealtimeMapPpModels.getRtbpDbpCoefficients();
-        return new double[] { combined[0] - base[0], combined[5], combined[6] };
+        return new double[] { combined[0] - base[0], combined[5] };
     }
 
     // 理想曲線データ（UI表示用）
@@ -444,19 +434,28 @@ public class SinBPDistortion {
     }
 
     private long getAdaptiveRefractoryPeriodMs() {
-        double referenceIbiMs = 0.0;
-        if (lastValidIBI > 0) {
-            referenceIbiMs = lastValidIBI;
-        } else if (logicRef != null && !logicRef.smoothedIbi.isEmpty()) {
-            referenceIbiMs = logicRef.getLastSmoothedIbi();
-        } else if (currentIBI > 0) {
-            referenceIbiMs = currentIBI;
-        }
+        double referenceIbiMs = getStableIbiReferenceMs();
         if (referenceIbiMs <= 0) {
             return REFRACTORY_PERIOD_MS;
         }
         long adaptiveMs = Math.round(referenceIbiMs * ADAPTIVE_REFRACTORY_RATIO);
         return Math.max(REFRACTORY_PERIOD_MS, Math.min(MAX_REFRACTORY_PERIOD_MS, adaptiveMs));
+    }
+
+    private double getStableIbiReferenceMs() {
+        if (logicRef != null && !logicRef.smoothedIbi.isEmpty()) {
+            double lastSmoothedIbi = logicRef.getLastSmoothedIbi();
+            if (lastSmoothedIbi > 0) {
+                return lastSmoothedIbi;
+            }
+        }
+        if (lastValidIBI > 0) {
+            return lastValidIBI;
+        }
+        if (currentIBI > 0) {
+            return currentIBI;
+        }
+        return 0.0;
     }
 
     private boolean isProminentPeak(Double[] recent, int peakIndex) {
@@ -566,7 +565,8 @@ public class SinBPDistortion {
         fitSineWave(beatSamples, ibi);
 
         // 異常値チェック
-        String invalidBeatReason = SignalProcessingUtils.getInvalidBeatReason(ibi, currentA, lastValidIBI);
+        double stableReferenceIbi = getStableIbiReferenceMs();
+        String invalidBeatReason = SignalProcessingUtils.getInvalidBeatReason(ibi, currentA, stableReferenceIbi);
         if (!"ok".equals(invalidBeatReason)) {
             currentRejectReason = invalidBeatReason;
             // データを更新して次の拍に備える
@@ -818,7 +818,7 @@ public class SinBPDistortion {
             hr = 60000.0 / ibi; // フォールバック
         }
 
-        // SinBP(D) は RTBP features を base とし、Stiffness_sin と E で補正する。
+        // SinBP(D) は RTBP features を base とし、residual E だけで補正する。
         double valleyToPeakRelTTP = (logicRef != null) ? logicRef.averageValleyToPeakRelTTP : 0.0;
         double peakToValleyRelTTP = (logicRef != null) ? logicRef.averagePeakToValleyRelTTP : 0.0;
         double regressionAmplitude = (logicRef != null) ? logicRef.averageValleyToPeakAmplitude : 0.0;
@@ -840,17 +840,13 @@ public class SinBPDistortion {
         double usedPeakToValleyRelTTP = FeatureClampUtils.clampFeature(
                 "P2V_relTTP", peakToValleyRelTTP, P2V_SUPPORT_MIN, P2V_SUPPORT_MAX, featureClampReason);
         double usedE = FeatureClampUtils.clampUpperFeature("E", E, E_SUPPORT_MAX, featureClampReason);
-        double stiffnessSin = E * Math.sqrt(Math.max(regressionAmplitude, 0.0));
-        double usedStiffnessSin = FeatureClampUtils.clampUpperFeature(
-                "Stiffness", usedE * Math.sqrt(Math.max(usedRegressionAmplitude, 0.0)),
-                STIFFNESS_SUPPORT_MAX, featureClampReason);
         currentUsedRegressionAmplitude = usedRegressionAmplitude;
         currentUsedHR = usedHr;
         currentUsedValleyToPeakRelTTP = usedValleyToPeakRelTTP;
         currentUsedPeakToValleyRelTTP = usedPeakToValleyRelTTP;
         currentUsedDistortion = usedE;
-        currentStiffnessSin = stiffnessSin;
-        currentUsedStiffnessSin = usedStiffnessSin;
+        currentStiffnessSin = 0.0;
+        currentUsedStiffnessSin = 0.0;
         currentFeatureClampApplied = featureClampReason.length() > 0 ? 1 : 0;
         currentFeatureClampReason = featureClampReason.length() > 0 ? featureClampReason.toString() : "ok";
         if (FeatureClampUtils.countFeatureClampSegments(featureClampReason) > MAX_ALLOWED_FEATURE_CLAMPS) {
@@ -868,7 +864,6 @@ public class SinBPDistortion {
                 usedHr,
                 usedValleyToPeakRelTTP,
                 usedPeakToValleyRelTTP,
-                usedStiffnessSin,
                 usedE);
         double sbpBase = basePrediction.sbpModelRaw;
         double dbpBase = basePrediction.dbpModelRaw;
@@ -911,7 +906,7 @@ public class SinBPDistortion {
                 hr, usedHr,
                 valleyToPeakRelTTP, usedValleyToPeakRelTTP,
                 peakToValleyRelTTP, usedPeakToValleyRelTTP,
-                stiffnessSin, usedStiffnessSin,
+                0.0, 0.0,
                 E, usedE,
                 currentFeatureClampReason));
 
