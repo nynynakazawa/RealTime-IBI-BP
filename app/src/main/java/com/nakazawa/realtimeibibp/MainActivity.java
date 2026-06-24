@@ -4,11 +4,18 @@ package com.nakazawa.realtimeibibp;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.*;
 import android.provider.Settings;
 import android.util.Log;
+import android.util.DisplayMetrics;
+import android.view.DisplayCutout;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.widget.*;
 import androidx.activity.result.ActivityResultLauncher;
@@ -40,6 +47,10 @@ public class MainActivity extends AppCompatActivity
     private static final String APP_VERSION = "1.0";
     private static final String COEFFICIENT_VERSION = "2026-04-10-smartphone-baseline-4session";
     private static final String AUTOMATION_LOG_TAG = "RealtimeAutomation";
+    private static final float CUTOUT_LANDING_OFFSET_DP = 42f;
+    private static final float CUTOUT_FALLBACK_TOP_DP = 14f;
+    private static final float LANDING_ZONE_MIN_TOP_DP = 24f;
+    private static final float LANDING_ZONE_BOTTOM_PADDING_DP = 12f;
 
     // ===== 定数 =====
     private static final int REQUEST_WRITE_STORAGE = 112, CAMERA_PERMISSION_REQUEST_CODE = 101;
@@ -52,6 +63,11 @@ public class MainActivity extends AppCompatActivity
     private TextView tvSinSBP, tvSinDBP, tvSinSBPAvg, tvSinDBPAvg; // SinBP(D)用
     private TextView tvSinSBPM, tvSinDBPM, tvSinSBPAvgM, tvSinDBPAvgM; // SinBP(M)用
     private TextView tvFNumber, tvISO, tvExposureTime, tvColorTemperature, tvWhiteBalance, tvFocusDistance, tvAperture, tvSensorSensitivity;
+    private FrameLayout touchCaptureOverlay;
+    private View landingZoneView, illuminationRingView, signalQualityIndicator, cameraHoleMarker;
+    private TextView tvPhaseStatus, tvQualityStatus, tvTargetProgressLabel, tvCurrentProgressLabel;
+    private TextView landingZoneLabel, landingInstructionLabel;
+    private ProgressBar pressTargetBar, pressCurrentBar;
 
     // ===== 解析と状態 =====
     private GreenValueAnalyzer analyzer; private RandomStimuliGeneration stimuliGen;
@@ -84,6 +100,11 @@ public class MainActivity extends AppCompatActivity
     private String currentSubjectId = "";
     private int currentSessionNumber = 0;
     private boolean isAutomatedSession = false;
+    private float lastTouchX = 0f;
+    private float lastTouchY = 0f;
+    private float lastTouchMajor = 0f;
+    private float lastTouchMinor = 0f;
+    private float lastTouchPressure = 0f;
     
     // ===== 画面輝度制御 =====
     private void setMaxBrightness() {
@@ -171,6 +192,19 @@ public class MainActivity extends AppCompatActivity
         tvFocusDistance = findViewById(R.id.tvFocusDistance);
         tvAperture = findViewById(R.id.tvAperture);
         tvSensorSensitivity = findViewById(R.id.tvSensorSensitivity);
+        touchCaptureOverlay = findViewById(R.id.touchCaptureOverlay);
+        landingZoneView = findViewById(R.id.landingZoneView);
+        illuminationRingView = findViewById(R.id.illuminationRingView);
+        signalQualityIndicator = findViewById(R.id.signalQualityIndicator);
+        cameraHoleMarker = findViewById(R.id.cameraHoleMarker);
+        landingZoneLabel = findViewById(R.id.landingZoneLabel);
+        landingInstructionLabel = findViewById(R.id.landingInstructionLabel);
+        tvPhaseStatus = findViewById(R.id.tvPhaseStatus);
+        tvQualityStatus = findViewById(R.id.tvQualityStatus);
+        tvTargetProgressLabel = findViewById(R.id.tvTargetProgressLabel);
+        tvCurrentProgressLabel = findViewById(R.id.tvCurrentProgressLabel);
+        pressTargetBar = findViewById(R.id.pressTargetBar);
+        pressCurrentBar = findViewById(R.id.pressCurrentBar);
 
         String[] logics = {"Logic1","Logic2"};
         ArrayAdapter<String> adapter = new ArrayAdapter<>(
@@ -226,7 +260,12 @@ public class MainActivity extends AppCompatActivity
             tvDBPRealtime.setText("DBP : 0.0");
             tvSBPAvg.setText("SBP(Average) : 0.0");
             tvDBPAvg.setText("DBP(Average) : 0.0");
+            tvPhaseStatus.setText("phase0 配置");
+            tvQualityStatus.setText("品質ゲート待機中");
+            pressTargetBar.setProgress(0);
+            pressCurrentBar.setProgress(0);
         });
+        initOscillometricGuidanceUi();
         /*bpMeasureButton.setOnClickListener(v ->
                 bpLauncher.launch(new Intent(this, PressureAnalyze.class))
         );*/
@@ -244,6 +283,230 @@ public class MainActivity extends AppCompatActivity
                 findViewById(R.id.HRTextView),
                 findViewById(R.id.SmoothedIbiTextView),
                 findViewById(R.id.SmoothedHRTextView));
+        analyzer.setOscillometricUiCallback(this::renderOscillometricUiState);
+    }
+
+    private void initOscillometricGuidanceUi() {
+        applyIlluminationGuideColor(Color.parseColor("#54F28A"));
+        pressTargetBar.setMax(1000);
+        pressCurrentBar.setMax(1000);
+        pressTargetBar.setProgress(0);
+        pressCurrentBar.setProgress(0);
+        tvPhaseStatus.setText("phase0 配置");
+        tvQualityStatus.setText("品質ゲート待機中");
+
+        touchCaptureOverlay.setOnTouchListener((v, event) -> handleTouchOverlayEvent(event));
+        touchCaptureOverlay.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
+                positionLandingZoneFromCutout());
+        touchCaptureOverlay.setOnApplyWindowInsetsListener((v, insets) -> {
+            positionLandingZoneFromCutout();
+            return insets;
+        });
+        touchCaptureOverlay.post(this::positionLandingZoneFromCutout);
+    }
+
+    private void positionLandingZoneFromCutout() {
+        if (touchCaptureOverlay == null || landingZoneView == null || illuminationRingView == null
+                || cameraHoleMarker == null || touchCaptureOverlay.getWidth() <= 0) {
+            return;
+        }
+
+        WindowInsets insets = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                ? touchCaptureOverlay.getRootWindowInsets()
+                : null;
+        Rect cutoutRect = getFrontCameraCutoutRect(insets);
+        int[] overlayLocation = new int[2];
+        touchCaptureOverlay.getLocationOnScreen(overlayLocation);
+
+        float holeCenterX = touchCaptureOverlay.getWidth() / 2f;
+        float holeCenterY = dpToPx(CUTOUT_FALLBACK_TOP_DP);
+        if (cutoutRect != null) {
+            holeCenterX = cutoutRect.centerX() - overlayLocation[0];
+            holeCenterY = cutoutRect.centerY() - overlayLocation[1];
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && insets != null && insets.getDisplayCutout() != null) {
+            holeCenterY = insets.getDisplayCutout().getSafeInsetTop() - overlayLocation[1];
+        }
+
+        holeCenterX = clamp(holeCenterX, cameraHoleMarker.getWidth() / 2f,
+                touchCaptureOverlay.getWidth() - cameraHoleMarker.getWidth() / 2f);
+        float targetCenterY = holeCenterY + dpToPx(CUTOUT_LANDING_OFFSET_DP);
+        float targetTop = clamp(
+                targetCenterY - landingZoneView.getHeight() / 2f,
+                dpToPx(LANDING_ZONE_MIN_TOP_DP),
+                Math.max(dpToPx(LANDING_ZONE_MIN_TOP_DP),
+                        touchCaptureOverlay.getHeight() - landingZoneView.getHeight() - dpToPx(LANDING_ZONE_BOTTOM_PADDING_DP)));
+        float targetCenterX = clamp(holeCenterX, landingZoneView.getWidth() / 2f,
+                touchCaptureOverlay.getWidth() - landingZoneView.getWidth() / 2f);
+
+        // WHY: 端末ごとのパンチホール位置差を吸収するため、XML固定ではなく実行時cutout基準にする。
+        placeChild(cameraHoleMarker, holeCenterX - cameraHoleMarker.getWidth() / 2f,
+                Math.max(0f, holeCenterY - cameraHoleMarker.getHeight() / 2f));
+        placeChild(landingZoneView, targetCenterX - landingZoneView.getWidth() / 2f, targetTop);
+        placeChild(illuminationRingView, targetCenterX - illuminationRingView.getWidth() / 2f,
+                targetTop - (illuminationRingView.getHeight() - landingZoneView.getHeight()) / 2f);
+        placeChild(landingZoneLabel, targetCenterX - landingZoneLabel.getWidth() / 2f,
+                targetTop + (landingZoneView.getHeight() - landingZoneLabel.getHeight()) / 2f);
+        placeChild(landingInstructionLabel, targetCenterX - landingInstructionLabel.getWidth() / 2f,
+                Math.max(0f, targetTop - landingInstructionLabel.getHeight() - dpToPx(8f)));
+
+        updateTouchTargetGeometry();
+    }
+
+    private Rect getFrontCameraCutoutRect(WindowInsets insets) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P || insets == null || insets.getDisplayCutout() == null) {
+            return null;
+        }
+        DisplayCutout cutout = insets.getDisplayCutout();
+        Rect bestRect = null;
+        int displayCenterX = getResources().getDisplayMetrics().widthPixels / 2;
+        for (Rect rect : cutout.getBoundingRects()) {
+            if (rect == null || rect.isEmpty()) {
+                continue;
+            }
+            if (bestRect == null
+                    || Math.abs(rect.centerX() - displayCenterX) < Math.abs(bestRect.centerX() - displayCenterX)) {
+                bestRect = rect;
+            }
+        }
+        return bestRect;
+    }
+
+    private void placeChild(View child, float left, float top) {
+        if (child == null) {
+            return;
+        }
+        child.setX(left);
+        child.setY(top);
+    }
+
+    private float dpToPx(float dp) {
+        return dp * getResources().getDisplayMetrics().density;
+    }
+
+    private float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private void updateTouchTargetGeometry() {
+        if (analyzer == null || touchCaptureOverlay == null || landingZoneView == null || cameraHoleMarker == null) {
+            return;
+        }
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        float cameraHoleCenterX = cameraHoleMarker.getX() + cameraHoleMarker.getWidth() / 2f;
+        float cameraHoleCenterY = cameraHoleMarker.getY() + cameraHoleMarker.getHeight() / 2f;
+        float touchTargetCenterX = landingZoneView.getX() + landingZoneView.getWidth() / 2f;
+        float touchTargetCenterY = landingZoneView.getY() + landingZoneView.getHeight() / 2f;
+        analyzer.setTouchTargetGeometry(
+                metrics.widthPixels,
+                metrics.heightPixels,
+                touchCaptureOverlay.getWidth(),
+                touchCaptureOverlay.getHeight(),
+                cameraHoleCenterX,
+                cameraHoleCenterY,
+                touchTargetCenterX,
+                touchTargetCenterY,
+                touchTargetCenterY - cameraHoleCenterY);
+    }
+
+    private boolean handleTouchOverlayEvent(MotionEvent event) {
+        if (analyzer == null || event == null) {
+            return false;
+        }
+        int pointerIndex = event.getActionIndex();
+        if (pointerIndex < 0 || pointerIndex >= event.getPointerCount()) {
+            pointerIndex = 0;
+        }
+
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+            case MotionEvent.ACTION_MOVE:
+            case MotionEvent.ACTION_POINTER_DOWN:
+            case MotionEvent.ACTION_POINTER_UP:
+                lastTouchX = event.getX(pointerIndex);
+                lastTouchY = event.getY(pointerIndex);
+                lastTouchMajor = event.getTouchMajor(pointerIndex);
+                lastTouchMinor = event.getTouchMinor(pointerIndex);
+                lastTouchPressure = event.getPressure(pointerIndex);
+                analyzer.updateTouchMeasurements(
+                        lastTouchX,
+                        lastTouchY,
+                        lastTouchMajor,
+                        lastTouchMinor,
+                        event.getSize(pointerIndex),
+                        lastTouchPressure,
+                        true,
+                        event.getEventTime());
+                return true;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                analyzer.updateTouchMeasurements(
+                        lastTouchX,
+                        lastTouchY,
+                        lastTouchMajor,
+                        lastTouchMinor,
+                        event.getSize(pointerIndex),
+                        lastTouchPressure,
+                        false,
+                        event.getEventTime());
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        return handleTouchOverlayEvent(event) || super.onTouchEvent(event);
+    }
+
+    private void renderOscillometricUiState(GreenValueAnalyzer.OscillometricUiState state) {
+        runOnUiThread(() -> {
+            tvPhaseStatus.setText(formatPhaseLabel(state.phase));
+            tvQualityStatus.setText(formatQualityText(state));
+            signalQualityIndicator.setBackgroundTintList(ColorStateList.valueOf(
+                    state.qualityPassed ? Color.parseColor("#54F28A") : Color.parseColor("#FF7A7A")));
+            pressTargetBar.setProgress((int) Math.round(state.pressTarget * 1000.0));
+            pressCurrentBar.setProgress((int) Math.round(state.currentPressProgress * 1000.0));
+            if (state.phase >= 2) {
+                tvTargetProgressLabel.setText(String.format(Locale.getDefault(), "目標 %.0f%%", state.pressTarget * 100.0));
+                tvCurrentProgressLabel.setText(String.format(Locale.getDefault(), "現在 %.0f%% / %.0f px^2", state.currentPressProgress * 100.0, state.contactArea));
+            } else {
+                tvTargetProgressLabel.setText("目標 phase2開始後");
+                tvCurrentProgressLabel.setText(String.format(Locale.getDefault(), "現在 %.0f px^2", state.contactArea));
+            }
+        });
+    }
+
+    private String formatPhaseLabel(int phase) {
+        switch (phase) {
+            case 0:
+                return "phase0 配置";
+            case 1:
+                return "phase1 安静";
+            case 2:
+                return "phase2 押込";
+            case 3:
+                return "phase3 解放";
+            default:
+                return "phase? 待機";
+        }
+    }
+
+    private String formatQualityText(GreenValueAnalyzer.OscillometricUiState state) {
+        return String.format(
+                Locale.getDefault(),
+                "品質 %s  A:%s  Exp:%s  Pos:%s  Touch:%s",
+                state.qualityPassed ? "OK" : "WAIT",
+                state.amplitudePassed ? "OK" : "NG",
+                state.exposurePassed ? "OK" : "NG",
+                state.positionPassed ? "OK" : "NG",
+                state.touchValid ? "ON" : "OFF");
+    }
+
+    private void applyIlluminationGuideColor(int color) {
+        // 将来の画面駆動マルチ波長はこの1箇所から切り替える。
+        illuminationRingView.setBackgroundTintList(ColorStateList.valueOf(color));
+        landingZoneView.setBackgroundTintList(ColorStateList.valueOf(color));
     }
 
     // ===== カメラ許可 =====
@@ -512,6 +775,8 @@ public class MainActivity extends AppCompatActivity
         saveSinBPDToCsv();
         saveWaveDataToCsv();
         saveTrainingDataToCsv();
+        String name = currentOutputBaseName.isEmpty() ? buildManualBaseName(editTextName.getText().toString().trim()) : currentOutputBaseName;
+        analyzer.saveSessionMetaToJson(name, mode == MODE_1 || mode == -1);
         Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist completed sessionId=" + currentSessionId);
     }
 

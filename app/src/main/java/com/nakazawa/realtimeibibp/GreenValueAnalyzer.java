@@ -45,11 +45,118 @@ import android.hardware.camera2.TotalCaptureResult;
 import com.nakazawa.realtimeibibp.session.BPPostprocessReplay;
 import com.nakazawa.realtimeibibp.session.CsvFormatUtils;
 import com.nakazawa.realtimeibibp.session.RealtimeBaselineReplay;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class GreenValueAnalyzer implements LifecycleObserver {
     private static final String REALTIME_LOG_TAG = "RealtimeSession";
     private static final int DEFAULT_FPS = 30;
+    private static final double ROI_CENTER_INSET_RATIO = 0.30;
+    private static final int ROI_SAMPLE_STRIDE = 4;
+    private static final double GREEN_BASELINE_ALPHA = 0.02;
+    private static final long QUALITY_GATE_STABLE_DURATION_MS = 1_000L;
+    private static final long REST_PHASE_DURATION_MS = 15_000L;
+    private static final long PRESS_PHASE_DURATION_MS = 15_000L;
+    private static final long RELEASE_PHASE_DURATION_MS = 6_000L;
+    private static final long UI_STATE_UPDATE_INTERVAL_MS = 100L;
+    private static final double QUALITY_GATE_PPG_AMPLITUDE_THRESHOLD = 1.5;
+    private static final double QUALITY_GATE_MIN_Y_THRESHOLD = 35.0;
+    private static final double QUALITY_GATE_MAX_Y_THRESHOLD = 245.0;
+    private static final double PRESS_AREA_TARGET_GAIN = 1.8;
+    private static final double PRESS_AREA_TARGET_DELTA_MIN = 1_200.0;
+    private static final float TOUCH_TARGET_TOLERANCE_DP = 56f;
+    private static final int PHASE_PLACEMENT = 0;
+    private static final int PHASE_RESTING = 1;
+    private static final int PHASE_PRESS = 2;
+    private static final int PHASE_RELEASE = 3;
+
+    private static final class YuvMeans {
+        final double yMean;
+        final double uMean;
+        final double vMean;
+
+        YuvMeans(double yMean, double uMean, double vMean) {
+            this.yMean = yMean;
+            this.uMean = uMean;
+            this.vMean = vMean;
+        }
+    }
+
+    private static final class TouchFrameSnapshot {
+        final double contactArea;
+        final double size;
+        final double pressure;
+        final double cx;
+        final double cy;
+        final double major;
+        final double minor;
+        final boolean valid;
+        final long eventTimeMs;
+
+        TouchFrameSnapshot(
+                double contactArea,
+                double size,
+                double pressure,
+                double cx,
+                double cy,
+                double major,
+                double minor,
+                boolean valid,
+                long eventTimeMs) {
+            this.contactArea = contactArea;
+            this.size = size;
+            this.pressure = pressure;
+            this.cx = cx;
+            this.cy = cy;
+            this.major = major;
+            this.minor = minor;
+            this.valid = valid;
+            this.eventTimeMs = eventTimeMs;
+        }
+    }
+
+    public static final class OscillometricUiState {
+        public final int phase;
+        public final double pressTarget;
+        public final double currentPressProgress;
+        public final double contactArea;
+        public final double greenValue;
+        public final double dcGreenValue;
+        public final boolean qualityPassed;
+        public final boolean amplitudePassed;
+        public final boolean exposurePassed;
+        public final boolean positionPassed;
+        public final boolean touchValid;
+
+        OscillometricUiState(
+                int phase,
+                double pressTarget,
+                double currentPressProgress,
+                double contactArea,
+                double greenValue,
+                double dcGreenValue,
+                boolean qualityPassed,
+                boolean amplitudePassed,
+                boolean exposurePassed,
+                boolean positionPassed,
+                boolean touchValid) {
+            this.phase = phase;
+            this.pressTarget = pressTarget;
+            this.currentPressProgress = currentPressProgress;
+            this.contactArea = contactArea;
+            this.greenValue = greenValue;
+            this.dcGreenValue = dcGreenValue;
+            this.qualityPassed = qualityPassed;
+            this.amplitudePassed = amplitudePassed;
+            this.exposurePassed = exposurePassed;
+            this.positionPassed = positionPassed;
+            this.touchValid = touchValid;
+        }
+    }
+
+    public interface OscillometricUiCallback {
+        void onOscillometricUiUpdated(OscillometricUiState state);
+    }
 
     // ===== UI =====
     private final Context ctx;
@@ -83,6 +190,18 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             recSmBpm = new ArrayList<>();
     private final List<Long>   recValTs = new ArrayList<>(),
             recIbiTs = new ArrayList<>();
+    private final List<Double> recYMean = new ArrayList<>();
+    private final List<Double> recUMean = new ArrayList<>();
+    private final List<Double> recVMean = new ArrayList<>();
+    private final List<Double> recContactArea = new ArrayList<>();
+    private final List<Double> recTouchPressure = new ArrayList<>();
+    private final List<Double> recTouchCx = new ArrayList<>();
+    private final List<Double> recTouchCy = new ArrayList<>();
+    private final List<Double> recTouchMajor = new ArrayList<>();
+    private final List<Double> recTouchMinor = new ArrayList<>();
+    private final List<Integer> recTouchValid = new ArrayList<>();
+    private final List<Integer> recPhase = new ArrayList<>();
+    private final List<Double> recPressTarget = new ArrayList<>();
     
     // ===== Sin波記録用 =====
     private final List<Double> recSinWave = new ArrayList<>();  // 理想曲線の値
@@ -210,6 +329,12 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private final List<Integer> recFps = new ArrayList<>();
     private final List<Integer> recIsValidBeat = new ArrayList<>();
     private final List<Integer> recArtifactFlag = new ArrayList<>();
+    private final List<Double> recBeatMedianContactArea = new ArrayList<>();
+    private final List<Double> recBeatMedianTouchPressure = new ArrayList<>();
+    private final List<Double> recBeatMedianYMean = new ArrayList<>();
+    private final List<Double> recBeatMedianUMean = new ArrayList<>();
+    private final List<Double> recBeatMedianVMean = new ArrayList<>();
+    private final List<Integer> recBeatPhase = new ArrayList<>();
 
     // ===== 状態 =====
     private boolean camOpen;
@@ -227,6 +352,34 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private String appVersion = "";
     private String coefficientVersion = "";
     private String outputBaseName = "";
+    private boolean greenBaselineInitialized = false;
+    private double greenBaseline = 0.0;
+    private final Object touchStateLock = new Object();
+    private TouchFrameSnapshot latestTouchSnapshot =
+            new TouchFrameSnapshot(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false, 0L);
+    private int currentPhase = PHASE_PLACEMENT;
+    private long currentPhaseStartMs = 0L;
+    private final long[] phaseStartTimesMs = new long[] {-1L, -1L, -1L, -1L};
+    private final long[] phaseEndTimesMs = new long[] {-1L, -1L, -1L, -1L};
+    private long qualityGateStableStartMs = 0L;
+    private boolean lastQualityGatePassed = false;
+    private boolean lastAmplitudeGatePassed = false;
+    private boolean lastExposureGatePassed = false;
+    private boolean lastPositionGatePassed = false;
+    private double phase2BaselineArea = 0.0;
+    private double phase2TargetArea = 0.0;
+    private int lastBeatFrameIndex = 0;
+    private long lastUiStateDispatchMs = 0L;
+    private int screenWidthPx = 0;
+    private int screenHeightPx = 0;
+    private float overlayWidthPx = 0f;
+    private float overlayHeightPx = 0f;
+    private float touchTargetCenterX = 0f;
+    private float touchTargetCenterY = 0f;
+    private float cameraHoleCenterX = 0f;
+    private float cameraHoleCenterY = 0f;
+    private float cameraToTouchOffsetPx = 0f;
+    private float touchTargetTolerancePx = 0f;
 
     // ISO管理
     private int currentISO = 600; // デフォルト値
@@ -310,8 +463,66 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                                 float focusDistance, float aperture, float sensorSensitivity);
     }
     private CameraInfoCallback cameraInfoCallback;
+    private OscillometricUiCallback oscillometricUiCallback;
     public void setCameraInfoCallback(CameraInfoCallback callback) {
         this.cameraInfoCallback = callback;
+    }
+
+    public void setOscillometricUiCallback(OscillometricUiCallback callback) {
+        this.oscillometricUiCallback = callback;
+    }
+
+    public void updateTouchMeasurements(
+            float cx,
+            float cy,
+            float major,
+            float minor,
+            float size,
+            float pressure,
+            boolean valid,
+            long eventTimeMs) {
+        double safeMajor = Math.max(0.0, major);
+        double safeMinor = Math.max(0.0, minor);
+        double normalizedSize = Math.max(0.0, size);
+        double contactArea = (Math.PI * safeMajor * safeMinor) / 4.0;
+        if (contactArea <= 0.0 && normalizedSize > 0.0 && overlayWidthPx > 0f && overlayHeightPx > 0f) {
+            // 一部端末では major/minor が不安定なので、標準 API の getSize を面積代理の保険に使う。
+            contactArea = normalizedSize * overlayWidthPx * overlayHeightPx;
+        }
+        synchronized (touchStateLock) {
+            latestTouchSnapshot = new TouchFrameSnapshot(
+                    contactArea,
+                    normalizedSize,
+                    Math.max(0.0, pressure),
+                    cx,
+                    cy,
+                    safeMajor,
+                    safeMinor,
+                    valid,
+                    eventTimeMs);
+        }
+    }
+
+    public void setTouchTargetGeometry(
+            int screenWidthPx,
+            int screenHeightPx,
+            float overlayWidthPx,
+            float overlayHeightPx,
+            float cameraHoleCenterX,
+            float cameraHoleCenterY,
+            float touchTargetCenterX,
+            float touchTargetCenterY,
+            float cameraToTouchOffsetPx) {
+        this.screenWidthPx = screenWidthPx;
+        this.screenHeightPx = screenHeightPx;
+        this.overlayWidthPx = overlayWidthPx;
+        this.overlayHeightPx = overlayHeightPx;
+        this.cameraHoleCenterX = cameraHoleCenterX;
+        this.cameraHoleCenterY = cameraHoleCenterY;
+        this.touchTargetCenterX = touchTargetCenterX;
+        this.touchTargetCenterY = touchTargetCenterY;
+        this.cameraToTouchOffsetPx = cameraToTouchOffsetPx;
+        this.touchTargetTolerancePx = dpToPx(TOUCH_TARGET_TOLERANCE_DP);
     }
 
     public void configureSession(
@@ -476,6 +687,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     // Camera2Interop の Experimental API を利用するので OptIn を付与
     @OptIn(markerClass = androidx.camera.camera2.interop.ExperimentalCamera2Interop.class)
     private void bindImageAnalysis(@NonNull ProcessCameraProvider cameraProvider) {
+        this.cameraProvider = cameraProvider;
         ImageAnalysis.Builder builder = new ImageAnalysis.Builder()
                 .setTargetResolution(new Size(240, 180))
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST);
@@ -533,6 +745,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         CameraSelector cameraSelector = new CameraSelector.Builder()
                 .requireLensFacing(CameraSelector.LENS_FACING_FRONT)
                 .build();
+        this.cameraSelector = cameraSelector;
 
         imageAnalysis.setAnalyzer(processingExecutor, this::processImage);
 
@@ -692,6 +905,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             }
 
             double g = getGreen(img);
+            YuvMeans yuvMeans = getRoiYuvMeans(img);
             long frameTimestampMs = System.currentTimeMillis();
             LogicProcessor lp = logicMap.get(activeLogic);
 
@@ -700,6 +914,24 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     ((BaseLogic) lp).setCurrentFrameTimestampMs(frameTimestampMs);
                 }
                 LogicResult r = lp.processGreenValueData(g);
+                TouchFrameSnapshot touchSnapshot = getLatestTouchSnapshot();
+                OscillometricUiState oscillometricUiState = null;
+                double frameGreenForRecording = r != null ? r.getCorrectedGreenValue() : g;
+                if (isRecordingActive) {
+                    oscillometricUiState = updateOscillometricStateAndRecordFrame(
+                            frameTimestampMs,
+                            frameGreenForRecording,
+                            yuvMeans,
+                            touchSnapshot);
+                } else {
+                    oscillometricUiState = buildOscillometricUiState(
+                            frameTimestampMs,
+                            frameGreenForRecording,
+                            updateGreenBaseline(frameGreenForRecording),
+                            yuvMeans,
+                            touchSnapshot,
+                            false);
+                }
                 
                 // ISOが300未満の場合でもUI更新とチャート表示は行う
                 if (r != null) {
@@ -715,10 +947,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
                     // ★ isRecordingActive フラグが true の場合のみデータを記録
                     if (isRecordingActive && isDetectionValid()) {
-                        recValue.add(r.getCorrectedGreenValue());
                         recIbi.add(r.getIbi());
                         recSd.add(r.getBpmSd());
-                        recValTs.add(frameTimestampMs);
                         long currentTimestamp = frameTimestampMs;
                         recIbiTs.add(currentTimestamp);
                         
@@ -743,6 +973,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                             recFps.add(DEFAULT_FPS);
                             recIsValidBeat.add(isDetectionValid() ? 1 : 0);
                             recArtifactFlag.add(0);
+                            appendBeatContextMetrics();
                             
                             // Method1 (RealtimeBP) 特徴量
                             if (bpEstimator != null) {
@@ -971,14 +1202,10 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
                         recSmIbi.add(smI);
                         recSmBpm.add(smB);
-                        
-                        // Sin波は1拍遅延で確定するため、現在フレームには仮値を置き、
-                        // 確定済みbeatのtimestamp範囲へ後から同じindexで埋め戻す。
-                        appendPendingSinWaveRecord(frameTimestampMs);
-                        backfillCompletedSinWaveRecords();
                     } else if (isRecordingActive && !isDetectionValid()) {
                         Log.d("GreenValueAnalyzer-ISO", "CSV recording skipped: ISO=" + currentISO);
                     }
+                    dispatchOscillometricUiState(oscillometricUiState);
                     // ★ IBIの更新とUI更新は記録状態に関わらず行う (リアルタイム表示のため)
                     IBI = r.getIbi();
                     double currentSmI = lp.getLastSmoothedIbi(); // 記録していなくても平滑化IBIは計算される可能性があるため取得
@@ -992,6 +1219,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                             isRecordingActive ? recSmBpm.isEmpty() ? 0 : recSmBpm.get(recSmBpm.size()-1) : currentSmB
                     );
                 } else {
+                    dispatchOscillometricUiState(oscillometricUiState);
                     // ISOが300未満の場合、UI更新のみ行う（検出は停止）
                     Log.d("GreenValueAnalyzer-ISO", "Detection skipped, UI update only: ISO=" + currentISO);
                     
@@ -1096,6 +1324,46 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     }
 
 
+    private YuvMeans getRoiYuvMeans(Image img) {
+        // WHY: 端末ではRGB変換せず、生YUV平均だけを軽く保存してPC側解析へ渡す。
+        Image.Plane[] planes = img.getPlanes();
+        ByteBuffer yBuffer = planes[0].getBuffer();
+        ByteBuffer uBuffer = planes[1].getBuffer();
+        ByteBuffer vBuffer = planes[2].getBuffer();
+        int width = img.getWidth();
+        int height = img.getHeight();
+        int xStart = (int) (width * ROI_CENTER_INSET_RATIO);
+        int xEnd = width - xStart;
+        int yStart = (int) (height * ROI_CENTER_INSET_RATIO);
+        int yEnd = height - yStart;
+
+        double ySum = 0.0;
+        double uSum = 0.0;
+        double vSum = 0.0;
+        int count = 0;
+
+        for (int y = yStart; y < yEnd; y += ROI_SAMPLE_STRIDE) {
+            for (int x = xStart; x < xEnd; x += ROI_SAMPLE_STRIDE) {
+                int yIndex = y * planes[0].getRowStride() + x * planes[0].getPixelStride();
+                int uIndex = (y / 2) * planes[1].getRowStride() + (x / 2) * planes[1].getPixelStride();
+                int vIndex = (y / 2) * planes[2].getRowStride() + (x / 2) * planes[2].getPixelStride();
+                if (yIndex >= yBuffer.limit() || uIndex >= uBuffer.limit() || vIndex >= vBuffer.limit()) {
+                    continue;
+                }
+
+                ySum += yBuffer.get(yIndex) & 0xFF;
+                uSum += uBuffer.get(uIndex) & 0xFF;
+                vSum += vBuffer.get(vIndex) & 0xFF;
+                count++;
+            }
+        }
+
+        if (count == 0) {
+            return new YuvMeans(0.0, 0.0, 0.0);
+        }
+        return new YuvMeans(ySum / count, uSum / count, vSum / count);
+    }
+
     private double getGreen(Image img) {
         ByteBuffer u = img.getPlanes()[1].getBuffer();
         int w = img.getWidth(), h = img.getHeight(),
@@ -1112,6 +1380,248 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     }
                 }
         return c > 0 ? (double) sum / c : 0;
+    }
+
+    private double updateGreenBaseline(double greenValue) {
+        if (!greenBaselineInitialized) {
+            greenBaseline = greenValue;
+            greenBaselineInitialized = true;
+        } else {
+            greenBaseline += GREEN_BASELINE_ALPHA * (greenValue - greenBaseline);
+        }
+        return greenBaseline;
+    }
+
+    private TouchFrameSnapshot getLatestTouchSnapshot() {
+        synchronized (touchStateLock) {
+            return latestTouchSnapshot;
+        }
+    }
+
+    private OscillometricUiState updateOscillometricStateAndRecordFrame(
+            long frameTimestampMs,
+            double greenValue,
+            YuvMeans yuvMeans,
+            TouchFrameSnapshot touchSnapshot) {
+        double dcGreen = updateGreenBaseline(greenValue);
+        OscillometricUiState state = buildOscillometricUiState(
+                frameTimestampMs,
+                greenValue,
+                dcGreen,
+                yuvMeans,
+                touchSnapshot,
+                true);
+        recordWaveFrame(frameTimestampMs, greenValue, yuvMeans, touchSnapshot, state);
+        return state;
+    }
+
+    private OscillometricUiState buildOscillometricUiState(
+            long frameTimestampMs,
+            double greenValue,
+            double dcGreen,
+            YuvMeans yuvMeans,
+            TouchFrameSnapshot touchSnapshot,
+            boolean advancePhase) {
+        double amplitude = 0.0;
+        if (bpEstimator != null) {
+            amplitude = Math.max(amplitude, bpEstimator.getLastAmplitude());
+        }
+        if (sinBPDistortion != null) {
+            amplitude = Math.max(amplitude, sinBPDistortion.getCurrentRegressionAmplitude());
+        }
+        amplitude = Math.max(amplitude, Math.abs(greenValue - dcGreen));
+
+        boolean amplitudePassed = amplitude >= QUALITY_GATE_PPG_AMPLITUDE_THRESHOLD;
+        // WHY: 露出判定は画面光の外周ではなく、指が覆う中心ROIのY輝度で見る。
+        boolean exposurePassed = yuvMeans.yMean >= QUALITY_GATE_MIN_Y_THRESHOLD
+                && yuvMeans.yMean <= QUALITY_GATE_MAX_Y_THRESHOLD;
+        boolean positionPassed = touchSnapshot.valid
+                && touchTargetTolerancePx > 0f
+                && Math.hypot(touchSnapshot.cx - touchTargetCenterX, touchSnapshot.cy - touchTargetCenterY)
+                <= touchTargetTolerancePx;
+        boolean qualityPassed = amplitudePassed && exposurePassed && positionPassed;
+
+        if (advancePhase) {
+            advancePhaseState(frameTimestampMs, qualityPassed, touchSnapshot);
+        }
+
+        lastAmplitudeGatePassed = amplitudePassed;
+        lastExposureGatePassed = exposurePassed;
+        lastPositionGatePassed = positionPassed;
+        lastQualityGatePassed = qualityPassed;
+
+        return new OscillometricUiState(
+                currentPhase,
+                getCurrentPressTarget(frameTimestampMs),
+                computeCurrentPressProgress(touchSnapshot.contactArea),
+                touchSnapshot.contactArea,
+                greenValue,
+                dcGreen,
+                qualityPassed,
+                amplitudePassed,
+                exposurePassed,
+                positionPassed,
+                touchSnapshot.valid);
+    }
+
+    private void advancePhaseState(long frameTimestampMs, boolean qualityPassed, TouchFrameSnapshot touchSnapshot) {
+        if (currentPhase == PHASE_PLACEMENT) {
+            if (qualityPassed) {
+                if (qualityGateStableStartMs <= 0L) {
+                    qualityGateStableStartMs = frameTimestampMs;
+                } else if (frameTimestampMs - qualityGateStableStartMs >= QUALITY_GATE_STABLE_DURATION_MS) {
+                    setCurrentPhase(PHASE_RESTING, frameTimestampMs);
+                }
+            } else {
+                qualityGateStableStartMs = 0L;
+            }
+            return;
+        }
+
+        long phaseElapsedMs = frameTimestampMs - currentPhaseStartMs;
+        if (currentPhase == PHASE_RESTING && phaseElapsedMs >= REST_PHASE_DURATION_MS) {
+            phase2BaselineArea = Math.max(touchSnapshot.contactArea, 1.0);
+            phase2TargetArea = phase2BaselineArea * PRESS_AREA_TARGET_GAIN + PRESS_AREA_TARGET_DELTA_MIN;
+            setCurrentPhase(PHASE_PRESS, frameTimestampMs);
+        } else if (currentPhase == PHASE_PRESS && phaseElapsedMs >= PRESS_PHASE_DURATION_MS) {
+            setCurrentPhase(PHASE_RELEASE, frameTimestampMs);
+        } else if (currentPhase == PHASE_RELEASE && phaseElapsedMs >= RELEASE_PHASE_DURATION_MS) {
+            phaseEndTimesMs[PHASE_RELEASE] = frameTimestampMs;
+        }
+    }
+
+    private void setCurrentPhase(int newPhase, long timestampMs) {
+        if (currentPhase >= 0 && currentPhase < phaseEndTimesMs.length && phaseStartTimesMs[currentPhase] >= 0L) {
+            phaseEndTimesMs[currentPhase] = timestampMs;
+        }
+        currentPhase = newPhase;
+        currentPhaseStartMs = timestampMs;
+        if (newPhase >= 0 && newPhase < phaseStartTimesMs.length && phaseStartTimesMs[newPhase] < 0L) {
+            phaseStartTimesMs[newPhase] = timestampMs;
+        }
+    }
+
+    private void finalizeCurrentPhase(long timestampMs) {
+        if (currentPhase >= 0 && currentPhase < phaseEndTimesMs.length) {
+            phaseEndTimesMs[currentPhase] = timestampMs;
+        }
+    }
+
+    private double getCurrentPressTarget(long frameTimestampMs) {
+        long phaseElapsedMs = Math.max(0L, frameTimestampMs - currentPhaseStartMs);
+        if (currentPhase == PHASE_PRESS) {
+            return clamp01(phaseElapsedMs / (double) PRESS_PHASE_DURATION_MS);
+        }
+        if (currentPhase == PHASE_RELEASE) {
+            return clamp01(1.0 - phaseElapsedMs / (double) RELEASE_PHASE_DURATION_MS);
+        }
+        return 0.0;
+    }
+
+    private double computeCurrentPressProgress(double contactArea) {
+        if (phase2TargetArea <= phase2BaselineArea) {
+            return 0.0;
+        }
+        return clamp01((contactArea - phase2BaselineArea) / (phase2TargetArea - phase2BaselineArea));
+    }
+
+    private void recordWaveFrame(
+            long frameTimestampMs,
+            double greenValue,
+            YuvMeans yuvMeans,
+            TouchFrameSnapshot touchSnapshot,
+            OscillometricUiState state) {
+        recValue.add(greenValue);
+        recValTs.add(frameTimestampMs);
+        recYMean.add(yuvMeans.yMean);
+        recUMean.add(yuvMeans.uMean);
+        recVMean.add(yuvMeans.vMean);
+        recContactArea.add(touchSnapshot.contactArea);
+        recTouchPressure.add(touchSnapshot.pressure);
+        recTouchCx.add(touchSnapshot.cx);
+        recTouchCy.add(touchSnapshot.cy);
+        recTouchMajor.add(touchSnapshot.major);
+        recTouchMinor.add(touchSnapshot.minor);
+        recTouchValid.add(touchSnapshot.valid ? 1 : 0);
+        recPhase.add(state.phase);
+        recPressTarget.add(state.pressTarget);
+
+        // SinWave は後段で拍区間に合わせて埋め戻すため、フレーム時点ではプレースホルダを積む。
+        appendPendingSinWaveRecord(frameTimestampMs);
+        backfillCompletedSinWaveRecords();
+    }
+
+    private void appendBeatContextMetrics() {
+        int rangeEnd = recValue.size();
+        recBeatMedianContactArea.add(computeMedian(recContactArea, lastBeatFrameIndex, rangeEnd));
+        recBeatMedianTouchPressure.add(computeMedian(recTouchPressure, lastBeatFrameIndex, rangeEnd));
+        recBeatMedianYMean.add(computeMedian(recYMean, lastBeatFrameIndex, rangeEnd));
+        recBeatMedianUMean.add(computeMedian(recUMean, lastBeatFrameIndex, rangeEnd));
+        recBeatMedianVMean.add(computeMedian(recVMean, lastBeatFrameIndex, rangeEnd));
+        recBeatPhase.add(computeLatestPhase(lastBeatFrameIndex, rangeEnd));
+        lastBeatFrameIndex = rangeEnd;
+    }
+
+    private double computeMedian(List<Double> values, int startInclusive, int endExclusive) {
+        if (values == null || values.isEmpty() || startInclusive >= endExclusive) {
+            return 0.0;
+        }
+        int safeStart = Math.max(0, startInclusive);
+        int safeEnd = Math.min(values.size(), endExclusive);
+        if (safeStart >= safeEnd) {
+            return 0.0;
+        }
+        List<Double> window = new ArrayList<>(safeEnd - safeStart);
+        for (int i = safeStart; i < safeEnd; i++) {
+            Double value = values.get(i);
+            if (value != null && Double.isFinite(value)) {
+                window.add(value);
+            }
+        }
+        if (window.isEmpty()) {
+            return 0.0;
+        }
+        Collections.sort(window);
+        int middle = window.size() / 2;
+        if ((window.size() & 1) == 1) {
+            return window.get(middle);
+        }
+        return (window.get(middle - 1) + window.get(middle)) / 2.0;
+    }
+
+    private int computeLatestPhase(int startInclusive, int endExclusive) {
+        if (recPhase.isEmpty()) {
+            return currentPhase;
+        }
+        int safeEnd = Math.min(recPhase.size(), endExclusive);
+        if (safeEnd <= 0) {
+            return currentPhase;
+        }
+        int index = Math.max(0, safeEnd - 1);
+        return recPhase.get(index);
+    }
+
+    private void dispatchOscillometricUiState(OscillometricUiState state) {
+        if (state == null || oscillometricUiCallback == null) {
+            return;
+        }
+        if (System.currentTimeMillis() - lastUiStateDispatchMs < UI_STATE_UPDATE_INTERVAL_MS) {
+            return;
+        }
+        lastUiStateDispatchMs = System.currentTimeMillis();
+        ui.post(() -> {
+            if (oscillometricUiCallback != null) {
+                oscillometricUiCallback.onOscillometricUiUpdated(state);
+            }
+        });
+    }
+
+    private double clamp01(double value) {
+        return Math.max(0.0, Math.min(1.0, value));
+    }
+
+    private float dpToPx(float dp) {
+        return dp * ctx.getResources().getDisplayMetrics().density;
     }
 
     // ===== UI更新 =====
@@ -1479,6 +1989,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         lastIdealWaveform.clear();
         lastIdealWaveformCursor = 0;
         sinPhaseOffset = DEFAULT_SIN_PHASE_OFFSET;  // 位相オフセットをデフォルト値にリセット
+        resetOscillometricState();
     }
 
     // ★ 修正: startRecording メソッド
@@ -1487,10 +1998,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         recordingStartTime = System.currentTimeMillis(); // 記録開始時点を記録
         isRecordingActive = true;
         beatCounter = 0;
+        resetOscillometricState();
+        setCurrentPhase(PHASE_PLACEMENT, recordingStartTime);
     }
 
     public void stopRecording()  {
         isRecordingActive = false;
+        finalizeCurrentPhase(System.currentTimeMillis());
     }
 
     public boolean hasRecordedTrainingData() {
@@ -1542,6 +2056,18 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         recSmBpm.clear();
         recValTs.clear();
         recIbiTs.clear();
+        recYMean.clear();
+        recUMean.clear();
+        recVMean.clear();
+        recContactArea.clear();
+        recTouchPressure.clear();
+        recTouchCx.clear();
+        recTouchCy.clear();
+        recTouchMajor.clear();
+        recTouchMinor.clear();
+        recTouchValid.clear();
+        recPhase.clear();
+        recPressTarget.clear();
         
         // Sin波データのクリア
         recSinWave.clear();
@@ -1666,6 +2192,34 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         recFps.clear();
         recIsValidBeat.clear();
         recArtifactFlag.clear();
+        recBeatMedianContactArea.clear();
+        recBeatMedianTouchPressure.clear();
+        recBeatMedianYMean.clear();
+        recBeatMedianUMean.clear();
+        recBeatMedianVMean.clear();
+        recBeatPhase.clear();
+        lastBeatFrameIndex = 0;
+        resetOscillometricState();
+    }
+
+    private void resetOscillometricState() {
+        greenBaselineInitialized = false;
+        greenBaseline = 0.0;
+        currentPhase = PHASE_PLACEMENT;
+        currentPhaseStartMs = 0L;
+        Arrays.fill(phaseStartTimesMs, -1L);
+        Arrays.fill(phaseEndTimesMs, -1L);
+        qualityGateStableStartMs = 0L;
+        lastQualityGatePassed = false;
+        lastAmplitudeGatePassed = false;
+        lastExposureGatePassed = false;
+        lastPositionGatePassed = false;
+        phase2BaselineArea = 0.0;
+        phase2TargetArea = 0.0;
+        lastUiStateDispatchMs = 0L;
+        synchronized (touchStateLock) {
+            latestTouchSnapshot = new TouchFrameSnapshot(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false, 0L);
+        }
     }
 
     private void emitRealtimeBeatLog(long timestampMs, int beatIndex) {
@@ -2036,15 +2590,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File csvFile = new File(downloadFolder, name + "_Wave_Data.csv");
 
-        if (recValue.isEmpty()) {
-            ui.post(() ->
-                    Toast.makeText(ctx, "記録されたWaveデータがありません", Toast.LENGTH_SHORT).show()
-            );
-            return;
-        }
-
         StringBuilder csvContent = new StringBuilder();
-        csvContent.append("経過時間_秒, Green, SinWave\n");
+        csvContent.append("経過時間_秒, Green, SinWave, Y_mean, U_mean, V_mean, contact_area, touch_pressure, touch_cx, touch_cy, touch_major, touch_minor, touch_valid, phase, press_target\n");
 
         // Green値とSinWave値を時間でマッチング
         for (int i = 0; i < recValue.size(); i++) {
@@ -2062,7 +2609,19 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             
             csvContent.append(String.format(Locale.getDefault(), "%.3f", elapsedSeconds)).append(", ")
                     .append(String.format(Locale.getDefault(), "%.2f", greenValue)).append(", ")
-                    .append(String.format(Locale.getDefault(), "%.2f", sinWaveValue))
+                    .append(String.format(Locale.getDefault(), "%.2f", sinWaveValue)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recYMean.size() ? recYMean.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recUMean.size() ? recUMean.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recVMean.size() ? recVMean.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recContactArea.size() ? recContactArea.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recTouchPressure.size() ? recTouchPressure.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recTouchCx.size() ? recTouchCx.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recTouchCy.size() ? recTouchCy.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recTouchMajor.size() ? recTouchMajor.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recTouchMinor.size() ? recTouchMinor.get(i) : 0.0)).append(", ")
+                    .append(i < recTouchValid.size() ? recTouchValid.get(i) : 0).append(", ")
+                    .append(i < recPhase.size() ? recPhase.get(i) : PHASE_PLACEMENT).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recPressTarget.size() ? recPressTarget.get(i) : 0.0))
                     .append("\n");
         }
 
@@ -2818,14 +3377,14 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 m3SbpCoefficients,
                 m3DbpCoefficients);
 
-        // 学習用データが空の場合はトースト表示して終了
+        // 学習用データが空でも、解析パイプラインが欠損ではなく空セッションと判断できるよう
+        // ヘッダだけは必ず保存しておく。
         if (recTrainingTs.isEmpty()) {
             if (showToast) {
                 ui.post(() ->
-                        Toast.makeText(ctx, "記録された学習用データがありません", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(ctx, "学習用データは空ですがヘッダ付きで保存します", Toast.LENGTH_SHORT).show()
                 );
             }
-            return;
         }
 
         StringBuilder csvContent = new StringBuilder();
@@ -2876,7 +3435,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                 .append("M3_MAP_term_intercept, M3_MAP_term_A, M3_MAP_term_HR, M3_MAP_term_Mean, M3_MAP_term_sinPhi, M3_MAP_term_cosPhi, ")
                 .append("M3_PP_term_intercept, M3_PP_term_A, M3_PP_term_HR, M3_PP_term_Mean, M3_PP_term_sinPhi, M3_PP_term_cosPhi, ");
         RealtimeBaselineReplay.appendHeader(csvContent);
-        csvContent.append("\n");
+        csvContent.append(", contact_area_median, touch_pressure_median, Y_mean_median, U_mean_median, V_mean_median, phase\n");
 
         // 記録データを CSV に書き出し
         int maxSize = recTrainingTs.size();
@@ -3240,6 +3799,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
                     .append(CsvFormatUtils.formatValues(m3PpTerms)).append(", ");
             RealtimeBaselineReplay.appendValues(csvContent, baselineResults, i);
             csvContent
+                    .append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recBeatMedianContactArea.size() ? recBeatMedianContactArea.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.4f", i < recBeatMedianTouchPressure.size() ? recBeatMedianTouchPressure.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recBeatMedianYMean.size() ? recBeatMedianYMean.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recBeatMedianUMean.size() ? recBeatMedianUMean.get(i) : 0.0)).append(", ")
+                    .append(String.format(Locale.getDefault(), "%.2f", i < recBeatMedianVMean.size() ? recBeatMedianVMean.get(i) : 0.0)).append(", ")
+                    .append(i < recBeatPhase.size() ? recBeatPhase.get(i) : currentPhase)
                     .append("\n");
         }
 
@@ -3261,6 +3827,90 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         
         // PCにも保存（mode-1の場合）
         saveToPCIfConnected(name, name + "_Training_Data.csv", csvContent.toString(), isMode1);
+        }
+    }
+
+    public void saveSessionMetaToJson(String name, boolean isMode1) {
+        File downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        File jsonFile = new File(downloadFolder, name + "_meta.json");
+        try {
+            JSONObject root = new JSONObject();
+            root.put("session_id", sessionId);
+            root.put("subject_id", subjectId);
+            root.put("session_number", sessionNumber);
+            root.put("mode", activeMode);
+            root.put("recording_start_time_ms", recordingStartTime);
+            root.put("recording_end_time_ms", System.currentTimeMillis());
+            root.put("completed", true);
+            root.put("app_version", appVersion);
+            root.put("coefficient_version", coefficientVersion);
+
+            JSONObject qualityGate = new JSONObject();
+            qualityGate.put("passed", lastQualityGatePassed);
+            qualityGate.put("amplitude_passed", lastAmplitudeGatePassed);
+            qualityGate.put("exposure_passed", lastExposureGatePassed);
+            qualityGate.put("position_passed", lastPositionGatePassed);
+            qualityGate.put("ppg_amplitude_threshold", QUALITY_GATE_PPG_AMPLITUDE_THRESHOLD);
+            qualityGate.put("min_y_threshold", QUALITY_GATE_MIN_Y_THRESHOLD);
+            qualityGate.put("max_y_threshold", QUALITY_GATE_MAX_Y_THRESHOLD);
+            qualityGate.put("touch_target_tolerance_px", touchTargetTolerancePx);
+            root.put("quality_gate", qualityGate);
+
+            JSONObject colorRecording = new JSONObject();
+            colorRecording.put("format", "YUV_420_888_roi_means");
+            colorRecording.put("note", "色は中心ROIのYUV平均をそのまま記録し、端末ではRGB変換しない。RGB変換はPC側解析で行う。");
+            colorRecording.put("pc_yuv_to_rgb_formula", "C=Y-16; D=U-128; E=V-128; R=clip((298*C+409*E+128)>>8); G=clip((298*C-100*D-208*E+128)>>8); B=clip((298*C+516*D+128)>>8)");
+            colorRecording.put("roi_center_x_ratio", 0.5);
+            colorRecording.put("roi_center_y_ratio", 0.5);
+            colorRecording.put("roi_center_inset_ratio", ROI_CENTER_INSET_RATIO);
+            colorRecording.put("roi_sample_stride", ROI_SAMPLE_STRIDE);
+            colorRecording.put("columns", "Y_mean,U_mean,V_mean");
+            root.put("color_recording", colorRecording);
+
+            JSONArray phases = new JSONArray();
+            for (int phase = PHASE_PLACEMENT; phase <= PHASE_RELEASE; phase++) {
+                JSONObject phaseObject = new JSONObject();
+                phaseObject.put("phase", phase);
+                phaseObject.put("name", getPhaseName(phase));
+                phaseObject.put("start_time_ms", phaseStartTimesMs[phase]);
+                phaseObject.put("end_time_ms", phaseEndTimesMs[phase]);
+                phases.put(phaseObject);
+            }
+            root.put("phases", phases);
+
+            JSONObject geometry = new JSONObject();
+            geometry.put("screen_width_px", screenWidthPx);
+            geometry.put("screen_height_px", screenHeightPx);
+            geometry.put("overlay_width_px", overlayWidthPx);
+            geometry.put("overlay_height_px", overlayHeightPx);
+            geometry.put("camera_hole_center_x_px", cameraHoleCenterX);
+            geometry.put("camera_hole_center_y_px", cameraHoleCenterY);
+            geometry.put("touch_target_center_x_px", touchTargetCenterX);
+            geometry.put("touch_target_center_y_px", touchTargetCenterY);
+            geometry.put("camera_to_touch_offset_px", cameraToTouchOffsetPx);
+            root.put("geometry", geometry);
+
+            try (FileWriter writer = new FileWriter(jsonFile)) {
+                writer.write(root.toString(2));
+            }
+            saveToPCIfConnected(name, name + "_meta.json", root.toString(2), isMode1);
+        } catch (Exception e) {
+            Log.e("GreenValueAnalyzer", "meta.json 保存失敗", e);
+        }
+    }
+
+    private String getPhaseName(int phase) {
+        switch (phase) {
+            case PHASE_PLACEMENT:
+                return "placement";
+            case PHASE_RESTING:
+                return "resting";
+            case PHASE_PRESS:
+                return "press";
+            case PHASE_RELEASE:
+                return "release";
+            default:
+                return "unknown";
         }
     }
 
