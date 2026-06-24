@@ -15,6 +15,7 @@ import android.util.DisplayMetrics;
 import android.view.DisplayCutout;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.widget.*;
@@ -24,6 +25,8 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.fragment.app.Fragment;
 import com.github.mikephil.charting.charts.LineChart;
 import java.text.SimpleDateFormat;
@@ -64,7 +67,8 @@ public class MainActivity extends AppCompatActivity
     private TextView tvSinSBPM, tvSinDBPM, tvSinSBPAvgM, tvSinDBPAvgM; // SinBP(M)用
     private TextView tvFNumber, tvISO, tvExposureTime, tvColorTemperature, tvWhiteBalance, tvFocusDistance, tvAperture, tvSensorSensitivity;
     private FrameLayout touchCaptureOverlay;
-    private View landingZoneView, illuminationRingView, signalQualityIndicator, cameraHoleMarker;
+    private ScrollView mainScrollView;
+    private View landingZoneView, illuminationRingView, signalQualityIndicator, cameraHoleMarker, statusBarTouchBlocker;
     private TextView tvPhaseStatus, tvQualityStatus, tvTargetProgressLabel, tvCurrentProgressLabel;
     private TextView landingZoneLabel, landingInstructionLabel;
     private ProgressBar pressTargetBar, pressCurrentBar;
@@ -116,6 +120,7 @@ public class MainActivity extends AppCompatActivity
     // ===== onCreate =====
     @Override protected void onCreate(Bundle s){
         super.onCreate(s);
+        configureEdgeToEdgeWindow();
         setContentView(R.layout.activity_main);
         
         // 画面の輝度を最大に設定
@@ -172,6 +177,23 @@ public class MainActivity extends AppCompatActivity
         handleAutomationIntent(getIntent());
     }
 
+    private void configureEdgeToEdgeWindow() {
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        getWindow().setStatusBarColor(ContextCompat.getColor(this, R.color.green_color));
+        getWindow().setNavigationBarColor(Color.TRANSPARENT);
+        WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        if (controller != null) {
+            controller.setAppearanceLightStatusBars(true);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams layoutParams = getWindow().getAttributes();
+            layoutParams.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(layoutParams);
+        }
+    }
+
     // ===== UI初期化 =====
     private void initUi() {
         modeBtn = findViewById(R.id.show_mode_select_fragment_button);
@@ -192,7 +214,9 @@ public class MainActivity extends AppCompatActivity
         tvFocusDistance = findViewById(R.id.tvFocusDistance);
         tvAperture = findViewById(R.id.tvAperture);
         tvSensorSensitivity = findViewById(R.id.tvSensorSensitivity);
+        mainScrollView = findViewById(R.id.mainScrollView);
         touchCaptureOverlay = findViewById(R.id.touchCaptureOverlay);
+        statusBarTouchBlocker = findViewById(R.id.statusBarTouchBlocker);
         landingZoneView = findViewById(R.id.landingZoneView);
         illuminationRingView = findViewById(R.id.illuminationRingView);
         signalQualityIndicator = findViewById(R.id.signalQualityIndicator);
@@ -295,13 +319,17 @@ public class MainActivity extends AppCompatActivity
         tvPhaseStatus.setText("phase0 配置");
         tvQualityStatus.setText("品質ゲート待機中");
 
-        touchCaptureOverlay.setOnTouchListener((v, event) -> handleTouchOverlayEvent(event));
+        touchCaptureOverlay.setClickable(false);
+        touchCaptureOverlay.setFocusable(false);
+        statusBarTouchBlocker.setOnTouchListener((v, event) -> true);
         touchCaptureOverlay.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
                 positionLandingZoneFromCutout());
         touchCaptureOverlay.setOnApplyWindowInsetsListener((v, insets) -> {
+            applySystemBarInsets(insets);
             positionLandingZoneFromCutout();
             return insets;
         });
+        touchCaptureOverlay.requestApplyInsets();
         touchCaptureOverlay.post(this::positionLandingZoneFromCutout);
     }
 
@@ -350,6 +378,42 @@ public class MainActivity extends AppCompatActivity
                 Math.max(0f, targetTop - landingInstructionLabel.getHeight() - dpToPx(8f)));
 
         updateTouchTargetGeometry();
+    }
+
+    private void applySystemBarInsets(WindowInsets insets) {
+        if (insets == null) {
+            return;
+        }
+        int statusTopInset = getStatusTopInset(insets);
+        int navigationBottomInset = getNavigationBottomInset(insets);
+
+        if (statusBarTouchBlocker != null) {
+            ViewGroup.LayoutParams params = statusBarTouchBlocker.getLayoutParams();
+            if (params != null && params.height != statusTopInset) {
+                params.height = statusTopInset;
+                statusBarTouchBlocker.setLayoutParams(params);
+            }
+        }
+        if (mainScrollView != null) {
+            // WHY: edge-to-edge時に最下部の情報パネルがジェスチャーバーの下へ潜らないよう、システム領域分だけ余白を足す。
+            mainScrollView.setPadding(
+                    mainScrollView.getPaddingLeft(),
+                    mainScrollView.getPaddingTop(),
+                    mainScrollView.getPaddingRight(),
+                    navigationBottomInset);
+        }
+    }
+
+    private int getStatusTopInset(WindowInsets insets) {
+        int topInset = insets.getSystemWindowInsetTop();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && insets.getDisplayCutout() != null) {
+            topInset = Math.max(topInset, insets.getDisplayCutout().getSafeInsetTop());
+        }
+        return topInset;
+    }
+
+    private int getNavigationBottomInset(WindowInsets insets) {
+        return insets.getSystemWindowInsetBottom();
     }
 
     private Rect getFrontCameraCutoutRect(WindowInsets insets) {
@@ -412,6 +476,10 @@ public class MainActivity extends AppCompatActivity
         if (analyzer == null || event == null) {
             return false;
         }
+        if (isTouchInsideStatusBarBlocker(event)) {
+            // WHY: 緑帯はキャプチャ対象外なので、通知シェード誤操作を抑えつつ接触計測にも混ぜない。
+            return false;
+        }
         int pointerIndex = event.getActionIndex();
         if (pointerIndex < 0 || pointerIndex >= event.getPointerCount()) {
             pointerIndex = 0;
@@ -424,6 +492,13 @@ public class MainActivity extends AppCompatActivity
             case MotionEvent.ACTION_POINTER_UP:
                 lastTouchX = event.getX(pointerIndex);
                 lastTouchY = event.getY(pointerIndex);
+                if (touchCaptureOverlay != null) {
+                    int[] overlayLocation = new int[2];
+                    touchCaptureOverlay.getLocationOnScreen(overlayLocation);
+                    // WHY: オーバレイを全画面化したため、どの子Viewがタッチ対象でも同じ座標系で接触面積を記録する。
+                    lastTouchX = event.getRawX(pointerIndex) - overlayLocation[0];
+                    lastTouchY = event.getRawY(pointerIndex) - overlayLocation[1];
+                }
                 lastTouchMajor = event.getTouchMajor(pointerIndex);
                 lastTouchMinor = event.getTouchMinor(pointerIndex);
                 lastTouchPressure = event.getPressure(pointerIndex);
@@ -455,8 +530,35 @@ public class MainActivity extends AppCompatActivity
     }
 
     @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        if (isTouchInsideStatusBarBlocker(event)) {
+            return true;
+        }
+        handleTouchOverlayEvent(event);
+        return super.dispatchTouchEvent(event);
+    }
+
+    private boolean isTouchInsideStatusBarBlocker(MotionEvent event) {
+        if (statusBarTouchBlocker == null || statusBarTouchBlocker.getHeight() <= 0) {
+            return false;
+        }
+        int pointerIndex = event.getActionIndex();
+        if (pointerIndex < 0 || pointerIndex >= event.getPointerCount()) {
+            pointerIndex = 0;
+        }
+        int[] blockerLocation = new int[2];
+        statusBarTouchBlocker.getLocationOnScreen(blockerLocation);
+        float rawX = event.getRawX(pointerIndex);
+        float rawY = event.getRawY(pointerIndex);
+        return rawX >= blockerLocation[0]
+                && rawX <= blockerLocation[0] + statusBarTouchBlocker.getWidth()
+                && rawY >= blockerLocation[1]
+                && rawY <= blockerLocation[1] + statusBarTouchBlocker.getHeight();
+    }
+
+    @Override
     public boolean onTouchEvent(MotionEvent event) {
-        return handleTouchOverlayEvent(event) || super.onTouchEvent(event);
+        return super.onTouchEvent(event);
     }
 
     private void renderOscillometricUiState(GreenValueAnalyzer.OscillometricUiState state) {

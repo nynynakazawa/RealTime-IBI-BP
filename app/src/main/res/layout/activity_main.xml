@@ -6,113 +6,107 @@
     android:layout_height="match_parent"
     android:background="#1e3333">
 
-    <!-- ツールバー -->
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/topAppBar"
-        android:layout_width="match_parent"
-        android:layout_height="?attr/actionBarSize"
-        android:backgroundTint="?attr/colorSurface"
-        android:title="Biometric Monitor"
-        android:titleTextColor="#78CCCC" />
-
-    <!-- 直接 ConstraintLayout を配置 -->
-    <androidx.constraintlayout.widget.ConstraintLayout
-        android:id="@+id/main_content"
+    <ScrollView
+        android:id="@+id/mainScrollView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:padding="16dp"
-        android:elevation="8dp">
+        android:clipToPadding="false"
+        android:fillViewport="true"
+        android:overScrollMode="ifContentScrolls">
 
-        <ImageView
-            android:id="@+id/appIcon"
-            android:layout_width="70dp"
-            android:layout_height="70dp"
-            android:layout_marginLeft="20dp"
-            android:src="@mipmap/ic_launcher_foreground"
-            android:contentDescription="App Icon"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintStart_toStartOf="parent" />
-
-        <TextView
-            android:id="@+id/appTitle"
-            android:layout_width="wrap_content"
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/main_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="RealTime-HR/BP"
-            android:textSize="30dp"
-            android:textColor="#78CCCC"
-            app:layout_constraintStart_toEndOf="@id/appIcon"
-            app:layout_constraintTop_toTopOf="@id/appIcon"
-            app:layout_constraintBottom_toBottomOf="@id/appIcon" />
+            android:paddingStart="16dp"
+            android:paddingTop="96dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="28dp">
 
-        <TextView
-            android:id="@+id/labelMode"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Select Processing Mode："
-            android:textSize="20dp"
-            android:textColor="#78CCCC"
-            app:layout_constraintTop_toBottomOf="@id/appIcon"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toStartOf="@id/spinnerLogicSelection"/>
-
-        <Spinner
-            android:id="@+id/spinnerLogicSelection"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            style="@style/CustomSpinnerText"
-            app:layout_constraintBaseline_toBaselineOf="@id/labelMode"
-            app:layout_constraintStart_toEndOf="@id/labelMode"
-            app:layout_constraintEnd_toEndOf="parent"/>
-
-        <LinearLayout
-            android:id="@+id/FileNameAndMode"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center|top"
-            android:padding="0dp"
-            app:layout_constraintTop_toBottomOf="@id/labelMode"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent">
-
-            <EditText
-                android:id="@+id/editTextName"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:hint="Enter FileName"
-                android:textSize="20dp"
-                android:textColor="#78CCCC"/>
+            <ImageView
+                android:id="@+id/appIcon"
+                android:layout_width="70dp"
+                android:layout_height="70dp"
+                android:layout_marginStart="20dp"
+                android:contentDescription="App Icon"
+                android:src="@mipmap/ic_launcher_foreground"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
 
             <TextView
-                android:id="@+id/tvMode"
+                android:id="@+id/appTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="mode : -1"
-                android:textSize="20dp"
-                android:textColor="#78CCCC"/>
+                android:layout_marginStart="8dp"
+                android:text="RealTime-HR/BP"
+                android:textColor="#78CCCC"
+                android:textSize="30sp"
+                app:layout_constraintBottom_toBottomOf="@id/appIcon"
+                app:layout_constraintStart_toEndOf="@id/appIcon"
+                app:layout_constraintTop_toTopOf="@id/appIcon" />
 
-        </LinearLayout>
+            <TextView
+                android:id="@+id/labelMode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="Select Processing Mode："
+                android:textColor="#78CCCC"
+                android:textSize="20sp"
+                app:layout_constraintEnd_toStartOf="@id/spinnerLogicSelection"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/appIcon" />
 
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/oscillometricGuideCard"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            app:cardBackgroundColor="#163C3C"
-            app:cardCornerRadius="24dp"
-            app:cardElevation="0dp"
-            app:strokeColor="#3354F28A"
-            app:strokeWidth="1dp"
-            app:layout_constraintTop_toBottomOf="@id/FileNameAndMode"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent">
+            <Spinner
+                android:id="@+id/spinnerLogicSelection"
+                style="@style/CustomSpinnerText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:layout_constraintBaseline_toBaselineOf="@id/labelMode"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toEndOf="@id/labelMode" />
 
             <LinearLayout
-                android:layout_width="match_parent"
+                android:id="@+id/FileNameAndMode"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:gravity="center|top"
+                android:orientation="horizontal"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/labelMode">
+
+                <EditText
+                    android:id="@+id/editTextName"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:hint="Enter FileName"
+                    android:textColor="#78CCCC"
+                    android:textSize="20sp" />
+
+                <TextView
+                    android:id="@+id/tvMode"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="mode : -1"
+                    android:textColor="#78CCCC"
+                    android:textSize="20sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/oscillometricGuideCard"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/bg_phase_panel"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:paddingStart="14dp"
+                android:paddingTop="12dp"
+                android:paddingEnd="14dp"
+                android:paddingBottom="14dp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/FileNameAndMode">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -122,9 +116,8 @@
 
                     <TextView
                         android:id="@+id/tvPhaseStatus"
-                        android:layout_width="0dp"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
                         android:text="phase0 配置"
                         android:textColor="#D8FFF2"
                         android:textSize="18sp"
@@ -134,537 +127,286 @@
                         android:id="@+id/signalQualityIndicator"
                         android:layout_width="12dp"
                         android:layout_height="12dp"
+                        android:layout_marginStart="12dp"
                         android:background="@drawable/bg_signal_quality_indicator" />
 
                     <TextView
                         android:id="@+id/tvQualityStatus"
-                        android:layout_width="wrap_content"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:text="品質ゲート待機中"
+                        android:layout_marginStart="10dp"
+                        android:layout_weight="1"
+                        android:singleLine="true"
+                        android:text="品質 WAIT  A:OK  Exp:OK  Pos:NG  Touch:OFF"
                         android:textColor="#BDE6D8"
                         android:textSize="14sp" />
                 </LinearLayout>
 
-                <FrameLayout
-                    android:id="@+id/touchCaptureOverlay"
-                    android:layout_width="match_parent"
-                    android:layout_height="220dp"
-                    android:layout_marginTop="12dp"
-                    android:background="#00000000"
-                    android:clickable="true"
-                    android:focusable="true">
-
-                    <View
-                        android:id="@+id/cameraHoleMarker"
-                        android:layout_width="12dp"
-                        android:layout_height="12dp"
-                        android:layout_gravity="top|center_horizontal"
-                        android:background="@drawable/bg_camera_hole_marker" />
-
-                    <View
-                        android:id="@+id/illuminationRingView"
-                        android:layout_width="196dp"
-                        android:layout_height="112dp"
-                        android:layout_gravity="top|center_horizontal"
-                        android:background="@drawable/bg_touch_ring" />
-
-                    <View
-                        android:id="@+id/landingZoneView"
-                        android:layout_width="136dp"
-                        android:layout_height="78dp"
-                        android:layout_gravity="top|center_horizontal"
-                        android:background="@drawable/bg_landing_zone" />
-
-                    <TextView
-                        android:id="@+id/landingZoneLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="top|center_horizontal"
-                        android:text="指先ランディングゾーン"
-                        android:textColor="#E9FFF4"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/landingInstructionLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="top|center_horizontal"
-                        android:text="穴の少し下に指腹を置く"
-                        android:textColor="#9EC8B7"
-                        android:textSize="13sp" />
-                </FrameLayout>
-
-                <LinearLayout
-                    android:layout_width="match_parent"
+                <TextView
+                    android:id="@+id/tvTargetProgressLabel"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="vertical">
+                    android:layout_marginTop="16dp"
+                    android:text="目標 phase2開始後"
+                    android:textColor="#C4EEDC"
+                    android:textSize="13sp" />
 
-                    <TextView
-                        android:id="@+id/tvTargetProgressLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="目標 0%"
-                        android:textColor="#C4EEDC"
-                        android:textSize="13sp" />
+                <ProgressBar
+                    android:id="@+id/pressTargetBar"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="3dp"
+                    android:layout_marginTop="5dp"
+                    android:indeterminate="false"
+                    android:max="1000"
+                    android:progress="0"
+                    android:progressDrawable="@drawable/progress_flat_green" />
 
-                    <ProgressBar
-                        android:id="@+id/pressTargetBar"
-                        style="?android:attr/progressBarStyleHorizontal"
-                        android:layout_width="match_parent"
-                        android:layout_height="8dp"
-                        android:layout_marginTop="4dp"
-                        android:max="1000"
-                        android:progress="0"
-                        android:progressTint="#75F0A6" />
+                <TextView
+                    android:id="@+id/tvCurrentProgressLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="現在 0 px^2"
+                    android:textColor="#C4EEDC"
+                    android:textSize="13sp" />
 
-                    <TextView
-                        android:id="@+id/tvCurrentProgressLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="現在 0%"
-                        android:textColor="#C4EEDC"
-                        android:textSize="13sp" />
-
-                    <ProgressBar
-                        android:id="@+id/pressCurrentBar"
-                        style="?android:attr/progressBarStyleHorizontal"
-                        android:layout_width="match_parent"
-                        android:layout_height="8dp"
-                        android:layout_marginTop="4dp"
-                        android:max="1000"
-                        android:progress="0"
-                        android:progressTint="#A8FFF4" />
-                </LinearLayout>
+                <ProgressBar
+                    android:id="@+id/pressCurrentBar"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="3dp"
+                    android:layout_marginTop="5dp"
+                    android:indeterminate="false"
+                    android:max="1000"
+                    android:progress="0"
+                    android:progressDrawable="@drawable/progress_flat_cyan" />
             </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
 
-        <!-- グラフ -->
-        <com.github.mikephil.charting.charts.LineChart
-            android:id="@+id/lineChart"
-            android:layout_width="0dp"
-            android:layout_height="350dp"
-            app:layout_constraintTop_toBottomOf="@id/oscillometricGuideCard"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"/>
+            <com.github.mikephil.charting.charts.LineChart
+                android:id="@+id/lineChart"
+                android:layout_width="0dp"
+                android:layout_height="350dp"
+                android:layout_marginTop="16dp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/oscillometricGuideCard" />
 
-        <!-- キャリブレーション中テキスト -->
+            <TextView
+                android:id="@+id/NowTextMessage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="30dp"
+                android:text="キャリブレーション中"
+                android:textColor="#78CCCC"
+                android:textSize="20sp"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/lineChart" />
+
+            <TableLayout
+                android:id="@+id/Table"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:divider="#78CCCC"
+                android:showDividers="middle"
+                android:stretchColumns="*"
+                app:layout_constraintTop_toBottomOf="@id/NowTextMessage">
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/greenValueTextView" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Green : " android:textColor="#78CCCC" android:textSize="20sp" />
+                    <TextView android:id="@+id/BPMSD" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="BPM SD : " android:textColor="#78CCCC" android:textSize="20sp" />
+                </TableRow>
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/ibiTextView" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="IBI : " android:textColor="#78CCCC" android:textSize="20sp" />
+                    <TextView android:id="@+id/HRTextView" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="HeartRate : " android:textColor="#78CCCC" android:textSize="20sp" />
+                </TableRow>
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/SmoothedIbiTextView" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="IBI(Smooth) : " android:textColor="#78CCCC" android:textSize="20sp" />
+                    <TextView android:id="@+id/SmoothedHRTextView" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="HR(Smooth) : " android:textColor="#78CCCC" android:textSize="20sp" />
+                </TableRow>
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/tvSBPRealtime" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SBP : --" android:textColor="#78CCCC" android:textSize="20sp" />
+                    <TextView android:id="@+id/tvDBPRealtime" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DBP : --" android:textColor="#78CCCC" android:textSize="20sp" />
+                </TableRow>
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/tvSBPAvg" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SBP(Average) : --" android:textColor="#78CCCC" android:textSize="20sp" />
+                    <TextView android:id="@+id/tvDBPAvg" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DBP(Average) : --" android:textColor="#78CCCC" android:textSize="20sp" />
+                </TableRow>
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/tvSinSBP" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SinSBP(D) : --" android:textColor="#FF9966" android:textSize="20sp" />
+                    <TextView android:id="@+id/tvSinDBP" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SinDBP(D) : --" android:textColor="#FF9966" android:textSize="20sp" />
+                </TableRow>
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/tvSinSBPAvg" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SinSBP(D)(Avg) : --" android:textColor="#FF9966" android:textSize="20sp" />
+                    <TextView android:id="@+id/tvSinDBPAvg" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SinDBP(D)(Avg) : --" android:textColor="#FF9966" android:textSize="20sp" />
+                </TableRow>
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/tvSinSBPM" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SinSBP(M) : --" android:textColor="#99FF99" android:textSize="20sp" />
+                    <TextView android:id="@+id/tvSinDBPM" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SinDBP(M) : --" android:textColor="#99FF99" android:textSize="20sp" />
+                </TableRow>
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/tvSinSBPAvgM" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SinSBP(M)(Avg) : --" android:textColor="#99FF99" android:textSize="20sp" />
+                    <TextView android:id="@+id/tvSinDBPAvgM" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SinDBP(M)(Avg) : --" android:textColor="#99FF99" android:textSize="20sp" />
+                </TableRow>
+            </TableLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/show_mode_select_fragment_button"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Mode"
+                android:textColor="#78CCCC"
+                android:textSize="20sp"
+                app:layout_constraintEnd_toStartOf="@id/start_button"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/Table" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/start_button"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_marginTop="16dp"
+                android:text="Start"
+                android:textColor="#78CCCC"
+                android:textSize="20sp"
+                app:layout_constraintEnd_toStartOf="@id/reset_button"
+                app:layout_constraintStart_toEndOf="@id/show_mode_select_fragment_button"
+                app:layout_constraintTop_toBottomOf="@id/Table" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/reset_button"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_marginTop="16dp"
+                android:text="Reset"
+                android:textColor="#78CCCC"
+                android:textSize="20sp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toEndOf="@id/start_button"
+                app:layout_constraintTop_toBottomOf="@id/Table" />
+
+            <TableLayout
+                android:id="@+id/cameraInfoTable"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="#1A78CCCC"
+                android:padding="8dp"
+                android:stretchColumns="*"
+                app:layout_constraintTop_toBottomOf="@id/reset_button">
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Camera X API Info" android:textColor="#78CCCC" android:textSize="18sp" android:textStyle="bold" />
+                </TableRow>
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/tvFNumber" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="F-Number: --" android:textColor="#78CCCC" android:textSize="16sp" />
+                    <TextView android:id="@+id/tvISO" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ISO: --" android:textColor="#78CCCC" android:textSize="16sp" />
+                </TableRow>
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/tvExposureTime" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Exposure: --" android:textColor="#78CCCC" android:textSize="16sp" />
+                    <TextView android:id="@+id/tvColorTemperature" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Color Temp: --" android:textColor="#78CCCC" android:textSize="16sp" />
+                </TableRow>
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/tvWhiteBalance" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="WB Mode: --" android:textColor="#78CCCC" android:textSize="16sp" />
+                    <TextView android:id="@+id/tvFocusDistance" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Focus: --" android:textColor="#78CCCC" android:textSize="16sp" />
+                </TableRow>
+
+                <TableRow android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                    <TextView android:id="@+id/tvAperture" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Aperture: --" android:textColor="#78CCCC" android:textSize="16sp" />
+                    <TextView android:id="@+id/tvSensorSensitivity" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Sensor: --" android:textColor="#78CCCC" android:textSize="16sp" />
+                </TableRow>
+            </TableLayout>
+        </androidx.constraintlayout.widget.ConstraintLayout>
+    </ScrollView>
+
+    <FrameLayout
+        android:id="@+id/touchCaptureOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#00000000"
+        android:clickable="false"
+        android:focusable="false"
+        android:importantForAccessibility="no"
+        android:translationZ="12dp">
+
+        <View
+            android:id="@+id/statusBarTouchBlocker"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_gravity="top"
+            android:background="@color/green_color"
+            android:clickable="true"
+            android:focusable="false"
+            android:importantForAccessibility="no" />
+
+        <View
+            android:id="@+id/cameraHoleMarker"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:layout_gravity="top|center_horizontal"
+            android:background="@drawable/bg_camera_hole_marker" />
+
+        <View
+            android:id="@+id/illuminationRingView"
+            android:layout_width="142dp"
+            android:layout_height="76dp"
+            android:layout_gravity="top|center_horizontal"
+            android:background="@drawable/bg_touch_ring" />
+
+        <View
+            android:id="@+id/landingZoneView"
+            android:layout_width="104dp"
+            android:layout_height="54dp"
+            android:layout_gravity="top|center_horizontal"
+            android:background="@drawable/bg_landing_zone" />
+
         <TextView
-            android:id="@+id/NowTextMessage"
+            android:id="@+id/landingZoneLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="キャリブレーション中"
-            android:textSize="20dp"
-            android:layout_marginTop="30dp"
-            android:textColor="#78CCCC"
-            app:layout_constraintTop_toBottomOf="@id/lineChart"
-            app:layout_constraintStart_toStartOf="parent"/>
+            android:layout_gravity="top|center_horizontal"
+            android:includeFontPadding="false"
+            android:text="指先をここに"
+            android:textColor="#E9FFF4"
+            android:textSize="12sp"
+            android:textStyle="bold" />
 
-        <TableLayout
-            android:id="@+id/Table"
-            android:layout_width="match_parent"
+        <TextView
+            android:id="@+id/landingInstructionLabel"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:divider="#78CCCC"
-            android:showDividers="middle"
-            app:layout_constraintTop_toBottomOf="@id/NowTextMessage"
-            android:stretchColumns="*">
-
-            <!-- Green / BPM SD -->
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-                <TextView
-                    android:id="@+id/greenValueTextView"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Green : "
-                    android:textSize="20dp"
-                    android:textColor="#78CCCC"/>
-                <TextView
-                    android:id="@+id/BPMSD"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="BPM SD : "
-                    android:textSize="20dp"
-                    android:textColor="#78CCCC"/>
-            </TableRow>
-
-            <!-- IBI / HR -->
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-                <TextView
-                    android:id="@+id/ibiTextView"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="IBI : "
-                    android:textSize="20dp"
-                    android:textColor="#78CCCC"/>
-                <TextView
-                    android:id="@+id/HRTextView"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="HeartRate : "
-                    android:textSize="20dp"
-                    android:textColor="#78CCCC"/>
-            </TableRow>
-
-            <!-- Smoothed IBI / HR -->
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-                <TextView
-                    android:id="@+id/SmoothedIbiTextView"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="IBI(Smooth) : "
-                    android:textSize="20dp"
-                    android:textColor="#78CCCC"/>
-                <TextView
-                    android:id="@+id/SmoothedHRTextView"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="HR(Smooth) : "
-                    android:textSize="20dp"
-                    android:textColor="#78CCCC"/>
-            </TableRow>
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-
-                <TextView
-                    android:id="@+id/tvSBPRealtime"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="SBP : --"
-                    android:textSize="20dp"
-                    android:textColor="#78CCCC"/>
-
-                <TextView
-                    android:id="@+id/tvDBPRealtime"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="DBP : --"
-                    android:textSize="20dp"
-                    android:textColor="#78CCCC"/>
-            </TableRow>
-
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-
-                <TextView
-                    android:id="@+id/tvSBPAvg"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="SBP(Average) : --"
-                    android:textSize="20dp"
-                    android:textColor="#78CCCC"/>
-
-                <TextView
-                    android:id="@+id/tvDBPAvg"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="DBP(Average) : --"
-                    android:textSize="20dp"
-                    android:textColor="#78CCCC"/>
-            </TableRow>
-
-            <!-- SinBP(D)表示 -->
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-
-                <TextView
-                    android:id="@+id/tvSinSBP"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="SinSBP(D) : --"
-                    android:textSize="20dp"
-                    android:textColor="#FF9966"/>
-
-                <TextView
-                    android:id="@+id/tvSinDBP"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="SinDBP(D) : --"
-                    android:textSize="20dp"
-                    android:textColor="#FF9966"/>
-            </TableRow>
-
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-
-                <TextView
-                    android:id="@+id/tvSinSBPAvg"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="SinSBP(D)(Avg) : --"
-                    android:textSize="20dp"
-                    android:textColor="#FF9966"/>
-
-                <TextView
-                    android:id="@+id/tvSinDBPAvg"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="SinDBP(D)(Avg) : --"
-                    android:textSize="20dp"
-                    android:textColor="#FF9966"/>
-            </TableRow>
-
-            <!-- SinBP(M)表示 -->
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-
-                <TextView
-                    android:id="@+id/tvSinSBPM"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="SinSBP(M) : --"
-                    android:textSize="20dp"
-                    android:textColor="#99FF99"/>
-
-                <TextView
-                    android:id="@+id/tvSinDBPM"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="SinDBP(M) : --"
-                    android:textSize="20dp"
-                    android:textColor="#99FF99"/>
-            </TableRow>
-
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-
-                <TextView
-                    android:id="@+id/tvSinSBPAvgM"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="SinSBP(M)(Avg) : --"
-                    android:textSize="20dp"
-                    android:textColor="#99FF99"/>
-
-                <TextView
-                    android:id="@+id/tvSinDBPAvgM"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="SinDBP(M)(Avg) : --"
-                    android:textSize="20dp"
-                    android:textColor="#99FF99"/>
-            </TableRow>
-        </TableLayout>
-
-        <!-- ボタン群 -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/show_mode_select_fragment_button"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:text="Mode"
-            android:textSize="20dp"
-            android:textColor="#78CCCC"
-            app:layout_constraintTop_toBottomOf="@id/Table"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toStartOf="@id/start_button"
-            android:layout_marginTop="16dp"/>
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/start_button"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:text="Start"
-            android:textSize="20dp"
-            android:textColor="#78CCCC"
-            app:layout_constraintTop_toBottomOf="@id/Table"
-            app:layout_constraintStart_toEndOf="@id/show_mode_select_fragment_button"
-            app:layout_constraintEnd_toStartOf="@id/reset_button"
-            android:layout_marginStart="8dp"
-            android:layout_marginTop="16dp"/>
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/reset_button"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:text="Reset"
-            android:textSize="20dp"
-            android:textColor="#78CCCC"
-            app:layout_constraintTop_toBottomOf="@id/Table"
-            app:layout_constraintStart_toEndOf="@id/start_button"
-            app:layout_constraintEnd_toEndOf="parent"
-            android:layout_marginStart="8dp"
-            android:layout_marginTop="16dp"/>
-
-<!--        <com.google.android.material.button.MaterialButton-->
-<!--            android:id="@+id/btn_bp_measure"-->
-<!--            style="@style/Widget.MaterialComponents.Button.OutlinedButton"-->
-<!--            android:layout_width="0dp"-->
-<!--            android:layout_height="wrap_content"-->
-<!--            android:text="Measure BP"-->
-<!--            android:textSize="20dp"-->
-<!--            android:textColor="#78CCCC"-->
-<!--            app:layout_constraintTop_toBottomOf="@id/show_mode_select_fragment_button"-->
-<!--            app:layout_constraintStart_toStartOf="parent"-->
-<!--            app:layout_constraintEnd_toEndOf="parent"-->
-<!--            android:layout_marginTop="16dp"/>-->
-
-        <!-- BP 結果 -->
-<!--        <TextView-->
-<!--            android:id="@+id/tvBPMax"-->
-<!--            android:layout_width="wrap_content"-->
-<!--            android:layout_height="wrap_content"-->
-<!--            android:text="BP Max : "-->
-<!--            android:textSize="20dp"-->
-<!--            android:textColor="#78CCCC"-->
-<!--            app:layout_constraintTop_toBottomOf="@id/btn_bp_measure"-->
-<!--            android:layout_marginTop="16dp"-->
-<!--            app:layout_constraintStart_toStartOf="parent"-->
-<!--            app:layout_constraintEnd_toStartOf="@id/tvBPMin"-->
-<!--            app:layout_constraintHorizontal_chainStyle="packed"/>-->
-
-<!--        <TextView-->
-<!--            android:id="@+id/tvBPMin"-->
-<!--            android:layout_width="wrap_content"-->
-<!--            android:layout_height="wrap_content"-->
-<!--            android:text="BP Min : "-->
-<!--            android:textSize="20dp"-->
-<!--            android:textColor="#78CCCC"-->
-<!--            app:layout_constraintTop_toBottomOf="@id/btn_bp_measure"-->
-<!--            android:layout_marginTop="16dp"-->
-<!--            app:layout_constraintStart_toEndOf="@id/tvBPMax"-->
-<!--            app:layout_constraintEnd_toEndOf="parent"/>-->
-
-        <!-- Camera X API 色温度関連情報 -->
-        <TableLayout
-            android:id="@+id/cameraInfoTable"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:stretchColumns="*"
-            app:layout_constraintTop_toBottomOf="@id/reset_button"
-            android:layout_marginTop="16dp"
-            android:background="#1A78CCCC"
-            android:padding="8dp">
-
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Camera X API Info"
-                    android:textSize="18dp"
-                    android:textColor="#78CCCC"
-                    android:textStyle="bold"/>
-            </TableRow>
-
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-                <TextView
-                    android:id="@+id/tvFNumber"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="F-Number: --"
-                    android:textSize="16dp"
-                    android:textColor="#78CCCC"/>
-                <TextView
-                    android:id="@+id/tvISO"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="ISO: --"
-                    android:textSize="16dp"
-                    android:textColor="#78CCCC"/>
-            </TableRow>
-
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-                <TextView
-                    android:id="@+id/tvExposureTime"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Exposure: --"
-                    android:textSize="16dp"
-                    android:textColor="#78CCCC"/>
-                <TextView
-                    android:id="@+id/tvColorTemperature"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Color Temp: --"
-                    android:textSize="16dp"
-                    android:textColor="#78CCCC"/>
-            </TableRow>
-
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-                <TextView
-                    android:id="@+id/tvWhiteBalance"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="WB Mode: --"
-                    android:textSize="16dp"
-                    android:textColor="#78CCCC"/>
-                <TextView
-                    android:id="@+id/tvFocusDistance"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Focus: --"
-                    android:textSize="16dp"
-                    android:textColor="#78CCCC"/>
-            </TableRow>
-
-            <TableRow
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center">
-                <TextView
-                    android:id="@+id/tvAperture"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Aperture: --"
-                    android:textSize="16dp"
-                    android:textColor="#78CCCC"/>
-                <TextView
-                    android:id="@+id/tvSensorSensitivity"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Sensor: --"
-                    android:textSize="16dp"
-                    android:textColor="#78CCCC"/>
-            </TableRow>
-        </TableLayout>
-
-    </androidx.constraintlayout.widget.ConstraintLayout>
+            android:layout_gravity="top|center_horizontal"
+            android:includeFontPadding="false"
+            android:text="フロントカメラの少し下"
+            android:textColor="#9EC8B7"
+            android:textSize="11sp" />
+    </FrameLayout>
 
     <FrameLayout
         android:id="@+id/mode_select_fragment_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:visibility="gone"
         android:clickable="true"
+        android:elevation="16dp"
         android:focusable="true"
         android:focusableInTouchMode="true"
-        android:elevation="16dp"
-        android:translationZ="16dp"/>
+        android:translationZ="16dp"
+        android:visibility="gone" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
