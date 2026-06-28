@@ -3,6 +3,9 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- WHY: IMUを SENSOR_DELAY_FASTEST(0μs, 200Hz超) で取るには Android12+ で本権限(normal)が必須。
+              無いと registerListener が SecurityException を投げ onCreate でクラッシュする。 -->
+    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     <uses-permission android:name="android.permission.ACCESS_STAGEFRIGHT_BUFFERQUEUE_HELPER" />
 
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />

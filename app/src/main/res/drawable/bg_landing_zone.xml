@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-    <corners android:radius="28dp" />
-    <solid android:color="#00163C3C" />
-    <stroke
-        android:width="1.5dp"
-        android:color="#78CCCC" />
-</shape>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="56dp"
+    android:height="96dp"
+    android:viewportWidth="56"
+    android:viewportHeight="96">
+    <path
+        android:fillColor="#2EE6A6"
+        android:fillAlpha="0.20"
+        android:pathData="M0,0 L56,0 A28,96 0,0,1 0,0 Z"
+        android:strokeWidth="2"
+        android:strokeColor="#2EE6A6" />
+</vector>

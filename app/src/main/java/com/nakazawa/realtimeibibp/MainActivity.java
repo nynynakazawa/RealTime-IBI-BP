@@ -47,13 +47,20 @@ public class MainActivity extends AppCompatActivity
     public static final String EXTRA_SESSION_NUMBER = "session_number";
     public static final String EXTRA_MODE = "mode";
     public static final String EXTRA_AUTOMATED = "automated";
+    public static final String EXTRA_TEST_FORCE_PHASES = "test_force_phases";
+    public static final String EXTRA_TEST_PLACEMENT_MS = "test_placement_ms";
+    public static final String EXTRA_TEST_REST_MS = "test_rest_ms";
+    public static final String EXTRA_TEST_PRESS_MS = "test_press_ms";
+    public static final String EXTRA_TEST_RELEASE_MS = "test_release_ms";
+    public static final String EXTRA_TEST_AUTO_STOP = "test_auto_stop";
     private static final String APP_VERSION = "1.0";
     private static final String COEFFICIENT_VERSION = "2026-04-10-smartphone-baseline-4session";
     private static final String AUTOMATION_LOG_TAG = "RealtimeAutomation";
-    private static final float CUTOUT_LANDING_OFFSET_DP = 42f;
     private static final float CUTOUT_FALLBACK_TOP_DP = 14f;
-    private static final float LANDING_ZONE_MIN_TOP_DP = 24f;
+    private static final float STATUS_BAR_LANDING_MARGIN_DP = 2f;
     private static final float LANDING_ZONE_BOTTOM_PADDING_DP = 12f;
+    private static final long IMU_LOW_RATE_WARNING_DELAY_MS = 3000L;
+    private static final double IMU_LOW_RATE_WARNING_THRESHOLD_HZ = 250.0;
 
     // ===== 定数 =====
     private static final int REQUEST_WRITE_STORAGE = 112, CAMERA_PERMISSION_REQUEST_CODE = 101;
@@ -61,11 +68,13 @@ public class MainActivity extends AppCompatActivity
 
     // ===== UI =====
     private Button startButton, resetButton, modeBtn/*, bpMeasureButton*/;
+    private Button testModeButton; // TEMP: テスト用 後で削除
     private EditText editTextName; private Spinner spinnerLogic;
     private TextView /*tvBPMax, tvBPMin,*/tvSBPRealtime,tvDBPRealtime, tvSBPAvg, tvDBPAvg;
     private TextView tvSinSBP, tvSinDBP, tvSinSBPAvg, tvSinDBPAvg; // SinBP(D)用
     private TextView tvSinSBPM, tvSinDBPM, tvSinSBPAvgM, tvSinDBPAvgM; // SinBP(M)用
-    private TextView tvFNumber, tvISO, tvExposureTime, tvColorTemperature, tvWhiteBalance, tvFocusDistance, tvAperture, tvSensorSensitivity;
+    private TextView tvFNumber, tvISO, tvExposureTime, tvColorTemperature, tvWhiteBalance, tvFocusDistance, tvAperture, tvSensorSensitivity, tvFps;
+    private TextView tvYmean, tvUmean, tvVmean, tvContactArea, tvTouchPressure, tvTouchCenter, tvTouchAxis, tvTouchValid, tvPhaseInfo, tvPressTarget, tvImuHz, tvGreenInfo, tvImuVib;
     private FrameLayout touchCaptureOverlay;
     private ScrollView mainScrollView;
     private View landingZoneView, illuminationRingView, signalQualityIndicator, cameraHoleMarker, statusBarTouchBlocker;
@@ -76,6 +85,9 @@ public class MainActivity extends AppCompatActivity
     // ===== 解析と状態 =====
     private GreenValueAnalyzer analyzer; private RandomStimuliGeneration stimuliGen;
     private int mode = -1; private boolean isRecording; private Handler handler; private Runnable recordTask;
+    private long imuWarningPhaseStartMs = -1L;
+    private boolean imuLowRateWarningShown = false;
+    private boolean testModeActive = false; // TEMP: テスト用 後で削除
 
     // ===== ランチャー =====
     private ActivityResultLauncher<Intent> bpLauncher;
@@ -137,35 +149,38 @@ public class MainActivity extends AppCompatActivity
         analyzer.setSinBPModel(sinBPModel); // SinBP(M)もAnalyzerに渡す
         
         // Camera X API 色温度関連情報のコールバックを設定
-        analyzer.setCameraInfoCallback((fNumber, iso, exposureTime, colorTemperature, whiteBalanceMode, focusDistance, aperture, sensorSensitivity) -> {
+        analyzer.setCameraInfoCallback((fNumber, iso, exposureTime, colorTemperature, whiteBalanceMode, focusDistance, aperture, sensorSensitivity, awbGainText, fps) -> {
             runOnUiThread(() -> {
-                tvFNumber.setText(String.format(Locale.getDefault(), "F-Number: %.1f", fNumber));
-                tvISO.setText(String.format(Locale.getDefault(), "ISO: %d", iso));
-                tvExposureTime.setText(String.format(Locale.getDefault(), "Exposure: %d", exposureTime));
-                tvColorTemperature.setText(String.format(Locale.getDefault(), "Color Temp: %.0f", colorTemperature));
-                tvWhiteBalance.setText(String.format(Locale.getDefault(), "WB Mode: %d", whiteBalanceMode));
-                tvFocusDistance.setText(String.format(Locale.getDefault(), "Focus: %.2f", focusDistance));
-                tvAperture.setText(String.format(Locale.getDefault(), "Aperture: %.1f", aperture));
-                tvSensorSensitivity.setText(String.format(Locale.getDefault(), "Sensor: %.0f", sensorSensitivity));
+                tvFNumber.setText(String.format(Locale.getDefault(), "F-Number: %s", formatFloatOrMissing(fNumber, "%.1f")));
+                tvISO.setText(String.format(Locale.getDefault(), "ISO: %s", formatIntOrMissing(iso)));
+                tvExposureTime.setText(String.format(Locale.getDefault(), "Exposure(ns): %s", formatLongOrMissing(exposureTime)));
+                tvColorTemperature.setText(String.format(Locale.getDefault(), "AWB R/B gain: %s", awbGainText));
+                tvWhiteBalance.setText(String.format(Locale.getDefault(), "WB Mode: %s", formatIntOrMissing(whiteBalanceMode)));
+                tvFocusDistance.setText(String.format(Locale.getDefault(), "Focus: %s", formatFloatOrMissing(focusDistance, "%.2f")));
+                tvAperture.setText(String.format(Locale.getDefault(), "Aperture: %s", formatFloatOrMissing(aperture, "%.1f")));
+                tvSensorSensitivity.setText(String.format(Locale.getDefault(), "Sensor sensitivity: %s", formatFloatOrMissing(sensorSensitivity, "%.0f")));
+                tvFps.setText(String.format(Locale.getDefault(), "FPS: %.1f", fps));
                 
                 // ISO値をGreenValueAnalyzerに渡してCSV記録を制御
-                analyzer.updateISO(iso);
+                if (iso >= 0) {
+                    analyzer.updateISO(iso);
+                }
                 
                 // Logic1とLogic2にもISO値を渡す
                 LogicProcessor logic1 = analyzer.getLogicProcessor("Logic1");
                 LogicProcessor logic2 = analyzer.getLogicProcessor("Logic2");
-                if (logic1 instanceof BaseLogic) {
+                if (iso >= 0 && logic1 instanceof BaseLogic) {
                     ((BaseLogic) logic1).updateISO(iso);
                 }
-                if (logic2 instanceof BaseLogic) {
+                if (iso >= 0 && logic2 instanceof BaseLogic) {
                     ((BaseLogic) logic2).updateISO(iso);
                 }
                 
                 // SinBPDistortionにもISO値を渡す
-                if (sinBPDistortion != null) {
+                if (iso >= 0 && sinBPDistortion != null) {
                     sinBPDistortion.updateISO(iso);
                 }
-                if (sinBPModel != null) {
+                if (iso >= 0 && sinBPModel != null) {
                     sinBPModel.updateISO(iso);
                 }
             });
@@ -199,6 +214,7 @@ public class MainActivity extends AppCompatActivity
         modeBtn = findViewById(R.id.show_mode_select_fragment_button);
         startButton = findViewById(R.id.start_button);
         resetButton = findViewById(R.id.reset_button);
+        testModeButton = findViewById(R.id.test_mode_button); // TEMP: テスト用 後で削除
         editTextName = findViewById(R.id.editTextName);
         spinnerLogic = findViewById(R.id.spinnerLogicSelection);
 //        bpMeasureButton = findViewById(R.id.btn_bp_measure);
@@ -214,6 +230,20 @@ public class MainActivity extends AppCompatActivity
         tvFocusDistance = findViewById(R.id.tvFocusDistance);
         tvAperture = findViewById(R.id.tvAperture);
         tvSensorSensitivity = findViewById(R.id.tvSensorSensitivity);
+        tvFps = findViewById(R.id.tvFps);
+        tvYmean = findViewById(R.id.tvYmean);
+        tvUmean = findViewById(R.id.tvUmean);
+        tvVmean = findViewById(R.id.tvVmean);
+        tvContactArea = findViewById(R.id.tvContactArea);
+        tvTouchPressure = findViewById(R.id.tvTouchPressure);
+        tvTouchCenter = findViewById(R.id.tvTouchCenter);
+        tvTouchAxis = findViewById(R.id.tvTouchAxis);
+        tvTouchValid = findViewById(R.id.tvTouchValid);
+        tvPhaseInfo = findViewById(R.id.tvPhaseInfo);
+        tvPressTarget = findViewById(R.id.tvPressTarget);
+        tvImuHz = findViewById(R.id.tvImuHz);
+        tvGreenInfo = findViewById(R.id.tvGreenInfo);
+        tvImuVib = findViewById(R.id.tvImuVib);
         mainScrollView = findViewById(R.id.mainScrollView);
         touchCaptureOverlay = findViewById(R.id.touchCaptureOverlay);
         statusBarTouchBlocker = findViewById(R.id.statusBarTouchBlocker);
@@ -284,11 +314,12 @@ public class MainActivity extends AppCompatActivity
             tvDBPRealtime.setText("DBP : 0.0");
             tvSBPAvg.setText("SBP(Average) : 0.0");
             tvDBPAvg.setText("DBP(Average) : 0.0");
-            tvPhaseStatus.setText("phase0 配置");
+            tvPhaseStatus.setText("指でカメラを軽く覆ってください（押さない）");
             tvQualityStatus.setText("品質ゲート待機中");
             pressTargetBar.setProgress(0);
             pressCurrentBar.setProgress(0);
         });
+        testModeButton.setOnClickListener(v -> toggleTestMode()); // TEMP: テスト用 後で削除
         initOscillometricGuidanceUi();
         /*bpMeasureButton.setOnClickListener(v ->
                 bpLauncher.launch(new Intent(this, PressureAnalyze.class))
@@ -307,16 +338,30 @@ public class MainActivity extends AppCompatActivity
                 findViewById(R.id.HRTextView),
                 findViewById(R.id.SmoothedIbiTextView),
                 findViewById(R.id.SmoothedHRTextView));
+        // WHY: 接触面積px^2は密度で変わるため、Pixel 8基準px^2へ換算してしきい値を端末非依存にする。
+        analyzer.setDeviceDensity(getResources().getDisplayMetrics().density);
         analyzer.setOscillometricUiCallback(this::renderOscillometricUiState);
+        analyzer.setForcedPhaseCompletionListener(() -> runOnUiThread(() -> {
+            if (isRecording) {
+                Log.i(AUTOMATION_LOG_TAG, "forced phase timeline completed; stopping sessionId=" + currentSessionId);
+                stopRecordingAndPersist();
+            }
+        }));
     }
 
     private void initOscillometricGuidanceUi() {
-        applyIlluminationGuideColor(Color.parseColor("#54F28A"));
+        applyIlluminationGuideColor(Color.parseColor("#2EE6A6"));
         pressTargetBar.setMax(1000);
         pressCurrentBar.setMax(1000);
         pressTargetBar.setProgress(0);
         pressCurrentBar.setProgress(0);
-        tvPhaseStatus.setText("phase0 配置");
+        // WHY: 寒冷昇圧プロトコルでは押し込み誘導を出さず、記録列だけ互換性のため残す。
+        tvTargetProgressLabel.setVisibility(View.GONE);
+        tvCurrentProgressLabel.setVisibility(View.GONE);
+        pressTargetBar.setVisibility(View.GONE);
+        pressCurrentBar.setVisibility(View.GONE);
+        tvPressTarget.setVisibility(View.GONE);
+        tvPhaseStatus.setText("指でカメラを軽く覆ってください（押さない）");
         tvQualityStatus.setText("品質ゲート待機中");
 
         touchCaptureOverlay.setClickable(false);
@@ -335,7 +380,7 @@ public class MainActivity extends AppCompatActivity
 
     private void positionLandingZoneFromCutout() {
         if (touchCaptureOverlay == null || landingZoneView == null || illuminationRingView == null
-                || cameraHoleMarker == null || touchCaptureOverlay.getWidth() <= 0) {
+                || cameraHoleMarker == null || statusBarTouchBlocker == null || touchCaptureOverlay.getWidth() <= 0) {
             return;
         }
 
@@ -357,25 +402,25 @@ public class MainActivity extends AppCompatActivity
 
         holeCenterX = clamp(holeCenterX, cameraHoleMarker.getWidth() / 2f,
                 touchCaptureOverlay.getWidth() - cameraHoleMarker.getWidth() / 2f);
-        float targetCenterY = holeCenterY + dpToPx(CUTOUT_LANDING_OFFSET_DP);
-        float targetTop = clamp(
-                targetCenterY - landingZoneView.getHeight() / 2f,
-                dpToPx(LANDING_ZONE_MIN_TOP_DP),
-                Math.max(dpToPx(LANDING_ZONE_MIN_TOP_DP),
-                        touchCaptureOverlay.getHeight() - landingZoneView.getHeight() - dpToPx(LANDING_ZONE_BOTTOM_PADDING_DP)));
+        int statusTopInset = insets != null ? getStatusTopInset(insets) : statusBarTouchBlocker.getHeight();
+        float minTouchableTop = statusTopInset + dpToPx(STATUS_BAR_LANDING_MARGIN_DP);
+        float maxTouchableTop = Math.max(minTouchableTop,
+                touchCaptureOverlay.getHeight() - landingZoneView.getHeight() - dpToPx(LANDING_ZONE_BOTTOM_PADDING_DP));
+        float targetTop = clamp(minTouchableTop, minTouchableTop, maxTouchableTop);
         float targetCenterX = clamp(holeCenterX, landingZoneView.getWidth() / 2f,
                 touchCaptureOverlay.getWidth() - landingZoneView.getWidth() / 2f);
 
-        // WHY: 端末ごとのパンチホール位置差を吸収するため、XML固定ではなく実行時cutout基準にする。
+        // WHY: ステータスバー内はOSがtouchを握り接触面積を読めないため、計測ゾーンは必ずバー直下のtouch感知域に置く。
+        // WHY: 横位置はパンチホールに追従し、指先でカメラを覆いながら指の腹が下側ゾーンへ自然に乗る配置にする。
         placeChild(cameraHoleMarker, holeCenterX - cameraHoleMarker.getWidth() / 2f,
                 Math.max(0f, holeCenterY - cameraHoleMarker.getHeight() / 2f));
         placeChild(landingZoneView, targetCenterX - landingZoneView.getWidth() / 2f, targetTop);
         placeChild(illuminationRingView, targetCenterX - illuminationRingView.getWidth() / 2f,
-                targetTop - (illuminationRingView.getHeight() - landingZoneView.getHeight()) / 2f);
+                targetTop);
         placeChild(landingZoneLabel, targetCenterX - landingZoneLabel.getWidth() / 2f,
                 targetTop + (landingZoneView.getHeight() - landingZoneLabel.getHeight()) / 2f);
         placeChild(landingInstructionLabel, targetCenterX - landingInstructionLabel.getWidth() / 2f,
-                Math.max(0f, targetTop - landingInstructionLabel.getHeight() - dpToPx(8f)));
+                targetTop + landingZoneView.getHeight() + dpToPx(6f));
 
         updateTouchTargetGeometry();
     }
@@ -458,8 +503,15 @@ public class MainActivity extends AppCompatActivity
         DisplayMetrics metrics = getResources().getDisplayMetrics();
         float cameraHoleCenterX = cameraHoleMarker.getX() + cameraHoleMarker.getWidth() / 2f;
         float cameraHoleCenterY = cameraHoleMarker.getY() + cameraHoleMarker.getHeight() / 2f;
-        float touchTargetCenterX = landingZoneView.getX() + landingZoneView.getWidth() / 2f;
-        float touchTargetCenterY = landingZoneView.getY() + landingZoneView.getHeight() / 2f;
+        int[] overlayLocation = new int[2];
+        int[] landingZoneLocation = new int[2];
+        touchCaptureOverlay.getLocationOnScreen(overlayLocation);
+        landingZoneView.getLocationOnScreen(landingZoneLocation);
+        // WHY: タッチ座標は raw 座標から overlay 原点を引いているため、ゾーン楕円も同じ画面座標基準から変換する。
+        float touchTargetCenterX = landingZoneLocation[0] - overlayLocation[0] + landingZoneView.getWidth() / 2f;
+        float touchTargetTopY = landingZoneLocation[1] - overlayLocation[1];
+        float touchTargetHalfWidth = landingZoneView.getWidth() / 2f;
+        float touchTargetFullHeight = landingZoneView.getHeight();
         analyzer.setTouchTargetGeometry(
                 metrics.widthPixels,
                 metrics.heightPixels,
@@ -468,8 +520,10 @@ public class MainActivity extends AppCompatActivity
                 cameraHoleCenterX,
                 cameraHoleCenterY,
                 touchTargetCenterX,
-                touchTargetCenterY,
-                touchTargetCenterY - cameraHoleCenterY);
+                touchTargetTopY,
+                touchTargetHalfWidth,
+                touchTargetFullHeight,
+                (touchTargetTopY + touchTargetFullHeight / 2f) - cameraHoleCenterY);
     }
 
     private boolean handleTouchOverlayEvent(MotionEvent event) {
@@ -490,25 +544,63 @@ public class MainActivity extends AppCompatActivity
             case MotionEvent.ACTION_MOVE:
             case MotionEvent.ACTION_POINTER_DOWN:
             case MotionEvent.ACTION_POINTER_UP:
-                lastTouchX = event.getX(pointerIndex);
-                lastTouchY = event.getY(pointerIndex);
+                int activePointerCount = event.getPointerCount();
+                boolean pointerUp = event.getActionMasked() == MotionEvent.ACTION_POINTER_UP;
+                int measurementCount = pointerUp ? Math.max(0, activePointerCount - 1) : activePointerCount;
+                float[] touchXs = new float[measurementCount];
+                float[] touchYs = new float[measurementCount];
+                float[] touchMajors = new float[measurementCount];
+                float[] touchMinors = new float[measurementCount];
+                float[] touchSizes = new float[measurementCount];
+                float[] touchPressures = new float[measurementCount];
                 if (touchCaptureOverlay != null) {
                     int[] overlayLocation = new int[2];
                     touchCaptureOverlay.getLocationOnScreen(overlayLocation);
-                    // WHY: オーバレイを全画面化したため、どの子Viewがタッチ対象でも同じ座標系で接触面積を記録する。
-                    lastTouchX = event.getRawX(pointerIndex) - overlayLocation[0];
-                    lastTouchY = event.getRawY(pointerIndex) - overlayLocation[1];
+                    int outIndex = 0;
+                    for (int i = 0; i < activePointerCount; i++) {
+                        if (pointerUp && i == pointerIndex) {
+                            continue;
+                        }
+                        // WHY: オーバレイを全画面化したため、どの子Viewがタッチ対象でも同じ座標系で接触面積を記録する。
+                        touchXs[outIndex] = event.getRawX(i) - overlayLocation[0];
+                        touchYs[outIndex] = event.getRawY(i) - overlayLocation[1];
+                        touchMajors[outIndex] = event.getTouchMajor(i);
+                        touchMinors[outIndex] = event.getTouchMinor(i);
+                        touchSizes[outIndex] = event.getSize(i);
+                        touchPressures[outIndex] = event.getPressure(i);
+                        outIndex++;
+                    }
+                } else {
+                    int outIndex = 0;
+                    for (int i = 0; i < activePointerCount; i++) {
+                        if (pointerUp && i == pointerIndex) {
+                            continue;
+                        }
+                        touchXs[outIndex] = event.getX(i);
+                        touchYs[outIndex] = event.getY(i);
+                        touchMajors[outIndex] = event.getTouchMajor(i);
+                        touchMinors[outIndex] = event.getTouchMinor(i);
+                        touchSizes[outIndex] = event.getSize(i);
+                        touchPressures[outIndex] = event.getPressure(i);
+                        outIndex++;
+                    }
                 }
-                lastTouchMajor = event.getTouchMajor(pointerIndex);
-                lastTouchMinor = event.getTouchMinor(pointerIndex);
-                lastTouchPressure = event.getPressure(pointerIndex);
+                if (measurementCount > 0) {
+                    int representativeIndex = Math.min(pointerIndex, measurementCount - 1);
+                    lastTouchX = touchXs[representativeIndex];
+                    lastTouchY = touchYs[representativeIndex];
+                    lastTouchMajor = touchMajors[representativeIndex];
+                    lastTouchMinor = touchMinors[representativeIndex];
+                    lastTouchPressure = touchPressures[representativeIndex];
+                }
                 analyzer.updateTouchMeasurements(
-                        lastTouchX,
-                        lastTouchY,
-                        lastTouchMajor,
-                        lastTouchMinor,
-                        event.getSize(pointerIndex),
-                        lastTouchPressure,
+                        touchXs,
+                        touchYs,
+                        touchMajors,
+                        touchMinors,
+                        touchSizes,
+                        touchPressures,
+                        measurementCount,
                         true,
                         event.getEventTime());
                 return true;
@@ -563,53 +655,198 @@ public class MainActivity extends AppCompatActivity
 
     private void renderOscillometricUiState(GreenValueAnalyzer.OscillometricUiState state) {
         runOnUiThread(() -> {
-            tvPhaseStatus.setText(formatPhaseLabel(state.phase));
+            tvPhaseStatus.setText(formatPhaseInstruction(state));
             tvQualityStatus.setText(formatQualityText(state));
             signalQualityIndicator.setBackgroundTintList(ColorStateList.valueOf(
-                    state.qualityPassed ? Color.parseColor("#54F28A") : Color.parseColor("#FF7A7A")));
+                    state.qualityPassed ? Color.parseColor("#2EE6A6") : Color.parseColor("#FF7A7A")));
             pressTargetBar.setProgress((int) Math.round(state.pressTarget * 1000.0));
             pressCurrentBar.setProgress((int) Math.round(state.currentPressProgress * 1000.0));
-            if (state.phase >= 2) {
-                tvTargetProgressLabel.setText(String.format(Locale.getDefault(), "目標 %.0f%%", state.pressTarget * 100.0));
-                tvCurrentProgressLabel.setText(String.format(Locale.getDefault(), "現在 %.0f%% / %.0f px^2", state.currentPressProgress * 100.0, state.contactArea));
-            } else {
-                tvTargetProgressLabel.setText("目標 phase2開始後");
-                tvCurrentProgressLabel.setText(String.format(Locale.getDefault(), "現在 %.0f px^2", state.contactArea));
-            }
+            tvYmean.setText(String.format(Locale.getDefault(), "Y_mean: %.2f", state.yMean));
+            tvUmean.setText(String.format(Locale.getDefault(), "U_mean: %.2f", state.uMean));
+            tvVmean.setText(String.format(Locale.getDefault(), "V_mean: %.2f", state.vMean));
+            // WHY: 1行が長いとSensor Infoの列が崩れるため、P8換算in-zoneとrawを改行で短く分ける。
+            tvContactArea.setText(String.format(Locale.getDefault(),
+                    "contact_area(P8 px^2)\n  in-zone: %.0f (基準16000/100%%=18000)\n  raw: %.0f px^2",
+                    state.inZoneContactArea,
+                    state.rawContactArea));
+            tvTouchPressure.setText(String.format(Locale.getDefault(), "touch_pressure: %.3f", state.touchPressure));
+            tvTouchCenter.setText(String.format(Locale.getDefault(), "touch_cx/cy: %.1f, %.1f", state.touchCx, state.touchCy));
+            tvTouchAxis.setText(String.format(Locale.getDefault(), "touch_major/minor: %.1f, %.1f", state.touchMajor, state.touchMinor));
+            tvTouchValid.setText(String.format(Locale.getDefault(), "touch_valid: %d", state.touchValid ? 1 : 0));
+            tvPhaseInfo.setText(String.format(Locale.getDefault(), "phase: %s (%d)", getPhaseName(state.phase), state.phase));
+            tvImuHz.setText(String.format(Locale.getDefault(), "IMU: %.0f Hz", state.imuHz));
+            tvGreenInfo.setText(String.format(Locale.getDefault(), "green/dcGreen: %.2f / %.2f", state.greenValue, state.dcGreenValue));
+            tvImuVib.setText(String.format(Locale.getDefault(), "IMU振動: %.3f", state.imuVibRms));
+            maybeShowImuLowRateWarning(state);
         });
     }
 
-    private String formatPhaseLabel(int phase) {
+    private void maybeShowImuLowRateWarning(GreenValueAnalyzer.OscillometricUiState state) {
+        long nowMs = System.currentTimeMillis();
+        if (state.phase < 1) {
+            imuWarningPhaseStartMs = -1L;
+            imuLowRateWarningShown = false;
+            return;
+        }
+        if (imuWarningPhaseStartMs < 0L) {
+            imuWarningPhaseStartMs = nowMs;
+        }
+        // WHY: Android 12+ではマイクアクセスOFF時にIMUが200Hzへ制限され、VFE確認を実機中に見逃しやすい。
+        if (!imuLowRateWarningShown
+                && nowMs - imuWarningPhaseStartMs >= IMU_LOW_RATE_WARNING_DELAY_MS
+                && state.imuHz > 0.0
+                && state.imuHz < IMU_LOW_RATE_WARNING_THRESHOLD_HZ) {
+            imuLowRateWarningShown = true;
+            Toast.makeText(this, "IMUレート低下: マイクアクセスONと高サンプリング権限を確認", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private String formatFloatOrMissing(float value, String pattern) {
+        if (value < 0f || Float.isNaN(value)) {
+            return "--";
+        }
+        return String.format(Locale.getDefault(), pattern, value);
+    }
+
+    private String formatIntOrMissing(int value) {
+        return value < 0 ? "--" : String.format(Locale.getDefault(), "%d", value);
+    }
+
+    private String formatLongOrMissing(long value) {
+        return value < 0L ? "--" : String.format(Locale.getDefault(), "%d", value);
+    }
+
+    private String getPhaseName(int phase) {
         switch (phase) {
             case 0:
-                return "phase0 配置";
+                return "placement";
             case 1:
-                return "phase1 安静";
+                return "rest";
             case 2:
-                return "phase2 押込";
+                return "cold";
             case 3:
-                return "phase3 解放";
+                return "recovery";
             default:
-                return "phase? 待機";
+                return "unknown";
         }
+    }
+
+    private String formatPhaseInstruction(GreenValueAnalyzer.OscillometricUiState state) {
+        String remaining = formatRemainingText(state);
+        switch (state.phase) {
+            case 0:
+                return "指でカメラを軽く覆ってください（押さない）\n" + remaining;
+            case 1:
+                return "安静にしてください（" + remaining + "）";
+            case 2:
+                return "氷水に手を入れてください（測定する指はそのまま）\n" + remaining;
+            case 3:
+                return "手を出して安静に（" + remaining + "）";
+            default:
+                return "指でカメラを軽く覆ってください（押さない）";
+        }
+    }
+
+    private String formatRemainingText(GreenValueAnalyzer.OscillometricUiState state) {
+        if (state.phase == 0) {
+            return "品質OKを保ってください（あと" + Math.max(1L, (long) Math.ceil(state.phaseRemainingMs / 1000.0)) + "秒キープ）";
+        }
+        return "あと" + Math.max(0L, (long) Math.ceil(state.phaseRemainingMs / 1000.0)) + "秒";
     }
 
     private String formatQualityText(GreenValueAnalyzer.OscillometricUiState state) {
         return String.format(
                 Locale.getDefault(),
-                "品質 %s  A:%s  Exp:%s  Pos:%s  Touch:%s",
-                state.qualityPassed ? "OK" : "WAIT",
-                state.amplitudePassed ? "OK" : "NG",
-                state.exposurePassed ? "OK" : "NG",
-                state.positionPassed ? "OK" : "NG",
-                state.touchValid ? "ON" : "OFF");
+                "A:%s Exp:%s Pos:%s Touch:%s 面積:%s\n%s",
+                formatAmplitudeLabel(state),
+                state.exposureStatus,
+                formatPositionLabel(state),
+                formatTouchLabel(state),
+                state.areaStatus,
+                formatQualityReasonSummary(state));
+    }
+
+    private String formatAmplitudeLabel(GreenValueAnalyzer.OscillometricUiState state) {
+        return state.amplitudePassed ? "OK" : "弱い";
+    }
+
+    private String formatPositionLabel(GreenValueAnalyzer.OscillometricUiState state) {
+        return state.positionPassed ? "OK" : "ずれ";
+    }
+
+    private String formatTouchLabel(GreenValueAnalyzer.OscillometricUiState state) {
+        return state.touchValid ? "ON" : "OFF";
+    }
+
+    private String formatQualityReasonSummary(GreenValueAnalyzer.OscillometricUiState state) {
+        if (state.qualityPassed) {
+            return "品質OK";
+        }
+        List<String> reasons = new ArrayList<>();
+        if (!state.amplitudePassed) {
+            reasons.add("振幅弱い");
+        }
+        if (!state.exposurePassed) {
+            reasons.add(state.exposureStatus);
+        }
+        if (!state.positionPassed) {
+            reasons.add("位置ずれ");
+        }
+        if (!state.touchValid) {
+            reasons.add("Touch OFF");
+        }
+        if (!state.areaPassed) {
+            reasons.add("面積" + state.areaStatus);
+        }
+        return "NG理由: " + joinReasons(reasons);
+    }
+
+    private String joinReasons(List<String> reasons) {
+        StringBuilder joined = new StringBuilder();
+        for (int i = 0; i < reasons.size(); i++) {
+            if (i > 0) {
+                joined.append("・");
+            }
+            joined.append(reasons.get(i));
+        }
+        return joined.toString();
+    }
+
+    private String formatQualityHint(GreenValueAnalyzer.OscillometricUiState state) {
+        if (!state.touchValid) {
+            return "下の枠に指の腹を置いてください";
+        }
+        if (!state.positionPassed) {
+            return "下の枠の中心に合わせてください";
+        }
+        if (!state.areaPassed) {
+            return "大きすぎ".equals(state.areaStatus) ? "接触を少し弱めてください" : "もう少し覆ってください";
+        }
+        if (!state.exposurePassed) {
+            return "明るすぎ(指浮き)".equals(state.exposureStatus)
+                    ? "カメラに指の腹を乗せてください"
+                    : "明るさが安定するよう覆ってください";
+        }
+        if (!state.amplitudePassed) {
+            return "指を動かさず脈波を待ってください";
+        }
+        return "そのまま保持";
     }
 
     private void applyIlluminationGuideColor(int color) {
         // 将来の画面駆動マルチ波長はこの1箇所から切り替える。
         illuminationRingView.setBackgroundTintList(ColorStateList.valueOf(color));
-        landingZoneView.setBackgroundTintList(ColorStateList.valueOf(color));
+        landingZoneView.setBackgroundTintList(ColorStateList.valueOf(Color.parseColor("#2EE6A6")));
     }
+
+    private void toggleTestMode() { // TEMP: テスト用 後で削除
+        testModeActive = !testModeActive; // TEMP: テスト用 後で削除
+        analyzer.setTestModeActive(testModeActive); // TEMP: テスト用 後で削除
+        testModeButton.setText(testModeActive ? "TEST ON" : "TEST"); // TEMP: テスト用 後で削除
+        testModeButton.setTextColor(testModeActive ? Color.parseColor("#101F1C") : Color.parseColor("#78CCCC")); // TEMP: テスト用 後で削除
+        testModeButton.setBackgroundTintList(ColorStateList.valueOf(testModeActive ? Color.parseColor("#2EE6A6") : Color.TRANSPARENT)); // TEMP: テスト用 後で削除
+        Toast.makeText(this, testModeActive ? "TEST: 録画なしでphase確認" : "TEST終了", Toast.LENGTH_SHORT).show(); // TEMP: テスト用 後で削除
+    } // TEMP: テスト用 後で削除
 
     // ===== カメラ許可 =====
     private void requestCameraPermission() {
@@ -795,6 +1032,9 @@ public class MainActivity extends AppCompatActivity
         if (isRecording) {
             return;
         }
+        if (testModeActive) { // TEMP: テスト用 後で削除
+            toggleTestMode(); // TEMP: テスト用 後で削除
+        } // TEMP: テスト用 後で削除
         String subject = editTextName.getText().toString().trim();
         String baseName = buildManualBaseName(subject);
         prepareSession(baseName, subject, 0, mode, false);
@@ -876,6 +1116,7 @@ public class MainActivity extends AppCompatActivity
         saveSinBPMToCsv();
         saveSinBPDToCsv();
         saveWaveDataToCsv();
+        saveImuDataToCsv();
         saveTrainingDataToCsv();
         String name = currentOutputBaseName.isEmpty() ? buildManualBaseName(editTextName.getText().toString().trim()) : currentOutputBaseName;
         analyzer.saveSessionMetaToJson(name, mode == MODE_1 || mode == -1);
@@ -893,18 +1134,45 @@ public class MainActivity extends AppCompatActivity
             String subjectId = intent.getStringExtra(EXTRA_SUBJECT_ID);
             int sessionNumber = intent.getIntExtra(EXTRA_SESSION_NUMBER, 0);
             int requestedMode = intent.getIntExtra(EXTRA_MODE, MODE_1);
-            startAutomatedSession(sessionId, subjectId, sessionNumber, requestedMode);
+            boolean testForcePhases = intent.getBooleanExtra(EXTRA_TEST_FORCE_PHASES, false);
+            boolean testAutoStop = intent.getBooleanExtra(EXTRA_TEST_AUTO_STOP, true);
+            int testPlacementMs = intent.getIntExtra(EXTRA_TEST_PLACEMENT_MS, 0);
+            int testRestMs = intent.getIntExtra(EXTRA_TEST_REST_MS, 0);
+            int testPressMs = intent.getIntExtra(EXTRA_TEST_PRESS_MS, 0);
+            int testReleaseMs = intent.getIntExtra(EXTRA_TEST_RELEASE_MS, 0);
+            startAutomatedSession(
+                    sessionId,
+                    subjectId,
+                    sessionNumber,
+                    requestedMode,
+                    testForcePhases,
+                    testAutoStop,
+                    testPlacementMs,
+                    testRestMs,
+                    testPressMs,
+                    testReleaseMs);
         } else if (ACTION_STOP_AUTOMATED_SESSION.equals(action)) {
             stopRecordingAndPersist();
         }
     }
 
-    private void startAutomatedSession(String sessionId, String subjectId, int sessionNumber, int requestedMode) {
+    private void startAutomatedSession(
+            String sessionId,
+            String subjectId,
+            int sessionNumber,
+            int requestedMode,
+            boolean testForcePhases,
+            boolean testAutoStop,
+            long testPlacementMs,
+            long testRestMs,
+            long testPressMs,
+            long testReleaseMs) {
         String normalizedSessionId = normalizeSessionId(sessionId);
         String normalizedSubjectId = (subjectId == null || subjectId.trim().isEmpty())
                 ? normalizedSessionId
                 : subjectId.trim();
-        Log.i(AUTOMATION_LOG_TAG, "startAutomatedSession sessionId=" + normalizedSessionId + " mode=" + requestedMode);
+        Log.i(AUTOMATION_LOG_TAG, "startAutomatedSession sessionId=" + normalizedSessionId
+                + " mode=" + requestedMode + " test_force_phases=" + testForcePhases);
         if (isRecording) {
             stopRecordingAndPersist();
         }
@@ -913,6 +1181,13 @@ public class MainActivity extends AppCompatActivity
         isAutomatedSession = true;
         editTextName.setText(normalizedSubjectId);
         prepareSession(normalizedSessionId, normalizedSubjectId, sessionNumber, requestedMode, true);
+        analyzer.configureForcedPhaseTimeline(
+                testForcePhases,
+                testAutoStop,
+                testPlacementMs,
+                testRestMs,
+                testPressMs,
+                testReleaseMs);
         analyzer.startRecording();
         isRecording = true;
         Toast.makeText(this, "自動計測を開始しました: " + normalizedSessionId, Toast.LENGTH_SHORT).show();
@@ -924,6 +1199,9 @@ public class MainActivity extends AppCompatActivity
         currentSubjectId = subjectId != null ? subjectId : "";
         currentSessionNumber = sessionNumber;
         isAutomatedSession = automated;
+        if (!automated) {
+            analyzer.configureForcedPhaseTimeline(false, true, 0L, 0L, 0L, 0L);
+        }
         analyzer.configureSession(
                 currentSessionId,
                 currentSubjectId,
@@ -1047,6 +1325,10 @@ public class MainActivity extends AppCompatActivity
     public void saveWaveDataToCsv() {
         String name = currentOutputBaseName.isEmpty() ? buildManualBaseName(editTextName.getText().toString().trim()) : currentOutputBaseName;
         analyzer.saveWaveDataToCsv(name, mode == MODE_1 || mode == -1);
+    }
+    public void saveImuDataToCsv() {
+        String name = currentOutputBaseName.isEmpty() ? buildManualBaseName(editTextName.getText().toString().trim()) : currentOutputBaseName;
+        analyzer.saveImuDataToCsv(name, mode == MODE_1 || mode == -1);
     }
     
     // ===== 後方互換性のためのメソッド（必要に応じて使用） =====
