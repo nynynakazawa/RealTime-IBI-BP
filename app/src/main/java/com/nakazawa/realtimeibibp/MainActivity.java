@@ -26,6 +26,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.fragment.app.Fragment;
 import com.github.mikephil.charting.charts.LineChart;
@@ -35,6 +36,8 @@ import android.os.Handler;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import android.os.Looper;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MainActivity extends AppCompatActivity
         implements ModeSelectionFragment.OnModeSelectedListener {
@@ -56,6 +59,7 @@ public class MainActivity extends AppCompatActivity
     private static final String APP_VERSION = "1.0";
     private static final String COEFFICIENT_VERSION = "2026-04-10-smartphone-baseline-4session";
     private static final String AUTOMATION_LOG_TAG = "RealtimeAutomation";
+    private static final String MEASUREMENT_LOCK_TAG = "MeasurementLock";
     private static final float CUTOUT_FALLBACK_TOP_DP = 14f;
     private static final float STATUS_BAR_LANDING_MARGIN_DP = 2f;
     private static final float LANDING_ZONE_BOTTOM_PADDING_DP = 12f;
@@ -110,12 +114,14 @@ public class MainActivity extends AppCompatActivity
 
     private ExecutorService rlExecutor;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final AtomicBoolean persistInProgress = new AtomicBoolean(false);
     private CountDownTimer activeCountDownTimer;
     private String currentOutputBaseName = "";
     private String currentSessionId = "";
     private String currentSubjectId = "";
     private int currentSessionNumber = 0;
     private boolean isAutomatedSession = false;
+    private boolean measurementLockActive = false;
     private float lastTouchX = 0f;
     private float lastTouchY = 0f;
     private float lastTouchMajor = 0f;
@@ -207,6 +213,61 @@ public class MainActivity extends AppCompatActivity
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             getWindow().setAttributes(layoutParams);
         }
+    }
+
+    private void onMeasurementLockRequested() {
+        runOnUiThread(this::startMeasurementLockIfNeeded);
+    }
+
+    private void onMeasurementLockReleased() {
+        runOnUiThread(this::stopMeasurementLockIfNeeded);
+    }
+
+    private void startMeasurementLockIfNeeded() {
+        if (measurementLockActive) {
+            return;
+        }
+        try {
+            startLockTask();
+            measurementLockActive = true;
+        } catch (Exception e) {
+            Log.w(MEASUREMENT_LOCK_TAG, "startLockTask failed", e);
+        }
+        applyMeasurementImmersiveMode();
+    }
+
+    private void stopMeasurementLockIfNeeded() {
+        if (measurementLockActive) {
+            try {
+                stopLockTask();
+            } catch (Exception e) {
+                Log.w(MEASUREMENT_LOCK_TAG, "stopLockTask failed", e);
+            } finally {
+                measurementLockActive = false;
+            }
+        }
+        clearMeasurementImmersiveMode();
+    }
+
+    private void applyMeasurementImmersiveMode() {
+        WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        if (controller == null) {
+            return;
+        }
+        // WHY: 本計測中だけ通知/ナビ領域の誤操作を抑え、終了時は通常表示へ戻す。
+        controller.setSystemBarsBehavior(
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        controller.hide(WindowInsetsCompat.Type.systemBars());
+    }
+
+    private void clearMeasurementImmersiveMode() {
+        WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        if (controller == null) {
+            return;
+        }
+        controller.show(WindowInsetsCompat.Type.systemBars());
     }
 
     // ===== UI初期化 =====
@@ -341,12 +402,27 @@ public class MainActivity extends AppCompatActivity
         // WHY: 接触面積px^2は密度で変わるため、Pixel 8基準px^2へ換算してしきい値を端末非依存にする。
         analyzer.setDeviceDensity(getResources().getDisplayMetrics().density);
         analyzer.setOscillometricUiCallback(this::renderOscillometricUiState);
-        analyzer.setForcedPhaseCompletionListener(() -> runOnUiThread(() -> {
-            if (isRecording) {
-                Log.i(AUTOMATION_LOG_TAG, "forced phase timeline completed; stopping sessionId=" + currentSessionId);
-                stopRecordingAndPersist();
+        analyzer.setForcedPhaseCompletionListener(new GreenValueAnalyzer.ForcedPhaseCompletionListener() {
+            @Override
+            public void onForcedPhaseTimelineCompleted() {
+                runOnUiThread(() -> {
+                    if (isRecording) {
+                        Log.i(AUTOMATION_LOG_TAG, "phase timeline completed; stopping sessionId=" + currentSessionId);
+                        stopRecordingAndPersist();
+                    }
+                });
             }
-        }));
+
+            @Override
+            public void onMeasurementLockRequested() {
+                MainActivity.this.onMeasurementLockRequested();
+            }
+
+            @Override
+            public void onMeasurementLockReleased() {
+                MainActivity.this.onMeasurementLockReleased();
+            }
+        });
     }
 
     private void initOscillometricGuidanceUi() {
@@ -989,6 +1065,20 @@ public class MainActivity extends AppCompatActivity
     }
 
     @Override
+    protected void onPause() {
+        // WHY: Activityを離れた後に画面固定が残ると端末操作を妨げるため、保険で解除する。
+        stopMeasurementLockIfNeeded();
+        super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        // WHY: pauseを経由しない異常系でも画面固定/immersiveを残さない。
+        stopMeasurementLockIfNeeded();
+        super.onStop();
+    }
+
+    @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
@@ -1107,20 +1197,52 @@ public class MainActivity extends AppCompatActivity
             Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist skipped: isRecording=false and no recorded data sessionId=" + currentSessionId);
             return;
         }
-        Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist begin sessionId=" + currentSessionId + " hasRecordedData=" + hasRecordedData);
+        if (!persistInProgress.compareAndSet(false, true)) {
+            Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist skipped: persist already running sessionId=" + currentSessionId);
+            return;
+        }
+        String subject = editTextName.getText().toString().trim();
+        String outputBaseName = currentOutputBaseName.isEmpty() ? buildManualBaseName(subject) : currentOutputBaseName;
+        boolean isMode1 = mode == MODE_1 || mode == -1;
+        String sessionId = currentSessionId;
+        Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist begin sessionId=" + sessionId + " hasRecordedData=" + hasRecordedData);
         if (isRecording) {
             stopRecording();
         }
-        saveRawDataToCsv();
-        saveRTBPToCsv();
-        saveSinBPMToCsv();
-        saveSinBPDToCsv();
-        saveWaveDataToCsv();
-        saveImuDataToCsv();
-        saveTrainingDataToCsv();
-        String name = currentOutputBaseName.isEmpty() ? buildManualBaseName(editTextName.getText().toString().trim()) : currentOutputBaseName;
-        analyzer.saveSessionMetaToJson(name, mode == MODE_1 || mode == -1);
-        Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist completed sessionId=" + currentSessionId);
+        ExecutorService persistExecutor = ensureBackgroundExecutor();
+        try {
+            persistExecutor.execute(() -> {
+                try {
+                    // WHY: 5分CSV/IMU保存は巨大でUIを5秒以上止めるため、完了待ちはメインスレッドから逃がす。
+                    analyzer.saveRawDataToCsv(outputBaseName, isMode1);
+                    analyzer.saveRTBPToCsv(outputBaseName, isMode1);
+                    analyzer.saveSinBPMToCsv(outputBaseName, isMode1);
+                    analyzer.saveSinBPDToCsv(outputBaseName, isMode1);
+                    analyzer.saveWaveDataToCsv(outputBaseName, isMode1);
+                    analyzer.saveImuDataToCsv(outputBaseName, isMode1);
+                    analyzer.saveTrainingDataToCsv(outputBaseName, isMode1);
+                    analyzer.saveSessionMetaToJson(outputBaseName, isMode1);
+                    Log.i("AUTOMATION_SESSION", "SESSION_PERSIST_COMPLETE sessionId=" + sessionId);
+                    Log.i(AUTOMATION_LOG_TAG, "stopRecordingAndPersist completed sessionId=" + sessionId);
+                } catch (Exception e) {
+                    Log.e(AUTOMATION_LOG_TAG, "stopRecordingAndPersist failed sessionId=" + sessionId, e);
+                } finally {
+                    persistInProgress.set(false);
+                    mainHandler.post(MainActivity.this::stopMeasurementLockIfNeeded);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            persistInProgress.set(false);
+            Log.e(AUTOMATION_LOG_TAG, "stopRecordingAndPersist rejected sessionId=" + sessionId, e);
+            stopMeasurementLockIfNeeded();
+        }
+    }
+
+    private ExecutorService ensureBackgroundExecutor() {
+        if (rlExecutor == null || rlExecutor.isShutdown() || rlExecutor.isTerminated()) {
+            rlExecutor = Executors.newSingleThreadExecutor();
+        }
+        return rlExecutor;
     }
 
     private void handleAutomationIntent(Intent intent) {

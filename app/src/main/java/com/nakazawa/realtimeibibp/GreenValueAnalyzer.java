@@ -48,7 +48,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private static final double ROI_CENTER_INSET_RATIO = 0.30;
     private static final int ROI_SAMPLE_STRIDE = 4;
     private static final double GREEN_BASELINE_ALPHA = 0.02;
-    private static final long QUALITY_GATE_STABLE_DURATION_MS = 5_000L;
+    private static final long QUALITY_GATE_STABLE_DURATION_MS = 10_000L;
     private static final long REST_PHASE_DURATION_MS = 120_000L;
     private static final long COLD_PHASE_DURATION_MS = 60_000L;
     private static final long RECOVERY_PHASE_DURATION_MS = 120_000L;
@@ -219,6 +219,8 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     public interface ForcedPhaseCompletionListener {
         void onForcedPhaseTimelineCompleted();
+        default void onMeasurementLockRequested() {}
+        default void onMeasurementLockReleased() {}
     }
 
     // ===== UI =====
@@ -436,6 +438,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     private long forcedColdDurationMs = COLD_PHASE_DURATION_MS;
     private long forcedRecoveryDurationMs = RECOVERY_PHASE_DURATION_MS;
     private boolean forcedPhaseCompletionNotified = false;
+    private boolean measurementLockRequested = false;
     private boolean lastQualityGatePassed = false;
     private boolean lastAmplitudeGatePassed = false;
     private boolean lastExposureGatePassed = false;
@@ -1709,12 +1712,14 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             setCurrentPhase(PHASE_RECOVERY, frameTimestampMs);
         } else if (currentPhase == PHASE_RECOVERY && phaseElapsedMs >= getActiveRecoveryDurationMs()) {
             phaseEndTimesMs[PHASE_RECOVERY] = frameTimestampMs;
+            notifyMeasurementLockReleasedIfNeeded();
             notifyForcedPhaseTimelineCompletedIfNeeded();
         }
     }
 
     private void notifyForcedPhaseTimelineCompletedIfNeeded() {
-        if (!forcedPhaseTimelineEnabled || !forcedPhaseAutoStop || forcedPhaseCompletionNotified) {
+        // WHY: 通常の品質ゲート経路でもrecovery完了後はPC吸い出し可能な保存完了まで進める。
+        if ((forcedPhaseTimelineEnabled && !forcedPhaseAutoStop) || forcedPhaseCompletionNotified) {
             return;
         }
         forcedPhaseCompletionNotified = true;
@@ -1724,7 +1729,30 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         }
     }
 
+    private void notifyMeasurementLockRequestedIfNeeded() {
+        if (measurementLockRequested) {
+            return;
+        }
+        measurementLockRequested = true;
+        ForcedPhaseCompletionListener listener = forcedPhaseCompletionListener;
+        if (listener != null) {
+            listener.onMeasurementLockRequested();
+        }
+    }
+
+    private void notifyMeasurementLockReleasedIfNeeded() {
+        if (!measurementLockRequested) {
+            return;
+        }
+        measurementLockRequested = false;
+        ForcedPhaseCompletionListener listener = forcedPhaseCompletionListener;
+        if (listener != null) {
+            listener.onMeasurementLockReleased();
+        }
+    }
+
     private void setCurrentPhase(int newPhase, long timestampMs) {
+        int previousPhase = currentPhase;
         if (currentPhase >= 0 && currentPhase < phaseEndTimesMs.length && phaseStartTimesMs[currentPhase] >= 0L) {
             phaseEndTimesMs[currentPhase] = timestampMs;
         }
@@ -1739,6 +1767,13 @@ public class GreenValueAnalyzer implements LifecycleObserver {
         } else {
             vibrationBurstController.stop();
         }
+        if (previousPhase == PHASE_PLACEMENT && newPhase == PHASE_REST) {
+            // WHY: 品質ゲート通過後の本計測中だけ通知シェード誤操作を防ぐ。
+            notifyMeasurementLockRequestedIfNeeded();
+        } else if (newPhase == PHASE_PLACEMENT) {
+            // WHY: 配置待ちへ戻ったら本計測外なので画面固定を残さない。
+            notifyMeasurementLockReleasedIfNeeded();
+        }
     }
 
     private void finalizeCurrentPhase(long timestampMs) {
@@ -1746,6 +1781,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
             phaseEndTimesMs[currentPhase] = timestampMs;
         }
         vibrationBurstController.stop();
+        notifyMeasurementLockReleasedIfNeeded();
     }
 
     private int getCurrentPhaseForImu() {
@@ -2289,6 +2325,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
 
     // ===== リセット ／ 記録制御 =====
     public void reset() {
+        notifyMeasurementLockReleasedIfNeeded();
         imuRecorder.stop();
         vibrationBurstController.stop();
         // 各 LogicProcessor 実装の reset() を呼び出す
@@ -2537,6 +2574,7 @@ public class GreenValueAnalyzer implements LifecycleObserver {
     }
 
     private void resetOscillometricState() {
+        notifyMeasurementLockReleasedIfNeeded();
         vibrationBurstController.stop();
         greenBaselineInitialized = false;
         greenBaseline = 0.0;
